@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>langrobo_perception</name>
+  <version>0.1.0</version>
+  <description>
+    LangRobo perception bringup for the Jetson Orin: nvblox 3D mapping from a
+    depth camera + Nav2 navigation. Profile "sim" consumes the rover_sim Gazebo
+    stand-in (laptop) over DDS; profile "real" targets the RealSense D555 with
+    cuVSLAM (pending hardware).
+  </description>
+  <maintainer email="rohit.kalavapudi@gmail.com">rakhi24</maintainer>
+  <license>MIT</license>
+
+  <exec_depend>nvblox_ros</exec_depend>
+  <exec_depend>nvblox_nav2</exec_depend>
+  <exec_depend>nvblox_examples_bringup</exec_depend>
+  <exec_depend>nav2_bringup</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

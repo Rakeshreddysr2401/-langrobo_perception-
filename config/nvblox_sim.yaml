@@ -1,0 +1,23 @@
+# nvblox overrides for the rover_sim (Gazebo) profile.
+# Loaded on top of nvblox_examples_bringup/config/nvblox/nvblox_base.yaml.
+#
+# Sim has no cuVSLAM (the Gazebo camera is mono RGBD, no stereo pair), so the
+# reconstruction is anchored to wheel odometry: global_frame = odom.
+# The real-robot profile switches this to "map" once the D555 + cuVSLAM land.
+/**:
+  ros__parameters:
+    global_frame: "odom"
+    num_cameras: 1
+    use_depth: true
+    # RGB adds mesh color only; skip it to save wifi bandwidth from the sim.
+    use_color: false
+    use_lidar: false
+    esdf_mode: "2d"
+    publish_esdf_distance_slice: true
+    map_clearing_frame_id: "base_link"
+    # Rover is ~0.15 m tall with the camera pitched down 0.5 rad; keep the
+    # 2D obstacle slice in the band the robot actually has to avoid.
+    static_mapper:
+      esdf_slice_min_height: 0.05
+      esdf_slice_max_height: 0.40
+      esdf_slice_height: 0.10
