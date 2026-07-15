@@ -26,6 +26,7 @@ setup(
         'console_scripts': [
             'cmd_vel_stamper = langrobo_perception.cmd_vel_stamper:main',
             'detections_3d = langrobo_perception.detections_3d_node:main',
+            'pixel_to_goal = langrobo_perception.pixel_to_goal_node:main',
             'sim_camera_relay = langrobo_perception.sim_camera_relay:main',
         ],
     },

@@ -42,7 +42,9 @@ collision_monitor:
     observation_sources: ["depth_points"]
     depth_points:
       type: "pointcloud"
-      topic: "/camera0/depth/color/points"
+      # nvblox's GPU back-projected depth (5Hz): the D555/DDS driver has no
+      # pointcloud filter (pointcloud.enable undeclared on this camera).
+      topic: "/nvblox_node/back_projected_depth/camera0_depth_optical_frame"
       min_height: 0.03
       max_height: 0.40
     polygons: ["SafeZone"]

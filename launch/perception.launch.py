@@ -65,7 +65,7 @@ def generate_launch_description():
 
     declare_mode = DeclareLaunchArgument(
         'mode', default_value='sim', choices=['sim', 'real'],
-        description="Perception profile: Gazebo stand-in or D555 + cuVSLAM.")
+        description="Perception profile: Gazebo stand-in or D555 + RTAB-Map + nvblox + Nav2.")
     declare_run_nav2 = DeclareLaunchArgument(
         'run_nav2', default_value='True',
         description='Start Nav2 alongside nvblox.')
@@ -182,7 +182,9 @@ def generate_launch_description():
             'launch', 'rs_launch.py')),
         launch_arguments={
             'camera_name': 'camera0',
-            'camera_namespace': '',
+            # realsense-ros ≥4.58.2 defaults camera_namespace to 'camera',
+            # giving /camera/camera0/… topics. Keep that default — passing ''
+            # is a malformed CLI arg and the launch system ignores it.
             'depth_module.depth_profile': '848x480x30',
             'rgb_camera.color_profile': '848x480x30',
             'align_depth.enable': 'true',       # registered depth for RTAB-Map
@@ -207,14 +209,15 @@ def generate_launch_description():
             'odom_frame_id': 'odom',
             'publish_tf': True,
             'approx_sync': True,
+            'approx_sync_max_interval': 0.05,  # D555 DDS color/depth arrive ~33 ms apart
             'qos': 2,                       # SENSOR_DATA (live driver)
             'Reg/Force3DoF': 'true',
             'Odom/ResetCountdown': '1',     # auto-recover after tracking loss
         }],
         remappings=[
-            ('rgb/image', '/camera0/color/image_raw'),
-            ('depth/image', '/camera0/aligned_depth_to_color/image_raw'),
-            ('rgb/camera_info', '/camera0/color/camera_info'),
+            ('rgb/image', '/camera/camera0/color/image_raw'),
+            ('depth/image', '/camera/camera0/aligned_depth_to_color/image_raw'),
+            ('rgb/camera_info', '/camera/camera0/color/camera_info'),
         ],
         condition=is_real,
     )
@@ -245,9 +248,9 @@ def generate_launch_description():
                  "'.lower() == 'true' else 'true'"]), value_type=str),
         }],
         remappings=[
-            ('rgb/image', '/camera0/color/image_raw'),
-            ('depth/image', '/camera0/aligned_depth_to_color/image_raw'),
-            ('rgb/camera_info', '/camera0/color/camera_info'),
+            ('rgb/image', '/camera/camera0/color/image_raw'),
+            ('depth/image', '/camera/camera0/aligned_depth_to_color/image_raw'),
+            ('rgb/camera_info', '/camera/camera0/color/camera_info'),
         ],
         condition=is_real,
     )
@@ -265,8 +268,8 @@ def generate_launch_description():
         remappings=[
             # Raw (unaligned) depth + its own camera_info — independent of the
             # aligned stream RTAB-Map consumes.
-            ('camera_0/depth/image', '/camera0/depth/image_rect_raw'),
-            ('camera_0/depth/camera_info', '/camera0/depth/camera_info'),
+            ('camera_0/depth/image', '/camera/camera0/depth/image_rect_raw'),
+            ('camera_0/depth/camera_info', '/camera/camera0/depth/camera_info'),
         ],
         condition=is_real,
     )
