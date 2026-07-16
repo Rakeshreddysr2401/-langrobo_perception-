@@ -21,6 +21,21 @@ It ALSO republishes the color stream as JPEG on
 container parked (compute freed for perception), this is the only camera feed
 the brain's look() tool and Telegram watch alerts have.
 
+And it IS the brain's YOLO target finder (visual servoing,
+navigate_to_visible_object). ARCHITECTURE.md contract:
+
+  /vision/target          String   Pi5 → here   COCO class to hunt ("" = stop)
+  /vision/target_result   String   here → Pi5   JSON, published EVERY detect
+      tick while a target is set (found or not — the brain treats silence as
+      a dead camera and halts):
+    {"target": "chair", "found": true, "bearing_x": 0.31, "rel_size": 0.18,
+     "conf": 0.72, "stamp": 1752300000.0}
+      bearing_x: horizontal offset of the box centre, -1 (left) .. +1 (right)
+      rel_size:  max(box_w/W, box_h/H) — the brain stops approaching at 0.45
+
+The target hunt deliberately does NOT require TF/SLAM — it is the no-map
+fallback path — so it runs even while cuVSLAM is still starting.
+
 Design notes:
   - No cv_bridge / tf2_geometry_msgs imports: images decode via numpy, the
     point transform is a quaternion rotation done by hand.
@@ -120,6 +135,11 @@ class Detections3DNode(Node):
                                  qos_profile_sensor_data)
         self._pub = self.create_publisher(String, p("output_topic"), 10)
 
+        # Target finder (brain visual servoing) — see module docstring.
+        self._target = ""
+        self.create_subscription(String, "/vision/target", self._on_target, 10)
+        self._target_pub = self.create_publisher(String, "/vision/target_result", 10)
+
         look_rate = float(p("look_feed_rate"))
         if look_rate > 0:
             self._look_pub = self.create_publisher(
@@ -135,6 +155,13 @@ class Detections3DNode(Node):
     def _on_depth(self, msg): self._depth = msg
     def _on_color_info(self, msg): self._color_info = msg
     def _on_depth_info(self, msg): self._depth_info = msg
+
+    def _on_target(self, msg):
+        label = msg.data.lower().strip()
+        if label != self._target:
+            self.get_logger().info(f"target hunt: {label!r}" if label
+                                   else "target hunt: idle")
+        self._target = label
 
     # ── look() feed (brain camera snapshot + watch alerts) ────────────────
 
@@ -157,13 +184,55 @@ class Detections3DNode(Node):
 
     # ── Detection tick ────────────────────────────────────────────────────
 
+    def _publish_target_result(self, boxes, width, height):
+        """Visual-servoing answer for the label on /vision/target — published
+        every tick while hunting (found or not), no TF/SLAM required."""
+        best = None
+        for label, conf, xyxy in boxes:
+            if label == self._target and (best is None or conf > best[1]):
+                best = (label, conf, xyxy)
+        if best is None:
+            out = {"target": self._target, "found": False, "stamp": time.time()}
+        else:
+            _, conf, (u1, v1, u2, v2) = best
+            out = {
+                "target": self._target, "found": True,
+                "bearing_x": round(((u1 + u2) / 2 - width / 2) / (width / 2), 3),
+                "rel_size": round(max((u2 - u1) / width, (v2 - v1) / height), 3),
+                "conf": round(conf, 2), "stamp": time.time(),
+            }
+        self._target_pub.publish(String(data=json.dumps(out)))
+
     def _tick(self):
-        if None in (self._color, self._depth, self._color_info, self._depth_info):
+        if self._color is None or self._color_info is None:
             return
         color_msg, depth_msg = self._color, self._depth
 
-        # Contract: map frame or silence. The lookup also fails while cuVSLAM
-        # is still starting — that silence is correct.
+        img = _decode_image(color_msg)
+        if img is None:
+            return
+        if img.ndim == 2:  # mono → 3ch for YOLO
+            img = np.stack([img] * 3, axis=-1)
+
+        # YOLO once per tick; everything downstream shares the boxes.
+        boxes = []
+        for r in self._model(img, device=self._device, verbose=False):
+            for b in r.boxes:
+                conf = float(b.conf[0])
+                if conf < self._conf_min:
+                    continue
+                boxes.append((self._model.names[int(b.cls[0])].lower(), conf,
+                              tuple(map(int, b.xyxy[0]))))
+
+        # Path 1 — target finder (no TF needed; the no-map fallback).
+        if self._target:
+            self._publish_target_result(boxes, img.shape[1], img.shape[0])
+
+        # Path 2 — map-frame detections. Contract: map frame or silence; the
+        # lookup also fails while cuVSLAM is still starting — that silence is
+        # correct.
+        if depth_msg is None or self._depth_info is None:
+            return
         try:
             tf = self._tf_buffer.lookup_transform(
                 self._target_frame, depth_msg.header.frame_id,
@@ -178,12 +247,9 @@ class Detections3DNode(Node):
             return
         self._no_tf_logged = False
 
-        img = _decode_image(color_msg)
         dep = _decode_image(depth_msg)
-        if img is None or dep is None:
+        if dep is None:
             return
-        if img.ndim == 2:  # mono → 3ch for YOLO
-            img = np.stack([img] * 3, axis=-1)
 
         ci, di = self._color_info, self._depth_info
         fx_c, fy_c, cx_c, cy_c = ci.k[0], ci.k[4], ci.k[2], ci.k[5]
@@ -193,42 +259,37 @@ class Detections3DNode(Node):
         q = tf.transform.rotation
 
         objects = []
-        for r in self._model(img, device=self._device, verbose=False):
-            for b in r.boxes:
-                conf = float(b.conf[0])
-                if conf < self._conf_min:
-                    continue
-                u1, v1, u2, v2 = map(int, b.xyxy[0])
-                u_c, v_c = (u1 + u2) // 2, (v1 + v2) // 2
-                # Map the color pixel into the depth image via angle equality
-                # (intrinsics-normalised coordinates; baseline ≈ 0).
-                u_d = int((u_c - cx_c) / fx_c * fx_d + cx_d)
-                v_d = int((v_c - cy_c) / fy_c * fy_d + cy_d)
-                if not (0 <= u_d < dep.shape[1] and 0 <= v_d < dep.shape[0]):
-                    continue
-                h = self._patch
-                patch = dep[max(0, v_d - h):v_d + h + 1,
-                            max(0, u_d - h):u_d + h + 1].astype(np.float32)
-                patch = patch[patch > 0]
-                if patch.size < 3:
-                    continue
-                z = float(np.median(patch))
-                if dep.dtype == np.uint16:
-                    z /= 1000.0                      # mm → m
-                if not (self._min_range < z < self._max_range):
-                    continue
-                # Deproject in the depth optical frame, then → map.
-                pt = np.array([(u_d - cx_d) / fx_d * z,
-                               (v_d - cy_d) / fy_d * z,
-                               z])
-                mp = _quat_rotate(q.x, q.y, q.z, q.w, pt) + np.array([t.x, t.y, t.z])
-                objects.append({
-                    "label": self._model.names[int(b.cls[0])].lower(),
-                    "x": round(float(mp[0]), 3),
-                    "y": round(float(mp[1]), 3),
-                    "z": round(float(mp[2]), 3),
-                    "conf": round(conf, 2),
-                })
+        for label, conf, (u1, v1, u2, v2) in boxes:
+            u_c, v_c = (u1 + u2) // 2, (v1 + v2) // 2
+            # Map the color pixel into the depth image via angle equality
+            # (intrinsics-normalised coordinates; baseline ≈ 0).
+            u_d = int((u_c - cx_c) / fx_c * fx_d + cx_d)
+            v_d = int((v_c - cy_c) / fy_c * fy_d + cy_d)
+            if not (0 <= u_d < dep.shape[1] and 0 <= v_d < dep.shape[0]):
+                continue
+            h = self._patch
+            patch = dep[max(0, v_d - h):v_d + h + 1,
+                        max(0, u_d - h):u_d + h + 1].astype(np.float32)
+            patch = patch[patch > 0]
+            if patch.size < 3:
+                continue
+            z = float(np.median(patch))
+            if dep.dtype == np.uint16:
+                z /= 1000.0                      # mm → m
+            if not (self._min_range < z < self._max_range):
+                continue
+            # Deproject in the depth optical frame, then → map.
+            pt = np.array([(u_d - cx_d) / fx_d * z,
+                           (v_d - cy_d) / fy_d * z,
+                           z])
+            mp = _quat_rotate(q.x, q.y, q.z, q.w, pt) + np.array([t.x, t.y, t.z])
+            objects.append({
+                "label": label,
+                "x": round(float(mp[0]), 3),
+                "y": round(float(mp[1]), 3),
+                "z": round(float(mp[2]), 3),
+                "conf": round(conf, 2),
+            })
 
         if objects:
             self._pub.publish(String(data=json.dumps(

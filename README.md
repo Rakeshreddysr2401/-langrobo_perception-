@@ -1,69 +1,89 @@
-# langrobo_perception
+# LangRobo Perception — Jetson stack
 
-Jetson Orin perception bringup for the LangRobo rover: **nvblox** (GPU 3D
-reconstruction from a depth camera) + **Nav2** (planning/control), per
-`~/robot/ARCHITECTURE.md`. The LangGraph brain on the Pi 5 sends
-`NavigateToPose` goals; this stack turns them into `TwistStamped` wheel
-commands.
+Voice/VLM-driven rover: say "go near the chair" on Telegram and the robot finds
+it, plans a path, and drives there.
 
-## Profiles
-
-| | `mode:=sim` (working today) | `mode:=real` (pending D555) |
-|---|---|---|
-| Depth source | rover_sim Gazebo on laptop, `/cam_1/depth/*` | RealSense D555 `/camera0/depth/*` |
-| Localization | wheel odometry from sim (`odom` frame) | cuVSLAM (`map` frame) |
-| Clock | sim `/clock` (`use_sim_time:=True`) | wall clock |
-
-## Run (sim profile)
-
-1. Laptop: start the sim with its DDS peers profile
-   (`WORLD=cafe rosmaster_x3_gazebo.sh` with
-   `FASTRTPS_DEFAULT_PROFILES_FILE=/workspace/ros2_ws/fastdds_peers.xml`).
-2. Jetson host:
-   ```bash
-   docker exec -it isaac_ros_dev_container \
-     /workspaces/isaac_ros-dev/src/langrobo_perception/scripts/run_perception_sim.sh
-   ```
-3. Send a goal from anywhere on the DDS mesh (Pi 5 in production):
-   ```bash
-   ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose \
-     "{pose: {header: {frame_id: odom}, pose: {position: {x: 1.5}, orientation: {w: 1.0}}}}"
-   ```
-
-## Build
-
-```bash
-docker exec -it isaac_ros_dev_container bash -c \
-  "cd /workspaces/isaac_ros-dev && source /opt/ros/jazzy/setup.bash && \
-   colcon build --symlink-install --packages-select langrobo_perception"
+```
+                  ┌──────────────── WiFi (192.168.1.x) ────────────────┐
+D555 camera ──eth──► Jetson Orin Nano ◄──────► Pi5 (brain) ◄──────► Mac mini
+(192.168.11.55)     cuVSLAM · nvblox        LangGraph agent        llama.cpp
+                    Nav2 · YOLO · grounding  Telegram · micro-ROS   Gemma-12B VLM
+                          │ /cmd_vel                │ udp 8888
+                          └────────────────► ESP32 rover (192.168.1.11)
+                                              wheels + pan/tilt head
 ```
 
-## Networking
+## Daily operation — from the Pi5
 
-All DDS traffic is unicast-peered over wifi (router drops wifi↔wifi
-multicast): container profile `/workspaces/isaac_ros-dev/config/fastdds_unicast.xml`
-lists the Pi (192.168.1.16) and the sim laptop (192.168.1.12); the laptop's
-counterpart is `/workspace/ros2_ws/fastdds_peers.xml`. Master copy:
-`~/robot/config/fastdds_unicast.xml` — keep them in sync.
+```bash
+robot status     # health table: camera → SLAM → Nav2 → wheels → brain → LLM
+robot start      # bring up the Jetson perception stack (~2.5 min cold)
+robot restart    # fresh SLAM origin + clean map (do this if pose looks wrong)
+robot stop       # stop perception (brain + wheels bridge stay up)
+```
 
-## When the D555 arrives (real profile TODO)
+Everything else is automatic: the Pi5 brain (`langrobo-brain`), the ESP32
+bridge (`langrobo-microros`) and the Jetson stack
+(`langrobo-perception.service`) all start at boot. When `robot status` is
+green, talk to the robot on Telegram.
 
-1. Camera driver: `realsense_example.launch.py` in `nvblox_examples_bringup`
-   is the template (splitter + emitter config ship with the container).
-2. Localization: add `isaac_ros_visual_slam` (see
-   `launch/perception/vslam.launch.py` in `nvblox_examples_bringup`);
-   switch `global_frame` to `map` in an `nvblox_real.yaml` + `nav2_real.yaml`
-   (copy the sim ones, change frames/topics/`use_sim_time`).
-3. `cmd_vel_stamper` stays — the real rover's ESP32 path also takes
-   TwistStamped (verify topic name against the micro-ROS firmware).
+## What the brain can use (all verified end-to-end)
 
-## Notes
+| Capability | Topic contract | Backed by |
+|---|---|---|
+| look() — see through the camera | `/camera/color/image_raw/compressed` 2Hz JPEG | detections_3d |
+| Known objects in the map | `/vision/detections_3d` JSON (map frame) | YOLOv8n + depth |
+| Visual servoing ("drive at the cup") | `/vision/target` → `/vision/target_result` (`found`, `bearing_x`, `rel_size`) | detections_3d target finder — works without SLAM |
+| VLM pixel grounding ("that thing there") | `/vision/pixel_query` → `/vision/pixel_result` + `/vision/pixel_goal` | pixel_to_goal + D555 depth |
+| Map navigation | `/navigate_to_pose` action, `/goal_pose` | Nav2 + nvblox costmaps |
+| Wheels | `/cmd_vel` (Twist, ≤0.30 m/s) | ESP32 via micro-ROS |
 
-- MPPI runs `motion_model: Omni` — the mecanum base strafes; keep `vy`
-  limits in sync with `velocity_smoother` if you tune speeds.
-- Collision monitor watches the **depth point cloud**, not lidar, so the
-  stack works on a camera-only robot. If the sim lidar is on, adding a
-  `scan` source is a 5-line change in `nav2_sim.yaml`.
-- Costmaps read nvblox's `/nvblox_node/static_map_slice`
-  (`NvbloxCostmapLayer`); there is no occupancy-grid SLAM anywhere in this
-  stack.
+Pi5-side client for scripts/tests: `pi5/langrobo_client.py`
+(`look | objects | ground u v | go x y | go-pixel u v | go-object label | cancel | status`).
+
+## Mounting the camera on the rover — checklist
+
+1. Mount the D555 facing **forward, level**; power + ethernet to the Jetson.
+2. Measure camera position from the **wheel-axle midpoint** (metres):
+   forward = x, left = y, up = z — edit the static TF in
+   `scripts/run_d555_stereo.sh` (`--x 0.10 --z 0.25` are placeholder values).
+3. `robot restart` — fresh origin at the rover's parking spot.
+4. **Verify rotation direction** (one-time): send
+   `ros2 topic pub -r 10 --times 15 /cmd_vel geometry_msgs/msg/Twist "{angular: {z: 1.4}}"`.
+   The rover must turn **LEFT (counter-clockwise from above)**. If it turns
+   right, swap the two motor connectors of ONE side, or negate `angularZ` in
+   `ESP_32_frimware/rover_firmware.ino` (Pi5 repo) → reflash.
+5. Drive a slow manual square (Telegram: "turn left", "go forward") and watch
+   RViz — the orange path should mirror what the rover did.
+6. First autonomous test: `robot status` all green → Telegram "go one meter
+   forward", then "go near the <visible object>". Keep a hand near the power.
+
+## Repo map
+
+| Path | What |
+|---|---|
+| `scripts/run_all.sh` / `status_all.sh` / `stop_all.sh` | orchestrator (systemd + the Pi5 `robot` CLI call these) |
+| `scripts/run_*.sh` | individual stages (camera, cuVSLAM, nvblox, nav2, vision, rviz) |
+| `docker/cuvslam-sidecar/` | the Isaac ROS 3.2.6 Humble sidecar that makes cuVSLAM run on Orin/JP7 |
+| `langrobo_perception/` | ROS nodes: detections_3d (YOLO + target finder), pixel_to_goal |
+| `pi5/` | Pi5-side: `robot` CLI, `langrobo_client.py` (deploy: `scripts/deploy_pi5.sh`) |
+| `systemd/langrobo-perception.service` | Jetson boot service |
+| `config/` | Nav2, nvblox, RViz configs (`*_sim.yaml` = old Gazebo profile, still usable via `perception.launch.py mode:=sim`) |
+| `CUVSLAM_ORIN_GUIDE.md` | architecture, performance, integration contracts |
+| `ISSUES_AND_SOLUTIONS.md` | every problem hit and how it was solved |
+
+## Known quirks (read before debugging)
+
+- **D555 restarts**: never restart a healthy camera driver — the D555's DDS
+  goes stale and only a **physical power unplug (15s)** recovers it.
+  `robot restart` deliberately leaves the driver running.
+- **Camera "not found" after a Jetson reboot**: check `ip link show enP8p1s0`
+  says **mtu 9000** BEFORE power-cycling — the NM profile once reverted it to
+  1500, which breaks DDS device discovery while ping still works
+  (ISSUES_AND_SOLUTIONS.md Part 3). Fixed persistently 2026-07-16.
+- **No discovery server anywhere** — everything is multicast (verified across
+  this WiFi AP). A discovery-server client cannot see the D555 (a raw DDS
+  participant) and silently splits the ROS graph (cost us half a day).
+- **IMU fusion is OFF**: default noise params diverge ~850m stationary;
+  visual-only is 0.000m. Calibrate before enabling (guide §7).
+- **pkill -f** matches its own docker-exec shell — kill by comm name.

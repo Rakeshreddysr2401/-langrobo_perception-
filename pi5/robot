@@ -1,0 +1,36 @@
+#!/bin/bash
+# LangRobo control from the Pi5 — the one command that runs the whole robot.
+#
+#   robot start     bring up the Jetson perception stack (camera→Nav2→vision)
+#   robot stop      stop the Jetson stack (brain + wheels bridge stay up)
+#   robot restart   full clean restart (fresh SLAM origin, clean map)
+#   robot status    health table: camera → SLAM → Nav2 → wheels → brain → LLM
+#
+# The Pi5 side (brain, micro-ROS agent) runs as systemd units and is always on.
+# Talk to the robot on Telegram once `robot status` is green.
+set -eo pipefail
+
+JETSON=${JETSON:-rakhi24@192.168.1.15}
+SCRIPTS=/home/rakhi24/workspaces/isaac_ros-dev/src/langrobo_perception/scripts
+
+case "${1:-}" in
+    start)
+        exec ssh -t -o BatchMode=yes "$JETSON" "$SCRIPTS/run_all.sh"
+        ;;
+    stop)
+        exec ssh -o BatchMode=yes "$JETSON" "$SCRIPTS/stop_all.sh"
+        ;;
+    restart)
+        ssh -o BatchMode=yes "$JETSON" "$SCRIPTS/stop_all.sh"
+        sleep 3
+        exec ssh -t -o BatchMode=yes "$JETSON" "$SCRIPTS/run_all.sh"
+        ;;
+    status)
+        ssh -o BatchMode=yes "$JETSON" "$SCRIPTS/status_all.sh" \
+            || echo "Jetson unreachable at $JETSON"
+        ;;
+    *)
+        grep "^#   robot" "$0" | sed "s/^#   //"
+        exit 1
+        ;;
+esac
