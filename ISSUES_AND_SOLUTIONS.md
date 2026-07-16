@@ -66,6 +66,7 @@ Both sides must leave `ROS_DISCOVERY_SERVER` unset (plain multicast).
 | No gyro/accel topics | D555 publishes ONE combined IMU stream: `enable_motion:=true` → `/camera/camera0/motion/sample` (200Hz). `enable_gyro`/`unite_imu_method` don't apply |
 | No pointcloud topic ever appears | `pointcloud.enable` **is not declared** on the DDS driver — SDK processing filters don't exist for network cameras. Solved with nvblox's GPU back-projected depth instead |
 | Camera vanishes after many restarts | The D555's onboard DDS stack goes stale — ping works, discovery doesn't. **Physical power cycle** (unplug 5s) is the only fix |
+| "No RealSense devices found" after a **Jetson reboot** — ping works, `rs-dds-sniffer` shows the `D555_…` participant, but `rs-dds-config --reset --debug` logs `device … is not ready` + `sample(s) lost` mid-handshake | **NOT the stale-DDS case.** `enP8p1s0` reverted to MTU 1500 (the NM "Wired connection 1" profile had `802-3-ethernet.mtu 1500` baked in), so the camera's jumbo discovery/handshake payloads get dropped while small packets pass. Fixed 2026-07-16: `sudo nmcli con mod "Wired connection 1" 802-3-ethernet.mtu 9000 && sudo nmcli con up "Wired connection 1"` — check `ip link show enP8p1s0 \| grep mtu` **before** reaching for the power plug |
 | IR emitter vs tracking | Emitter dot-pattern corrupts cuVSLAM features → emitter OFF (`depth_module.emitter_enabled:=0`); depth gets noisier — acceptable trade |
 
 ## Part 4 — Making the stack correct
@@ -121,7 +122,9 @@ cd ~/workspaces/isaac_ros-dev/src/langrobo_perception/scripts
 
 **When something looks wrong:** pose far from origin / goal aborted →
 `./run_cuvslam_sidecar.sh && sleep 20 && ./run_nvblox.sh` (fresh origin, clean map).
-Camera not detected → power-cycle the D555. Full health-check commands are in
+Camera not detected → first check `ip link show enP8p1s0` says **mtu 9000**
+(reverts to 1500 if the NM profile is wrong — see Part 3 table); only then
+power-cycle the D555. Full health-check commands are in
 `CUVSLAM_ORIN_GUIDE.md` §3.
 
 **To make the rover physically move:** connect the ESP32 base and subscribe it to `/cmd_vel`

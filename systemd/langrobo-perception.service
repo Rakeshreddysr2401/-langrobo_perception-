@@ -1,0 +1,24 @@
+[Unit]
+Description=LangRobo Jetson perception stack (camera, cuVSLAM, nvblox, Nav2, vision AI)
+After=docker.service network-online.target
+Wants=docker.service network-online.target
+StartLimitIntervalSec=900
+StartLimitBurst=4
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=rakhi24
+# The D555 needs ~20s after power-on before its DDS stack answers; on cold
+# boot give the network and docker a moment before the first attempt.
+ExecStartPre=/bin/sleep 15
+ExecStart=/home/rakhi24/workspaces/isaac_ros-dev/src/langrobo_perception/scripts/run_all.sh
+ExecStop=/home/rakhi24/workspaces/isaac_ros-dev/src/langrobo_perception/scripts/stop_all.sh
+TimeoutStartSec=420
+# Boot races (docker/camera not ready yet) fail the first attempt; retry a few
+# times instead of staying dead until someone runs `robot start` by hand.
+Restart=on-failure
+RestartSec=45
+
+[Install]
+WantedBy=multi-user.target
