@@ -6,12 +6,22 @@ it, plans a path, and drives there.
 ```
                   ┌──────────────── WiFi (192.168.1.x) ────────────────┐
 D555 camera ──eth──► Jetson Orin Nano ◄──────► Pi5 (brain) ◄──────► Mac mini
-(192.168.11.55)     cuVSLAM · nvblox        LangGraph agent        llama.cpp
+(192.168.11.55)     RTAB-Map · nvblox       LangGraph agent        llama.cpp
                     Nav2 · YOLO · grounding  Telegram · micro-ROS   Gemma-12B VLM
-                          │ /cmd_vel                │ udp 8888
+                          │ /cmd_vel_nav → deadband shim → /cmd_vel
                           └────────────────► ESP32 rover (192.168.1.11)
                                               wheels + pan/tilt head
 ```
+
+First fully autonomous mission (pixel-grounded goal → plan → drive →
+"arrived") completed 2026-07-16 on this architecture.
+
+**Localization is pluggable** — `config/localization` holds one word:
+`rtabmap` (default, verified under motion) or `cuvslam` (parked: explodes
+under motion on this hardware — the Humble sidecar starves it of frames and
+TF across the container boundary; re-evaluate when NVIDIA ships Orin/JP7
+cuVSLAM builds that can live in the main container). Switch the word, then
+`robot restart`.
 
 ## Daily operation — from the Pi5
 
@@ -63,7 +73,12 @@ Pi5-side client for scripts/tests: `pi5/langrobo_client.py`
 | Path | What |
 |---|---|
 | `scripts/run_all.sh` / `status_all.sh` / `stop_all.sh` | orchestrator (systemd + the Pi5 `robot` CLI call these) |
-| `scripts/run_*.sh` | individual stages (camera, cuVSLAM, nvblox, nav2, vision, rviz) |
+| `config/localization` | one-word localization backend switch: `rtabmap` \| `cuvslam` |
+| `scripts/run_localization.sh` | backend dispatcher (called by run_all) |
+| `scripts/run_rtabmap.sh` | RTAB-Map backend: rgbd_odometry + rtabmap on infra1 + raw depth |
+| `scripts/run_cuvslam_sidecar.sh` | cuVSLAM backend (parked — see Known quirks) |
+| `scripts/cmd_vel_deadband.py` | motor dead-zone shim: `/cmd_vel_nav` → effective-PWM `/cmd_vel`. DELETE after the ESP32 firmware reflash carries the remap itself |
+| `scripts/run_*.sh` | other stages (camera, nvblox, nav2, vision, rviz) |
 | `docker/cuvslam-sidecar/` | the Isaac ROS 3.2.6 Humble sidecar that makes cuVSLAM run on Orin/JP7 |
 | `langrobo_perception/` | ROS nodes: detections_3d (YOLO + target finder), pixel_to_goal |
 | `pi5/` | Pi5-side: `robot` CLI, `langrobo_client.py` (deploy: `scripts/deploy_pi5.sh`) |
@@ -87,3 +102,28 @@ Pi5-side client for scripts/tests: `pi5/langrobo_client.py`
 - **IMU fusion is OFF**: default noise params diverge ~850m stationary;
   visual-only is 0.000m. Calibrate before enabling (guide §7).
 - **pkill -f** matches its own docker-exec shell — kill by comm name.
+- **Driver params silently dropped at launch**: `depth_module.*` params only
+  exist after the device connects, so launch args like `emitter_enabled:=0`
+  are DISCARDED with a buried warning. run_all/run_d555_stereo enforce
+  `emitter_enabled=false` (dot pattern corrupts feature tracking) and
+  `global_time_enabled=false` (per-stream clock models drift the stereo
+  stamps apart) at runtime on EVERY start. Same trap family:
+  `align_depth.enable` and `pointcloud.enable` accept a value but publish
+  nothing on the DDS driver — RTAB-Map uses infra1 + raw depth instead
+  (natively registered, no alignment needed).
+- **Moved the rover by hand? `robot restart`.** Any tracker treats a
+  kidnap as chaos; fresh origin is cheap.
+- **Nav goals must carry a ZERO timestamp** ("use latest TF"): Nav2
+  re-transforms the original stamp on every replan, so `now()` stamps age
+  out of the 10s TF cache mid-drive and abort with "extrapolation into the
+  past". langrobo_client and the Pi5 brain already do this — keep it that
+  way in new tools.
+- **Motor dead zone**: below ~60% PWM (cmd <≈0.18 m/s) the wheels hum but
+  don't turn. `cmd_vel_deadband.py` rescales Nav2's output for now; the
+  proper fix is the same remap in `ESP_32_frimware/rover_firmware.ino`
+  (Pi5 repo) — after reflashing, delete the shim and set the collision
+  monitor's `cmd_vel_out_topic` back to `cmd_vel`.
+- **Jazzy↔Humble DDS is NOT trustworthy** (relevant only if reviving the
+  cuVSLAM sidecar): /tf_static never deserializes across it and large
+  image messages drop even with 16MB buffers ("sequence size exceeds
+  remaining buffer"). Anything critical must live in ONE distro.

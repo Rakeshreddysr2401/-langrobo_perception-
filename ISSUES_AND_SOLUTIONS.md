@@ -181,3 +181,30 @@ systemd units, with the LLM on a **Mac mini** (`192.168.1.7` /
 **Verified after the fix:** brain subscribes the camera feed + detections (visible from
 the Jetson), LLM reports 4 slots, and a live robot camera frame sent to the Mac mini VLM
 came back correctly described. Everything works except the ESP32 session.
+
+## Part 9 — Motion day: every bug between "verified" and actually driving (2026-07-16 night)
+
+The stack was green on paper but had never navigated autonomously. Getting the
+first real "arrived" surfaced ten distinct issues. Chronologically:
+
+| Issue | Cause | Fix |
+|---|---|---|
+| Perception dead after Jetson reboot, camera "not found" | NM wired profile reverted MTU to 1500 (see Part 3 row) | nmcli MTU 9000 persisted; boot service now retries (`Restart=on-failure`) |
+| First Telegram nav aborted in 7s, "path may be blocked" | bt_navigator `default_server_timeout` 20ms too tight on loaded Orin; collision monitor TF lookups died on "extrapolation into the future" (nvblox stamps ms ahead of odom TF) and held /cmd_vel at zero | timeout 100ms; `base_shift_correction: False`, `transform_tolerance: 0.3` |
+| Rover hums, zero net motion; bt_navigator "unknown goal response" | TWO full Nav2 stacks: scripts pkill'd node binaries but not the `ros2 launch` parent, which (`use_respawn:=True`) resurrected them | kill `[n]avigation_launch.py` FIRST (run_nav2.sh / stop_all.sh) |
+| cuVSLAM: perfect at rest, ±100m explosions on ANY motion (1) | IR emitter was ON at laser_power 150 — `emitter_enabled:=0` launch arg silently dropped (depth_module params don't exist until device connect) | enforce `ros2 param set ... emitter_enabled false` at runtime on every start path |
+| cuVSLAM explosions (2) | `global_time_enabled` runs an independent host-clock drift model per stream: infra1 ticked 33.2535ms/frame, infra2 33.3745 — timestamp pairing matched frames from different instants | `global_time_enabled false` enforced at runtime (device stamps are identical per stereo shutter and track host within ~10ms) |
+| cuVSLAM explosions (3) | Humble sidecar cannot deserialize the Jazzy container's `/tf_static` ("sequence size exceeds remaining buffer") → cuVSLAM never resolved base_link → NO stereo extrinsics | static TF chain published inside the sidecar container |
+| cuVSLAM explosions (4) | kernel UDP buffers 208KB < one 450KB IR frame → half of all frames never arrived (66.7ms deltas) | `/etc/sysctl.d/99-langrobo-dds.conf` (64MB max) + 16MB buffers in udp_only.xml |
+| cuVSLAM STILL exploded after all of the above | remaining cross-distro starvation is architectural — every extrinsics/order permutation A/B burst-tested; 0-4 features tracked vs RTAB-Map's 456 on identical images | **cuVSLAM PARKED.** `config/localization` backend switch; RTAB-Map (same-container, infra1 + raw depth, Force3DoF, auto-recovery) is the production tracker. Re-evaluate cuVSLAM when NVIDIA ships Orin/JP7 builds that can live in the main container |
+| RTAB-Map fed nothing on `aligned_depth_to_color` | `align_depth.enable` accepted but publishes NOTHING on the DDS driver (same family as `pointcloud.enable`) | feed infra1 as "rgb" + raw depth — same viewpoint by construction, no alignment needed. Emitter must stay off |
+| Missions aborted mid-drive: "extrapolation into the PAST" | Nav2 re-transforms the ORIGINAL goal stamp on every replan; `now()` stamps age out of the 10s TF cache | **zero-stamp all nav goals** (= "use latest TF"): langrobo_client + Pi5 `ros2_bridge.py` (ros2_ws commit `c7b108e`) |
+| Nav2 commanded for 110s, rover never moved | motors need ≥~60% PWM to break friction; MPPI approach speeds (0.07-0.15 m/s ≈ 25-50%) just hum | `cmd_vel_deadband.py`: collision monitor → `/cmd_vel_nav` → rescale onto [0.20, 0.30] m/s → `/cmd_vel`. Proper fix = same remap in the ESP32 firmware, then delete the shim |
+| False lead: "chassis redesigned, front is now back" | burst test with RTAB-Map proved cmd +x = camera-forward — the earlier "random" reversals were garbage-odometry Nav2 commanding recoveries, plus the camera physically falling | no inversion anywhere; a `cmd_vel_invert.py` shim was added and removed same-day (git history) |
+
+**Result: first fully autonomous mission SUCCESS** — pixel-grounded goal → Nav2
+plan → drive (with a working reverse correction) → "arrived", smooth odometry
+throughout, on a mattress at night. Remaining known work: ESP32 firmware reflash
+(deadband + retry-forever sessions), standoff distance parameter, brain-side
+object-search behavior, LLM latency (2 calls ≈ 50s before wheels move), IMU
+calibration, camera mount extrinsics measurement, git remotes.
