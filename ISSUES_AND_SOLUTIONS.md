@@ -137,3 +137,27 @@ contract: guide §6. Also fixed on the way: `detections_3d` still used the pre-4
 namespace (`/camera0/…`) — it would have silently seen no camera.
 
 Remaining work list: guide §7.
+
+---
+
+## Part 7 — Pi5 over WiFi (2026-07-16)
+
+The Pi5 moved from ethernet to WiFi (now `192.168.1.16` on `wlan0`; Jetson WiFi is
+`192.168.1.15`; the ethernet cable now carries only the D555 at `192.168.11.55`).
+
+| Issue | Cause | Fix |
+|---|---|---|
+| Pi5 not at its old IP, no mDNS answer | it's on the WiFi subnet now | ping-swept `192.168.1.0/24`, identified by the Raspberry Pi MAC prefix `2c:cf:67` |
+| Would multicast discovery survive WiFi? | WiFi APs often filter multicast | tested — it works on this AP: Jetson-container → Pi5-native message flow confirmed, then the full stack (JPEG feed 2Hz, detections, grounding, Nav2 action) |
+| `ground` from a fresh CLI process randomly returned nothing | classic DDS race: a brand-new node publishes before the subscriber is matched → first message silently lost | client waits for `get_subscription_count() > 0` before publishing |
+| Pi5 couldn't tell "bad pixel" from "message lost" | old contract published nothing on failure | `pixel_to_goal` now ALWAYS answers on `/vision/pixel_result` (JSON, request id echoed, failure reasons: `no_depth_at_pixel`, `tf_not_ready`, …) |
+
+**New pieces:** `pi5/langrobo_client.py` (the single VLM↔robot integration point:
+`look / objects / ground / go / go-pixel / go-object / cancel / status`, usable as a
+library or CLI) and `scripts/deploy_pi5.sh` (repo copy is the source of truth).
+
+**Verified end-to-end from the Pi5 over WiFi:** frame grab → pixel grounding (valid pixel
+→ goal; invalid pixel → clean `no_depth_at_pixel`) → NavigateToPose accepted →
+`/cmd_vel` at ~15Hz on the Jetson → cancel. The only unverified link left is the ESP32
+itself (micro-ROS agent ready in `~/microros_ws` on the Pi5; the ESP32 just subscribes
+`/cmd_vel`).

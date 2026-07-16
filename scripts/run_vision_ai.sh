@@ -5,10 +5,12 @@
 #   detections_3d — YOLO objects → /vision/detections_3d (map-frame JSON)
 #                   + /camera/color/image_raw/compressed (2Hz JPEG, VLM look())
 #   pixel_to_goal — VLM pixel (u,v) on /vision/pixel_query
-#                   → Nav2-ready PoseStamped on /vision/pixel_goal
+#                   → JSON result on /vision/pixel_result (always answered)
+#                   + Nav2-ready PoseStamped on /vision/pixel_goal (success only)
 #
-# Pi5 is on the same subnet (Jetson 192.168.2.20) — default multicast
-# discovery reaches it; no discovery server needed.
+# Pi5 (192.168.1.16, WiFi) reaches these over the Jetson's wlP1p1s0
+# (192.168.1.15) via default multicast discovery — no discovery server.
+# Pi5-side consumer: pi5/langrobo_client.py (deploy with deploy_pi5.sh).
 set -eo pipefail
 
 docker exec isaac_ros bash -c 'pkill -f "[d]etections_3d" 2>/dev/null; pkill -f "[p]ixel_to_goal" 2>/dev/null; true'

@@ -14,18 +14,24 @@ Contract (all frames map, all units metres):
   in:   /vision/pixel_query   geometry_msgs/PointStamped
           point.x = u pixel column in the COLOR image
           point.y = v pixel row
-          header.frame_id is echoed back verbatim (use it as a request id)
-  out:  /vision/pixel_goal    geometry_msgs/PoseStamped (frame_id "map")
-          header.frame_id of the REQUEST echoed in... pose is in map; the
-          request id travels in the pose's header.frame_id suffix — see below.
+          header.frame_id = request id, echoed back in the result JSON
+  out:  /vision/pixel_result  std_msgs/String — ALWAYS answered, one per query:
+          {"id": "<req>", "ok": true,  "depth_m": 3.5,
+           "object": {"x":..,"y":..,"z":..}, "goal": {"x":..,"y":..,"yaw":..}}
+          {"id": "<req>", "ok": false, "reason": "no_depth_at_pixel"}
+  out:  /vision/pixel_goal    geometry_msgs/PoseStamped (frame_id "map") —
+          published only on success; can be wired straight into Nav2.
 
-  On failure (no depth at pixel, TF not ready) nothing is published — the Pi5
-  side should time out (~2 s) and retry or re-prompt the VLM.
+  The Pi5 client should subscribe to /vision/pixel_result and match on "id";
+  a missing reply within ~2 s means the query never arrived (transport), not
+  a grounding failure.
 
 Depth sampling matches detections_3d_node: the color pixel is mapped into the
 unaligned depth image via intrinsics angle-equality (color↔depth baseline of a
 few mm is negligible beyond 0.3 m), then a median over a small patch.
 """
+
+import json
 
 import numpy as np
 import rclpy
@@ -33,6 +39,7 @@ from geometry_msgs.msg import PointStamped, PoseStamped
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo, Image
+from std_msgs.msg import String
 from tf2_ros import Buffer, TransformListener
 
 
@@ -60,6 +67,7 @@ class PixelToGoalNode(Node):
         self.declare_parameter("depth_info_topic", "/camera/camera0/depth/camera_info")
         self.declare_parameter("query_topic", "/vision/pixel_query")
         self.declare_parameter("goal_topic", "/vision/pixel_goal")
+        self.declare_parameter("result_topic", "/vision/pixel_result")
         self.declare_parameter("target_frame", "map")
         self.declare_parameter("base_frame", "base_link")
         self.declare_parameter("approach_offset_m", 0.6)
@@ -89,6 +97,7 @@ class PixelToGoalNode(Node):
                                  self._on_depth_info, qos_profile_sensor_data)
         self.create_subscription(PointStamped, p("query_topic"), self._on_query, 10)
         self._pub = self.create_publisher(PoseStamped, p("goal_topic"), 10)
+        self._pub_result = self.create_publisher(String, p("result_topic"), 10)
 
         self.get_logger().info("pixel_to_goal ready — send PointStamped pixel "
                                f"queries on {p('query_topic')}")
@@ -97,10 +106,15 @@ class PixelToGoalNode(Node):
     def _on_color_info(self, msg): self._color_info = msg
     def _on_depth_info(self, msg): self._depth_info = msg
 
+    def _fail(self, req_id: str, reason: str, detail: str = ""):
+        self.get_logger().warning(f"query [{req_id}] failed: {reason} {detail}")
+        self._pub_result.publish(String(data=json.dumps(
+            {"id": req_id, "ok": False, "reason": reason})))
+
     def _on_query(self, msg: PointStamped):
+        req_id = msg.header.frame_id
         if None in (self._depth, self._color_info, self._depth_info):
-            self.get_logger().warning("query dropped: camera streams not ready")
-            return
+            return self._fail(req_id, "camera_not_ready")
         depth_msg = self._depth
 
         try:
@@ -109,13 +123,11 @@ class PixelToGoalNode(Node):
             tf_base = self._tf_buffer.lookup_transform(
                 self._target_frame, self._base_frame, rclpy.time.Time())
         except Exception as e:
-            self.get_logger().warning(f"query dropped: TF not ready ({e})")
-            return
+            return self._fail(req_id, "tf_not_ready", str(e))
 
         dep = _decode_depth(depth_msg)
         if dep is None:
-            self.get_logger().warning("query dropped: undecodable depth encoding")
-            return
+            return self._fail(req_id, "bad_depth_encoding")
 
         ci, di = self._color_info, self._depth_info
         fx_c, fy_c, cx_c, cy_c = ci.k[0], ci.k[4], ci.k[2], ci.k[5]
@@ -125,25 +137,21 @@ class PixelToGoalNode(Node):
         u_d = int((u_c - cx_c) / fx_c * fx_d + cx_d)
         v_d = int((v_c - cy_c) / fy_c * fy_d + cy_d)
         if not (0 <= u_d < dep.shape[1] and 0 <= v_d < dep.shape[0]):
-            self.get_logger().warning(f"query dropped: pixel ({u_c:.0f},{v_c:.0f}) "
-                                      "maps outside the depth image")
-            return
+            return self._fail(req_id, "pixel_outside_depth_image",
+                              f"({u_c:.0f},{v_c:.0f})")
 
         h = self._patch
         patch = dep[max(0, v_d - h):v_d + h + 1,
                     max(0, u_d - h):u_d + h + 1].astype(np.float32)
         patch = patch[patch > 0]
         if patch.size < 3:
-            self.get_logger().warning("query dropped: no valid depth at pixel "
-                                      "(object too close / reflective / out of range)")
-            return
+            return self._fail(req_id, "no_depth_at_pixel",
+                              "(too close / reflective / out of range)")
         z = float(np.median(patch))
         if dep.dtype == np.uint16:
             z /= 1000.0
         if not (self._min_range < z < self._max_range):
-            self.get_logger().warning(f"query dropped: depth {z:.2f}m outside "
-                                      f"[{self._min_range}, {self._max_range}]")
-            return
+            return self._fail(req_id, "depth_out_of_range", f"{z:.2f}m")
 
         # Object point: deproject in depth optical frame → map.
         pt = np.array([(u_d - cx_d) / fx_d * z,
@@ -159,8 +167,7 @@ class PixelToGoalNode(Node):
         to_obj = obj[:2] - robot
         dist = float(np.linalg.norm(to_obj))
         if dist < 1e-3:
-            self.get_logger().warning("query dropped: object at robot position")
-            return
+            return self._fail(req_id, "object_at_robot_position")
         heading = to_obj / dist
         goal_xy = obj[:2] - heading * min(self._offset, dist * 0.5)
         yaw = float(np.arctan2(heading[1], heading[0]))
@@ -173,11 +180,17 @@ class PixelToGoalNode(Node):
         out.pose.orientation.z = float(np.sin(yaw / 2.0))
         out.pose.orientation.w = float(np.cos(yaw / 2.0))
         self._pub.publish(out)
+        self._pub_result.publish(String(data=json.dumps({
+            "id": req_id, "ok": True, "depth_m": round(z, 3),
+            "object": {"x": round(float(obj[0]), 3), "y": round(float(obj[1]), 3),
+                       "z": round(float(obj[2]), 3)},
+            "goal": {"x": round(float(goal_xy[0]), 3),
+                     "y": round(float(goal_xy[1]), 3), "yaw": round(yaw, 4)}})))
         self.get_logger().info(
             f"pixel ({u_c:.0f},{v_c:.0f}) depth {z:.2f}m → object map "
             f"({obj[0]:.2f},{obj[1]:.2f},{obj[2]:.2f}) → goal "
             f"({goal_xy[0]:.2f},{goal_xy[1]:.2f}) yaw {np.degrees(yaw):.0f}°"
-            + (f" [req {msg.header.frame_id}]" if msg.header.frame_id else ""))
+            + (f" [req {req_id}]" if req_id else ""))
 
 
 def main(args=None):

@@ -202,9 +202,39 @@ fully loaded. When adding heavier AI, apply #1 and #3 to free ~1-1.5GB RAM + GPU
 
 ## 6. Pi5 / VLM Integration — "go near the chair"
 
-The Jetson is on the Pi5's subnet (`192.168.2.20` on `enP8p1s0`), so when the Pi5 is online
-with `ROS_DOMAIN_ID=0` and default multicast discovery, it sees these topics directly — no
-discovery server needed. `run_vision_ai.sh` provides two complementary paths:
+**Network topology (verified 2026-07-16):**
+
+```
+D555 camera ──ethernet 192.168.11.x──► Jetson (enP8p1s0: 192.168.11.70)
+                                       Jetson (wlP1p1s0: 192.168.1.15)
+Pi5 (wlan0: 192.168.1.16) ◄──WiFi 192.168.1.x, same SSID──┘
+ESP32 rover ──micro-ROS──► Pi5 agent (~/microros_ws) ──► subscribes /cmd_vel
+```
+
+Jetson↔Pi5 talk over WiFi with `ROS_DOMAIN_ID=0` and default multicast discovery — no
+discovery server, nothing to configure on either side (both must leave
+`ROS_DISCOVERY_SERVER` unset). Verified end-to-end over this link: 2Hz JPEG feed, YOLO
+detections, pixel grounding round-trip, NavigateToPose accept/cancel from the Pi5 with
+`/cmd_vel` flowing at ~15Hz on the Jetson.
+
+**The Pi5 client (`pi5/langrobo_client.py`)** is the single integration point — deploy it
+with `scripts/deploy_pi5.sh` (lands at `~/langrobo/` on the Pi5, repo copy is the source of
+truth). Your VLM script imports it:
+
+```python
+from langrobo_client import LangRoboClient
+bot = LangRoboClient()
+frame = bot.look("/tmp/frame.jpg")      # newest camera frame → give to the VLM
+res = bot.ground_pixel(u, v)            # VLM's pixel → {"ok":True,"goal":{x,y,yaw}}
+bot.go_to(**res["goal"])                # Nav2 action, blocks until arrival
+# or one call:  bot.go_near_pixel(u, v)
+# YOLO shortcut: bot.go_near_object("chair")   # no VLM needed for known objects
+```
+
+CLI for testing: `./langrobo_client.py status | look | objects | ground u v | go x y [yaw]
+| go-pixel u v | go-object label | cancel`.
+
+`run_vision_ai.sh` on the Jetson provides the two complementary paths behind it:
 
 **Path A — YOLO (common objects, no VLM round-trip):** `detections_3d` runs YOLOv8n at 5Hz
 and publishes map-frame object positions:
@@ -222,28 +252,46 @@ already worked with the old contract — same topic, same JSON.
 1. Pi5 grabs a frame:      /camera/color/image_raw/compressed   (2Hz JPEG)
 2. VLM returns pixel (u,v) of the object in that image
 3. Pi5 publishes:          /vision/pixel_query   geometry_msgs/PointStamped
-                             point.x=u, point.y=v  (header.frame_id = request id, echoed)
-4. pixel_to_goal answers:  /vision/pixel_goal    geometry_msgs/PoseStamped (map frame)
-                             — depth-deprojected, pulled back 0.6m from the object,
-                               oriented facing it: directly usable as a Nav2 goal
-5. Pi5 forwards it:        ros2 action send_goal /navigate_to_pose ...
+                             point.x=u, point.y=v  (header.frame_id = request id)
+4. pixel_to_goal answers:  /vision/pixel_result  std_msgs/String — ALWAYS, success or not:
+                             {"id":"<req>","ok":true,"depth_m":3.1,
+                              "object":{x,y,z},"goal":{x,y,yaw}}
+                             {"id":"<req>","ok":false,"reason":"no_depth_at_pixel"}
+                           /vision/pixel_goal    geometry_msgs/PoseStamped (map frame,
+                             success only) — pulled back 0.6m, facing the object,
+                             directly usable as a Nav2 goal
+5. Pi5 forwards it:        bot.go_to(**res["goal"])  (NavigateToPose action)
 ```
 
-No reply within ~2s = the query was dropped (no valid depth at that pixel / TF not ready —
-reason logged in `/tmp/pixel_to_goal.log`); retry or re-prompt the VLM. Tunables on the
+Every query gets an answer matched by request id — `ok:false` carries the reason
+(`no_depth_at_pixel`, `depth_out_of_range`, `tf_not_ready`, `camera_not_ready`, …). No
+reply at all within ~2s means the query never arrived (transport, not grounding). The
+client guards the classic trap here: a fresh ROS node must wait for DDS subscriber
+matching before publishing, or the first message vanishes silently. Tunables on the
 node: `approach_offset_m` (0.6), `max_range_m` (8.0), `depth_patch_px` (9).
+
+**Depth on the Pi5?** Deliberately not streamed — raw depth is ~7MB/s even compressed and
+WiFi would choke. The Pi5 gets metric 3D the light way: pixel queries answered with real
+depth by the Jetson (Path B), or ready-made map-frame object positions (Path A). If a
+future VLM genuinely needs dense depth, subscribe to
+`/camera/camera0/depth/image_rect_raw/compressedDepth` sparingly — it works over the same
+link, it's just heavy.
 
 Image resolution for the VLM: 896x504. Remind the VLM to return pixel coordinates in that
 space (or scale them back if you downscale the image before prompting).
 
 ## 7. Remaining Work
 
-1. **ESP32 rover bring-up** — `/cmd_vel` is ready to consume; wheels + servo GPIO 18/19 pending
-2. **Camera extrinsics** — measure real mount (`cam_x/y/z/pitch`, defaults in use)
-3. **IMU calibration** — then retry `enable_imu_fusion`
-4. **Emitter on/off toggling** — better depth without hurting tracking
-5. **Pi5 end-to-end test** — vision AI topics are live (§6); test with the Pi5 online
-   (same subnet, multicast — the old discovery-server env is no longer needed/used)
+1. **ESP32 rover bring-up** — the last unverified link. Start the micro-ROS agent on the
+   Pi5 (`~/microros_ws`), flash the ESP32 to subscribe `/cmd_vel` (plain
+   `geometry_msgs/Twist`, capped 0.30 m/s); everything upstream already produces it.
+   Wheels + servo GPIO 18/19 pending.
+2. **VLM on the Pi5 (or Mac mini)** — wire the VLM's pixel output into
+   `bot.go_near_pixel(u, v)`; the whole transport/grounding/navigation chain below it is
+   verified. A Mac mini VLM can either talk to the Pi5 over HTTP or join ROS directly.
+3. **Camera extrinsics** — measure real mount (`cam_x/y/z/pitch`, defaults in use)
+4. **IMU calibration** — then retry `enable_imu_fusion`
+5. **Emitter on/off toggling** — better depth without hurting tracking
 6. **Map persistence** — cuVSLAM save/load for goals that survive reboots
 7. **Shared-memory IPC between containers** — removes the UDP overhead (§5)
 8. **Watch NVIDIA releases** — if Isaac ROS ships an Orin JetPack-7 build, the sidecar retires
