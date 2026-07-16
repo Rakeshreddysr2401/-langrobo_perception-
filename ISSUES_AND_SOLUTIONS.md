@@ -161,3 +161,20 @@ library or CLI) and `scripts/deploy_pi5.sh` (repo copy is the source of truth).
 `/cmd_vel` at ~15Hz on the Jetson → cancel. The only unverified link left is the ESP32
 itself (micro-ROS agent ready in `~/microros_ws` on the Pi5; the ESP32 just subscribes
 `/cmd_vel`).
+
+## Part 8 — Brain online: Mac mini VLM + the discovery-plane split (2026-07-16 PM)
+
+**The whole brain layer came up, but was invisible.** The Pi5 runs a LangGraph brain
+(`~/ros2_ws`, `langrobo_ros`: supervisor + specialists, Telegram, episodic memory) as
+systemd units, with the LLM on a **Mac mini** (`192.168.1.7` /
+`singireddys-mac-mini.local`, llama.cpp :8080, gemma-4-12B multimodal, 4 slots).
+
+| Issue | Cause | Fix |
+|---|---|---|
+| Brain running but absent from `ros2 node list`; saw zero Jetson topics | Pi5 units set `ROS_DISCOVERY_SERVER=127.0.0.1:11811` (old "meeting point" design) — discovery-server clients and multicast participants live on **separate discovery planes** | `run_brain.sh` + `run_microros.sh` switched to multicast (Pi5 ros2_ws commit `279a466`); `langrobo-discovery.service` is now unused — disable it. The Jetson can never join a discovery server: the D555 camera is a raw DDS participant a server-client can't see |
+| ESP32 never sessions with the micro-ROS agent | firmware source has `AGENT_IP = "192.168.1.100"` (+ placeholder SSID) but the Pi5 is `192.168.1.16` | reflash `~/ros2_ws/ESP_32_frimware/rover_firmware.ino` with the real SSID + `AGENT_IP "192.168.1.16"` — or alias .100 onto the Pi5 (`sudo nmcli con mod <wifi-con> +ipv4.addresses 192.168.1.100/24`) |
+| Brain wants `/vision/target` → `/vision/target_result` (visual servoing) | that Jetson-side target-finder node doesn't exist in langrobo_perception yet | to build: YOLO-track a named label, publish bearing/px-offset JSON — until then the brain's servo loop just sees "no data" |
+
+**Verified after the fix:** brain subscribes the camera feed + detections (visible from
+the Jetson), LLM reports 4 slots, and a live robot camera frame sent to the Mac mini VLM
+came back correctly described. Everything works except the ESP32 session.
