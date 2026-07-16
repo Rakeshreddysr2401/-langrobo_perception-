@@ -44,10 +44,11 @@ fi
 docker exec isaac_ros bash -c "
     unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE
     source /opt/ros/jazzy/setup.bash
-    ros2 param set /camera/camera0 depth_module.emitter_enabled false" \
+    ros2 param set /camera/camera0 depth_module.emitter_enabled false >/dev/null &&
+    ros2 param set /camera/camera0 depth_module.global_time_enabled false" \
     2>/dev/null | grep -q successful \
-    && echo "  [ok] IR emitter off" \
-    || echo "  [WARN] could not confirm emitter off — SLAM may corrupt on motion" >&2
+    && echo "  [ok] IR emitter off + per-stream global time off" \
+    || echo "  [WARN] could not set camera params — SLAM may corrupt on motion" >&2
 
 echo "[2/5] cuVSLAM (localization)"
 "$DIR/run_cuvslam_sidecar.sh" >/dev/null

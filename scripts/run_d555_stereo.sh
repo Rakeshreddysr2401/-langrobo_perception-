@@ -49,16 +49,23 @@ docker exec -d isaac_ros bash -c '
 # laser_power 150 and its camera-fixed dot pattern corrupted cuVSLAM the moment
 # the camera moved (stationary looked perfect; any motion exploded to ±100m).
 # Set it at runtime once the node is up, with retries.
+# global_time_enabled must ALSO be off: its host-clock conversion runs an
+# independent drift model per stream, so infra1/infra2 stamps tick at
+# slightly different rates (33.2535 vs 33.3745 ms/frame measured) and
+# cuVSLAM's timestamp pairing matches frames from different instants —
+# static looks fine, any motion explodes. Raw device stamps are identical
+# for the synced stereo shutter (and the D555 clock tracks host within ms).
 for i in $(seq 1 24); do
     if docker exec isaac_ros bash -c '
         unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE
         source /opt/ros/jazzy/setup.bash
-        ros2 param set /camera/camera0 depth_module.emitter_enabled false' \
+        ros2 param set /camera/camera0 depth_module.emitter_enabled false >/dev/null &&
+        ros2 param set /camera/camera0 depth_module.global_time_enabled false' \
         2>/dev/null | grep -q "successful"; then
-        echo "emitter OFF (runtime param set)"
+        echo "emitter OFF + global_time OFF (runtime param set)"
         break
     fi
-    [ "$i" = 24 ] && echo "WARNING: could not disable emitter — cuVSLAM WILL corrupt on motion" >&2
+    [ "$i" = 24 ] && echo "WARNING: could not set camera params — cuVSLAM WILL corrupt on motion" >&2
     sleep 5
 done
 
