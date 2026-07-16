@@ -93,7 +93,10 @@ controller_server:
       vx_max: 0.25
       vx_min: -0.15
       vy_max: 0.0
-      wz_max: 1.2
+      # 1.2 rad/s risks cuVSLAM tracking loss during in-place turns: visual-only
+      # (IMU off) at ~20Hz effective with occasional 140ms frame gaps means up to
+      # ~10deg between tracked frames. 0.8 keeps the worst gap under ~6.5deg.
+      wz_max: 0.8
       iteration_count: 1
       prune_distance: 1.7
       transform_tolerance: 0.3

@@ -43,4 +43,23 @@ docker exec -d isaac_ros bash -c '
         --frame-id base_link --child-frame-id camera0_link \
         > /tmp/static_tf.log 2>&1'
 
+# CRITICAL: the emitter_enabled launch arg above is silently DROPPED — the DDS
+# driver only declares depth_module.* params after the device connects (launch
+# log even warns "not supported"). Found live 2026-07-16: emitter was ON at
+# laser_power 150 and its camera-fixed dot pattern corrupted cuVSLAM the moment
+# the camera moved (stationary looked perfect; any motion exploded to ±100m).
+# Set it at runtime once the node is up, with retries.
+for i in $(seq 1 24); do
+    if docker exec isaac_ros bash -c '
+        unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE
+        source /opt/ros/jazzy/setup.bash
+        ros2 param set /camera/camera0 depth_module.emitter_enabled false' \
+        2>/dev/null | grep -q "successful"; then
+        echo "emitter OFF (runtime param set)"
+        break
+    fi
+    [ "$i" = 24 ] && echo "WARNING: could not disable emitter — cuVSLAM WILL corrupt on motion" >&2
+    sleep 5
+done
+
 echo "D555 stereo IR starting — log: docker exec isaac_ros tail -f /tmp/rs_infra.log"

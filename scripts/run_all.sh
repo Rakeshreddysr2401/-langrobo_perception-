@@ -36,8 +36,18 @@ if ros_check 5 /camera/camera0/infra1/image_rect_raw; then
 else
     "$DIR/run_d555_stereo.sh" >/dev/null
     wait_for "camera" 60 /camera/camera0/infra1/image_rect_raw || {
-        echo "  hint: power-cycle the D555 (unplug 5s) and rerun" >&2; exit 1; }
+        echo "  hint: check 'ip link show enP8p1s0' says mtu 9000; if so, power-cycle the D555 (unplug 5s) and rerun" >&2; exit 1; }
 fi
+# Emitter must be off for cuVSLAM (dot pattern corrupts tracking) and the
+# launch arg is silently dropped — enforce at runtime EVERY start, including
+# the driver-left-alone path (see run_d555_stereo.sh, 2026-07-16).
+docker exec isaac_ros bash -c "
+    unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE
+    source /opt/ros/jazzy/setup.bash
+    ros2 param set /camera/camera0 depth_module.emitter_enabled false" \
+    2>/dev/null | grep -q successful \
+    && echo "  [ok] IR emitter off" \
+    || echo "  [WARN] could not confirm emitter off — SLAM may corrupt on motion" >&2
 
 echo "[2/5] cuVSLAM (localization)"
 "$DIR/run_cuvslam_sidecar.sh" >/dev/null
