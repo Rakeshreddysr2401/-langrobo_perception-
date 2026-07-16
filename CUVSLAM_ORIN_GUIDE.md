@@ -1,5 +1,16 @@
 # cuVSLAM + nvblox + Nav2 on Jetson Orin Nano (JetPack 7.2) — Complete Guide
 
+> **STATUS 2026-07-16: cuVSLAM is PARKED as the localization backend.**
+> It tracked flawlessly at rest but exploded (±100m) under real motion —
+> root cause is architectural: the Humble sidecar is starved of frames and
+> TF across the Jazzy↔Humble DDS boundary (ISSUES_AND_SOLUTIONS.md Part 9).
+> Production localization is **RTAB-Map** (`config/localization` = `rtabmap`,
+> `scripts/run_rtabmap.sh`). Everything below remains accurate for the
+> sidecar itself and becomes relevant again when NVIDIA ships
+> Orin-compatible JetPack-7 cuVSLAM builds that can live in the MAIN
+> container — that, plus IMU calibration (§7) and a rigid camera mount, are
+> the re-adoption gate.
+
 **Date:** 2026-07-15
 **Hardware:** Jetson Orin Nano 8GB · RealSense D555 (Ethernet/DDS) · ESP32 rover
 **Host:** Ubuntu 24.04 · JetPack 7.2 (L4T r39.2) · ROS 2 Jazzy — *host untouched throughout*
