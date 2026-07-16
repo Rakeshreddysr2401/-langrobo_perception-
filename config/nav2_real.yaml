@@ -19,7 +19,10 @@ bt_navigator:
     global_frame: map
     robot_base_frame: base_link
     bt_loop_duration: 10
-    default_server_timeout: 20
+    # 20ms ack timeout aborts goals mid-drive on the loaded Orin ("Timed out
+    # while waiting for action server to acknowledge goal request",
+    # 2026-07-16 first live approach_object test)
+    default_server_timeout: 100
     navigators: ['navigate_to_pose', 'navigate_through_poses']
     navigate_to_pose:
       plugin: "nav2_bt_navigator::NavigateToPoseNavigator"
@@ -39,6 +42,14 @@ collision_monitor:
     odom_frame_id: "odom"
     cmd_vel_in_topic: "cmd_vel_smoothed"
     cmd_vel_out_topic: "cmd_vel"
+    # The ~3.5Hz nvblox pointcloud is stamped ms AHEAD of the latest cuVSLAM
+    # odom TF; with base_shift_correction on, every lookup failed with
+    # "extrapolation into the future" and the monitor held the robot at zero
+    # (2026-07-16 live test). At 0.30 m/s the sub-100ms shift is negligible —
+    # use the latest transform instead.
+    base_shift_correction: False
+    transform_tolerance: 0.3
+    source_timeout: 1.0
     observation_sources: ["depth_points"]
     depth_points:
       type: "pointcloud"
