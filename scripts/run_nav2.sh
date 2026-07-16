@@ -11,6 +11,12 @@
 #     "{pose: {header: {frame_id: map}, pose: {position: {x: 0.5}, orientation: {w: 1.0}}}}"
 set -eo pipefail
 
+# Kill the LAUNCH PARENT first: with use_respawn:=True it resurrects every
+# node killed below, leaving TWO stacks fighting over /cmd_vel (seen live
+# 2026-07-16 — "unknown goal response" in bt_navigator, rover hum, no motion).
+# [n] bracket keeps pkill -f from matching this docker-exec shell itself.
+docker exec isaac_ros bash -c 'pkill -9 -f "[n]avigation_launch.py"; true'
+sleep 1
 docker exec isaac_ros bash -c 'pkill -9 bt_navig; pkill -9 planner_ser; pkill -9 controller_s; pkill -9 lifecycle_m; pkill -9 collision_m; pkill -9 velocity_sm; pkill -9 behavior_se; pkill -9 smoother_se; pkill -9 waypoint_f; pkill -9 route_serv; pkill -9 opennav; true'
 sleep 3
 
