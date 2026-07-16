@@ -12,11 +12,12 @@ docker exec isaac_ros bash -c '
     sleep 1
     for n in bt_navig planner_ser controller_s lifecycle_m collision_m \
              velocity_sm behavior_se smoother_se waypoint_f route_serv opennav \
-             component_co nvblox_node '"$EXTRA"'; do
+             component_co nvblox_node rgbd_odomet rtabmap '"$EXTRA"'; do
         pkill -9 "$n" 2>/dev/null
     done
     pkill -9 -f "[d]etections_3d" 2>/dev/null
     pkill -9 -f "[p]ixel_to_goal" 2>/dev/null
+    pkill -9 -f "[c]md_vel_deadband" 2>/dev/null
     true' 2>/dev/null
 docker stop cuvslam >/dev/null 2>&1
 echo "perception stack stopped (containers stay up; camera untouched)"

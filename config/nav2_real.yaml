@@ -41,7 +41,7 @@ collision_monitor:
     base_frame_id: "base_link"
     odom_frame_id: "odom"
     cmd_vel_in_topic: "cmd_vel_smoothed"
-    cmd_vel_out_topic: "cmd_vel"
+    cmd_vel_out_topic: "cmd_vel_nav"  # dead-zone compensated onto /cmd_vel by cmd_vel_deadband.py
     # The ~3.5Hz nvblox pointcloud is stamped ms AHEAD of the latest cuVSLAM
     # odom TF; with base_shift_correction on, every lookup failed with
     # "extrapolation into the future" and the monitor held the robot at zero

@@ -31,5 +31,16 @@ docker exec -d isaac_ros bash -c '
         autostart:=True use_respawn:=True \
         > /tmp/nav2.log 2>&1'
 
+# Motor dead-zone compensation (see scripts/cmd_vel_deadband.py): collision
+# monitor publishes cmd_vel_nav; this shim rescales onto /cmd_vel so slow
+# approach commands actually turn the wheels. Remove after firmware reflash.
+docker exec isaac_ros bash -c 'pkill -9 -f "[c]md_vel_deadband" 2>/dev/null; true'
+docker exec -d isaac_ros bash -c '
+    unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE
+    export ROS_DOMAIN_ID=0
+    source /opt/ros/jazzy/setup.bash
+    exec python3 /workspaces/isaac_ros-dev/src/langrobo_perception/scripts/cmd_vel_deadband.py \
+        > /tmp/cmd_vel_deadband.log 2>&1'
+
 echo "Nav2 starting — wait ~30s, then check:"
 echo "  docker exec isaac_ros grep -a 'Managed nodes are active' /tmp/nav2.log"

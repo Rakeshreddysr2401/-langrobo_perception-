@@ -18,7 +18,7 @@ check() {  # check <label> <timeout_s> <topic>
 echo "── Jetson perception ──────────────────────────"
 check "camera stereo IR"      5 /camera/camera0/infra1/image_rect_raw
 check "camera depth"          5 /camera/camera0/depth/image_rect_raw
-check "cuVSLAM odometry"      5 /visual_slam/tracking/odometry
+check "localization odometry" 5 "$("$DIR/localization_odom_topic.sh")"
 check "nvblox costmap slice"  5 /nvblox_node/static_map_slice
 check "look feed (VLM eye)"   5 /camera/color/image_raw/compressed
 

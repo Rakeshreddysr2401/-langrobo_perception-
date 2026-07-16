@@ -50,9 +50,9 @@ docker exec isaac_ros bash -c "
     && echo "  [ok] IR emitter off + per-stream global time off" \
     || echo "  [WARN] could not set camera params — SLAM may corrupt on motion" >&2
 
-echo "[2/5] cuVSLAM (localization)"
-"$DIR/run_cuvslam_sidecar.sh" >/dev/null
-wait_for "cuVSLAM odometry" 60 /visual_slam/tracking/odometry || exit 1
+echo "[2/5] localization ($(tr -d '[:space:]' < "$DIR/../config/localization" 2>/dev/null || echo rtabmap))"
+"$DIR/run_localization.sh" >/dev/null
+wait_for "odometry" 60 "$("$DIR/localization_odom_topic.sh")" || exit 1
 
 echo "[3/5] nvblox (3D map + costmaps)"
 "$DIR/run_nvblox.sh" >/dev/null

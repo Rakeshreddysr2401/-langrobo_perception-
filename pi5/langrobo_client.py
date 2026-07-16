@@ -135,7 +135,10 @@ class LangRoboClient(Node):
             return {"ok": False, "reason": "nav2_action_server_unreachable"}
         goal = NavigateToPose.Goal()
         goal.pose.header.frame_id = "map"
-        goal.pose.header.stamp = self.get_clock().now().to_msg()
+        # stamp deliberately left zero = "use latest TF". Nav2 re-transforms
+        # the ORIGINAL stamp on every replan; a now() stamp ages out of the
+        # 10s TF cache mid-drive and aborts the goal with "Lookup would
+        # require extrapolation into the past" (seen live 2026-07-16).
         goal.pose.pose.position.x = float(x)
         goal.pose.pose.position.y = float(y)
         goal.pose.pose.orientation.z = math.sin(yaw / 2.0)
