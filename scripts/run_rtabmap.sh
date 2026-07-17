@@ -23,8 +23,34 @@ set -eo pipefail
 # rtabmap takes mono8 fine. Emitter must stay OFF (dots would corrupt the
 # feature tracking on the IR image).
 
-docker exec isaac_ros bash -c 'pkill -9 -f "[r]gbd_odometry" 2>/dev/null; pkill -9 -f "[r]tabmap_slam" 2>/dev/null; pkill -9 rtabmap 2>/dev/null; true'
+# rtabmap writes /data/rtabmap.db (SQLite) — SIGKILL mid-write corrupts it
+# (malformed-DB crash loop, 2026-07-17). TERM, wait for the DB to close, -9.
+docker exec isaac_ros bash -c '
+    pkill -TERM rtabmap 2>/dev/null
+    for i in $(seq 1 15); do pgrep rtabmap >/dev/null || break; sleep 1; done
+    pkill -9 rtabmap 2>/dev/null
+    pkill -9 -f "[r]gbd_odometry" 2>/dev/null
+    true'
 sleep 2
+
+# A corrupt DB makes rtabmap abort at start (FATAL, no map frame, vision AI
+# silently dead). Verify it and archive a bad one instead of crash-looping.
+docker exec isaac_ros bash -c '
+    [ -f /data/rtabmap.db ] || exit 0
+    python3 - <<"PYEOF"
+import sqlite3, sys
+try:
+    ok = sqlite3.connect("file:/data/rtabmap.db?mode=ro", uri=True) \
+                .execute("PRAGMA quick_check;").fetchone()[0] == "ok"
+except sqlite3.DatabaseError:
+    ok = False
+sys.exit(0 if ok else 1)
+PYEOF
+' || {
+    stamp=$(date +%Y%m%d-%H%M%S)
+    echo "WARNING: /data/rtabmap.db failed integrity check — archiving to rtabmap.db.corrupt-$stamp, starting a fresh map"
+    docker exec isaac_ros mv /data/rtabmap.db "/data/rtabmap.db.corrupt-$stamp"
+}
 
 docker exec -d isaac_ros bash -c '
     unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE

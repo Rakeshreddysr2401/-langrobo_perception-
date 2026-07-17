@@ -19,6 +19,17 @@ echo "── Jetson perception ────────────────�
 check "camera stereo IR"      5 /camera/camera0/infra1/image_rect_raw
 check "camera depth"          5 /camera/camera0/depth/image_rect_raw
 check "localization odometry" 5 "$("$DIR/localization_odom_topic.sh")"
+# /odom alone doesn't prove SLAM is alive: rtabmap can be dead (e.g. corrupt
+# DB) while rgbd_odometry hums along — then map frame is missing and the
+# vision AI (detections_3d, pixel_to_goal) silently publishes nothing.
+if docker exec isaac_ros bash -c '
+    unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE
+    source /opt/ros/jazzy/setup.bash
+    timeout 6 ros2 run tf2_ros tf2_echo map odom 2>&1 | grep -qm1 Translation'; then
+    printf "  %-28s OK\n" "SLAM map frame (tf map)"
+else
+    printf "  %-28s DOWN  (rtabmap dead? /tmp/rtabmap.log)\n" "SLAM map frame (tf map)"
+fi
 check "nvblox costmap slice"  5 /nvblox_node/static_map_slice
 check "look feed (VLM eye)"   5 /camera/color/image_raw/compressed
 

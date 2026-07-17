@@ -70,7 +70,10 @@ class PixelToGoalNode(Node):
         self.declare_parameter("result_topic", "/vision/pixel_result")
         self.declare_parameter("target_frame", "map")
         self.declare_parameter("base_frame", "base_link")
-        self.declare_parameter("approach_offset_m", 0.6)
+        # Floor for the offset: D555 depth goes blind under ~0.4 m and Nav2
+        # may stop xy_goal_tolerance (0.20 m) short — below ~0.4 the camera
+        # loses the object it just approached.
+        self.declare_parameter("approach_offset_m", 0.45)
         self.declare_parameter("min_range_m", 0.25)
         self.declare_parameter("max_range_m", 8.0)
         self.declare_parameter("depth_patch_px", 9)

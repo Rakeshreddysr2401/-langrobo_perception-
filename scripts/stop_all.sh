@@ -10,9 +10,14 @@ docker exec isaac_ros bash -c '
     # launch parent FIRST — use_respawn:=True resurrects the nodes otherwise
     pkill -9 -f "[n]avigation_launch.py" 2>/dev/null
     sleep 1
+    # rtabmap holds an open SQLite DB (/data/rtabmap.db) — SIGKILL mid-write
+    # corrupts it (malformed-DB crash loop, 2026-07-17). TERM, wait, then -9.
+    pkill -TERM rtabmap 2>/dev/null
+    for i in $(seq 1 15); do pgrep rtabmap >/dev/null || break; sleep 1; done
+    pkill -9 rtabmap 2>/dev/null
     for n in bt_navig planner_ser controller_s lifecycle_m collision_m \
              velocity_sm behavior_se smoother_se waypoint_f route_serv opennav \
-             component_co nvblox_node rgbd_odomet rtabmap '"$EXTRA"'; do
+             component_co nvblox_node rgbd_odomet '"$EXTRA"'; do
         pkill -9 "$n" 2>/dev/null
     done
     pkill -9 -f "[d]etections_3d" 2>/dev/null
