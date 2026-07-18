@@ -101,9 +101,11 @@ camera intrinsics into a 3D point, fuses it into a truncated-signed-distance
 volume, and slices it into the 2D costmap that Nav2 plans on.
 
 **TF** (`scripts/run_robot_tf.sh` + the driver): `base_link → camera0_link`
-(static, currently placeholder x=0.10 z=0.25 — **must be measured** on the real
-chassis) then `camera0_link → {infra1,depth,color,motion}_optical_frame` from
-the driver.
+(static; owner's setup 2026-07-18 — market 4-wheel chassis, camera ~15 cm off
+the ground → **z=0.15**; x=0.10 forward is still a rough estimate, y centred)
+then `camera0_link → {infra1,depth,color,motion}_optical_frame` from the driver.
+A cheap 4-wheel chassis is skid-steer, kinematically the same as differential
+drive, so the diff-drive stack handles it as-is.
 
 ---
 
@@ -274,8 +276,8 @@ All three end in a `nav2_msgs/action/NavigateToPose` goal in the `map` frame.
 | Nav2 planning + control + anti-crash | ✅ live, goal test produced real commands |
 | Vision (YOLO on-demand, look feed) | ✅ live |
 | **Physical motion** | ⛔ **needs the ESP32 rover powered** (`/cmd_vel` has no consumer yet) |
-| Camera mount TF (`base_link→camera0_link`) | ⚠️ placeholder — measure the real chassis |
-| Chassis footprint in costmaps | ⚠️ placeholder — measure |
+| Camera mount TF (`base_link→camera0_link`) | ✅ z=0.15 (camera ~15cm off ground, owner setup); x=0.10 rough |
+| Chassis footprint in costmaps | ⚠️ placeholder ±0.15×0.13 m — measure the market 4-wheel chassis |
 | D555 IMU fusion into odometry | ⏳ Phase 2 |
 
 **To take it for a real drive:** power the ESP32, verify/flash firmware, then a
