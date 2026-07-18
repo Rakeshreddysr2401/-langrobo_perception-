@@ -3,3 +3,6 @@ __pycache__/
 
 # live camera/depth snapshots (debug visuals, not source)
 .snapshots/
+
+# machine-local Claude Code settings (absolute paths, per-session ids)
+.claude/settings.local.json
