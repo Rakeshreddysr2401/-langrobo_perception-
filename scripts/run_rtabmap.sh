@@ -39,6 +39,7 @@ docker exec isaac_ros bash -c '
     pkill -9 rtabmap 2>/dev/null
     pkill -9 -f "[r]gbd_odometry" 2>/dev/null
     pkill -9 -f "[e]kf_node" 2>/dev/null
+    pkill -9 -f "[i]mu_to_base" 2>/dev/null
     true'
 sleep 2
 
@@ -70,7 +71,7 @@ docker exec -d isaac_ros bash -c '
     exec ros2 run rtabmap_odom rgbd_odometry --ros-args \
         -p frame_id:=base_link \
         -p odom_frame_id:=odom \
-        -p publish_tf:=true \
+        -p publish_tf:=false \
         -p approx_sync:=true \
         -p approx_sync_max_interval:=0.05 \
         -p qos:=2 \
@@ -81,13 +82,28 @@ docker exec -d isaac_ros bash -c '
         -r rgb/camera_info:=/camera/camera0/infra1/camera_info \
         > /tmp/rgbd_odometry.log 2>&1'
 
-# EKF (robot_localization) gyro-heading fusion: DISABLED 2026-07-18 pending a fix.
-# Wired correctly (config/ekf.yaml) and the TF chain stayed healthy, but the gyro
-# yaw would not fuse (heading stuck at 0 through real turns; smooth_lagged_data
-# did not help). Left OFF so rgbd_odometry keeps publishing odom->base_link and
-# heading is not left pinned. To resume: publish_tf:=false above, re-enable this
-# block, and likely re-stamp the IMU to the host clock first. See
-# SENSOR_FUSION_NOTES.md.
+# IMU relay: rotate the D555 gyro into base_link + re-stamp to host clock, so the
+# EKF actually fuses yaw (robot_localization gave 0 yaw-rate on the raw optical
+# frame — it was not transforming it). Publishes /imu/base. See imu_to_base.py.
+docker exec -d isaac_ros bash -c '
+    unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE
+    export ROS_DOMAIN_ID=0
+    source /opt/ros/jazzy/setup.bash
+    exec python3 /workspaces/isaac_ros-dev/src/langrobo_perception/scripts/imu_to_base.py \
+        > /tmp/imu_to_base.log 2>&1'
+
+# EKF (robot_localization): fuse visual /odom translation + gyro heading (/imu/base)
+# and OWN the odom->base_link TF (rgbd_odometry above is publish_tf:=false).
+# Fixes visual odom's rotation-blindness (48deg read for a real 360). Verified
+# 2026-07-18: filtered yaw-rate tracks the gyro. Config in config/ekf.yaml.
+docker exec -d isaac_ros bash -c '
+    unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE
+    export ROS_DOMAIN_ID=0
+    source /opt/ros/jazzy/setup.bash
+    source /workspaces/isaac_ros-dev/install/setup.bash
+    exec ros2 run robot_localization ekf_node --ros-args \
+        --params-file /workspaces/isaac_ros-dev/src/langrobo_perception/config/ekf.yaml \
+        > /tmp/ekf.log 2>&1'
 
 docker exec -d -e DB="$DB" isaac_ros bash -c '
     unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE

@@ -40,9 +40,10 @@ ekf_filter_node:
     odom0_queue_size: 10
     odom0_nodelay: true
 
-    # D555 IMU: TRUST THE GYRO FOR HEADING (yaw rate) only. No absolute
-    # orientation (RealSense IMU has none) and no accel (noisy).
-    imu0: /camera/camera0/motion/sample
+    # D555 IMU: TRUST THE GYRO FOR HEADING (yaw rate) only. Fed via scripts/
+    # imu_to_base.py, which rotates it into base_link (so z IS yaw) and re-stamps
+    # to host clock — the raw optical-frame topic gave the EKF 0 yaw-rate.
+    imu0: /imu/base
     imu0_config: [false, false, false,
                   false, false, false,
                   false, false, false,

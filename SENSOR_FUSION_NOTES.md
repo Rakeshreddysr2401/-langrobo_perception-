@@ -89,6 +89,15 @@ AFTER:   camera-tracking ──(where)──►┐
 Files: `config/ekf.yaml` (the settings + why), and the launch wiring in
 `scripts/run_rtabmap.sh` (the camera-tracker now hands the transform to the EKF).
 
+**The gotcha that made it work (2026-07-18):** at first the EKF *ignored the gyro
+completely* — heading stayed frozen at 0. The cause: the IMU reports its spin in
+the **camera's tilted "optical" frame**, where a real *turn* shows up on a
+sideways axis, and the filter wasn't rotating it into the robot's frame. Fix: a
+tiny relay, `scripts/imu_to_base.py`, that **rotates the gyro into the robot
+frame** (so "turning" lands on the right axis) and **re-stamps it to the host
+clock** (removing the ~200ms lag) before the EKF sees it, on `/imu/base`.
+Verified live: heading now tracks real turns to ~±10%.
+
 ## 6. Why small gyro errors don't ruin navigation
 
 On top of moment-to-moment tracking, **RTAB-Map** builds a *map* and recognizes
@@ -100,10 +109,11 @@ navigation, even with the 28% gyro quirk.
 ## 7. What's done, what's left
 
 - ✅ EKF installed and fusing; transform chain healthy (`map→odom→base_link` intact).
-- ⏳ **Verify turning tracks** by spinning the robot and watching the heading update
-  (needs someone watching the tether — it's the last check).
-- ⏳ Re-test a Nav2 goal that requires a turn.
-- 🔧 Optional cleanup: fix the camera mount angle in config to remove the 28% patch.
+- ✅ **Turning tracks** — verified live: real ~88–90° turns read ~79–87° in the EKF
+  heading (was frozen at 0 before the `/imu/base` relay fix).
+- ⏳ Re-test a Nav2 goal that requires a turn (the real payoff).
+- 🔧 Optional: the ~8° left/right gap is the front camera weight (CoG off the turn
+  axis) — reduce by counterweighting/centering the camera.
 
 ## 8. If it ever misbehaves — how to undo this
 
