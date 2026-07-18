@@ -1,0 +1,48 @@
+# robot_localization EKF — fuse visual odometry (translation) + D555 gyro (heading).
+#
+# WHY (2026-07-18): rgbd_odometry's visual yaw is BLIND to in-place rotation on
+# the reflective floor (it read 48 deg for a real 360 deg spin). The D555 gyro
+# tracks rotation accurately. So this EKF takes x/y VELOCITY from /odom and the
+# YAW-RATE from the IMU, blends them, and publishes a corrected odom->base_link
+# transform that Nav2 can finally turn on. rgbd_odometry stops publishing that TF
+# (publish_tf:=false in run_rtabmap.sh); the EKF owns it now. RTAB-Map still
+# publishes map->odom on top, so absolute drift is corrected by loop closure.
+#
+# Loosely-coupled (unlike direct rgbd_odometry IMU fusion, which the D555 stamp
+# lag broke) — the EKF fuses each sensor on its own timestamp with a buffer.
+ekf_filter_node:
+  ros__parameters:
+    frequency: 20.0           # 20Hz: 30 overran the loaded Orin ("failed to meet
+                              # update rate"); plenty for a slow rover, avoids TF lag
+    sensor_timeout: 0.2
+    two_d_mode: true          # planar rover: lock z, roll, pitch to 0
+    publish_tf: true          # EKF owns odom->base_link now
+    print_diagnostics: true
+
+    map_frame: map
+    odom_frame: odom
+    base_link_frame: base_link
+    world_frame: odom         # continuous odom frame; map->odom from RTAB-Map
+
+    # Visual odometry: TRUST FOR TRANSLATION ONLY (its yaw is rotation-blind).
+    # order = [x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az]
+    odom0: /odom
+    odom0_config: [false, false, false,
+                   false, false, false,
+                   true,  true,  false,
+                   false, false, false,
+                   false, false, false]
+    odom0_queue_size: 10
+    odom0_nodelay: true
+
+    # D555 IMU: TRUST THE GYRO FOR HEADING (yaw rate) only. No absolute
+    # orientation (RealSense IMU has none) and no accel (noisy).
+    imu0: /camera/camera0/motion/sample
+    imu0_config: [false, false, false,
+                  false, false, false,
+                  false, false, false,
+                  false, false, true,
+                  false, false, false]
+    imu0_queue_size: 50
+    imu0_nodelay: true
+    imu0_remove_gravitational_acceleration: true

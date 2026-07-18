@@ -38,6 +38,7 @@ docker exec isaac_ros bash -c '
     for i in $(seq 1 15); do pgrep rtabmap >/dev/null || break; sleep 1; done
     pkill -9 rtabmap 2>/dev/null
     pkill -9 -f "[r]gbd_odometry" 2>/dev/null
+    pkill -9 -f "[e]kf_node" 2>/dev/null
     true'
 sleep 2
 
@@ -69,7 +70,7 @@ docker exec -d isaac_ros bash -c '
     exec ros2 run rtabmap_odom rgbd_odometry --ros-args \
         -p frame_id:=base_link \
         -p odom_frame_id:=odom \
-        -p publish_tf:=true \
+        -p publish_tf:=false \
         -p approx_sync:=true \
         -p approx_sync_max_interval:=0.05 \
         -p qos:=2 \
@@ -79,6 +80,19 @@ docker exec -d isaac_ros bash -c '
         -r depth/image:=/camera/camera0/depth/image_rect_raw \
         -r rgb/camera_info:=/camera/camera0/infra1/camera_info \
         > /tmp/rgbd_odometry.log 2>&1'
+
+# EKF (robot_localization): fuses visual /odom translation + D555 gyro heading
+# and OWNS the odom->base_link TF (rgbd_odometry above now publishes_tf:=false).
+# Fixes visual odom's rotation-blindness (48deg read for a real 360). Config +
+# rationale in config/ekf.yaml. rtabmap (map->odom) stacks on top unchanged.
+docker exec -d isaac_ros bash -c '
+    unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE
+    export ROS_DOMAIN_ID=0
+    source /opt/ros/jazzy/setup.bash
+    source /workspaces/isaac_ros-dev/install/setup.bash
+    exec ros2 run robot_localization ekf_node --ros-args \
+        --params-file /workspaces/isaac_ros-dev/src/langrobo_perception/config/ekf.yaml \
+        > /tmp/ekf.log 2>&1'
 
 docker exec -d -e DB="$DB" isaac_ros bash -c '
     unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE
