@@ -1,2 +1,5 @@
 __pycache__/
 *.pyc
+
+# live camera/depth snapshots (debug visuals, not source)
+.snapshots/
