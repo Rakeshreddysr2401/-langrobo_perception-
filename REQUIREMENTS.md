@@ -148,8 +148,11 @@ Jetson host.
    Verify: infra1 ≥10Hz + depth ≥10Hz 16UC1 + color ≥5Hz, stamps on wall
    clock, emitter OFF (the script + run_all.sh enforce it).
    `check_contract.sh` sections "camera source" + "clock discipline" + "TF
-   camera frames" must be green. If the driver won't stream: mtu 9000 on
-   enP8p1s0, then physical power-cycle (stale-DDS quirk).
+   camera frames" must be green. If the driver won't stream ("No RealSense
+   devices were found!") but the D555 still pings: it is almost always a
+   stale host-side DDS session, NOT the device — do the clean DDS teardown
+   (see "IMPORTANT correction" below) BEFORE any power cycle. Also check
+   mtu 9000 on enP8p1s0.
 2. **Localization (RTAB-Map)** — `scripts/run_localization.sh`
    (`config/localization` = `rtabmap`; cuVSLAM stays PARKED — SIGILL on
    Orin Nano, see `CUVSLAM_ORIN_GUIDE.md` re-adoption gate. Do not debug it
@@ -214,13 +217,35 @@ infra1 stays rock-solid at 30Hz. Root causes, in order of impact:
    896x504 mono channel. FIXED: `run_d555_stereo.sh` now
    `enable_infra2:=false` (re-enable on cuVSLAM re-adoption). Also dropped
    the dead `pointcloud.enable:=true` arg (produced no topic).
-   NOT YET RE-MEASURED: the running camera was left alone to avoid the D555
-   stale-DDS quirk (needs a physical power cycle to recover); the leaner
-   config applies on the NEXT camera start — verify depth ≥10Hz then.
+
+### VERIFIED FIXED (2026-07-18, same day) — depth clears the floor
+Restarted the camera with `enable_infra2:=false` and re-measured under the
+FULL stack (RTAB-Map + nvblox + Nav2 + vision AI all running):
+- **depth: 13–15Hz** under load (was 2.4–8Hz with infra2 on) — clears the
+  10Hz floor. ✅
+- infra1: 28Hz, system load 5.2 (was ~15).
+Baseline camera-only depth: 25.7Hz. The infra2-off change is confirmed.
+
+### IMPORTANT correction — the "stale-DDS needs a power cycle" belief is wrong
+The camera restart initially failed: driver logged "No RealSense devices were
+found!" for ~20 min despite the D555 pinging at 0.15ms and (tcpdump-confirmed)
+actively sending RTPS discovery multicast from 192.168.11.55:8888. TWO physical
+power cycles did NOT fix it. The real cause was a **stale host-side DDS
+participant holding the device's session** — the device won't re-advertise to a
+new driver while an old participant lingers. Recovery that WORKED (no power
+cycle needed):
+  1. `scripts/stop_all.sh --full`   (tear down every ROS node)
+  2. `ros2 daemon stop` + `rm -f /dev/shm/fastrtps* /dev/shm/sem.fastrtps*`
+     (166 stale segments had accumulated from repeated SIGKILLs)
+  3. launch the camera driver ALONE, let it settle, THEN bring the stack back
+So: prefer a clean host DDS teardown BEFORE resorting to a power cycle; and
+avoid `pkill -9` on the driver (ungraceful exit is what strands the session).
+The notes in `run_all.sh`/`stop_all.sh` overstate the power-cycle requirement.
+
+GOTCHA when relaunching the camera by hand: `run_d555_stereo.sh` also starts
+`run_robot_tf.sh` (base_link→camera0_link). Launching the bare rs_launch.py
+skips it, so RTAB-Map can't find base_link (no /odom) and Nav2's costmap fails
+to activate. Always run the script, or start `run_robot_tf.sh` alongside.
 
 ### Next
-- On next camera restart, re-measure depth rate with infra2 off; expect it to
-  clear the 10Hz floor. If still short under production (headless) load,
-  consider throttling nvblox integration rate or moving rgbd_odometry to a
-  lighter feature budget.
 - Everything else is rover-day work (power ESP32, firmware/deadband, mission).
