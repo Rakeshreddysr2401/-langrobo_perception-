@@ -34,8 +34,9 @@ only once the rover is powered.**
    │  infra1 (gray)         color (RGB)        depth (mm)        IMU
    ▼
  ┌─────────────────────────────────────────────────────────────────┐
- │ LOCALIZATION  — RTAB-Map (CPU, same container as the driver)      │
- │   rgbd_odometry: infra1+depth → /odom  (+ odom→base_link TF)      │
+ │ LOCALIZATION  — RTAB-Map + EKF (CPU, same container as driver)    │
+ │   rgbd_odometry: infra1+depth → /odom  (translation)             │
+ │   EKF: /odom + gyro(/imu/base) → odom→base_link TF (gyro heading) │
  │   rtabmap:       infra1+depth → map→odom TF, /map, persistent DB  │
  └─────────────────────────────────────────────────────────────────┘
    │  "where am I" = map→odom→base_link  +  persistent map (/data/rtabmap.db)
@@ -111,13 +112,20 @@ drive, so the diff-drive stack handles it as-is.
 
 ## 3. Localization — "where am I" (RTAB-Map)
 
-`scripts/run_localization.sh` (backend switch: `config/localization`). Two nodes
-in the camera's own Jazzy container (no cross-distro DDS):
+`scripts/run_localization.sh` (backend switch: `config/localization`). Nodes in
+the camera's own Jazzy container (no cross-distro DDS). For a plain-language
+version of this whole section, see **`HOW_MOVEMENT_WORKS.md`**.
 
-- **`rgbd_odometry`** — infra1 + depth → `/odom` and the `odom → base_link` TF.
-  Visual odometry at ~3–8 Hz, quality 250–310 tracked features per frame.
-  `Reg/Force3DoF=true` keeps poses planar; `Odom/ResetCountdown=1` auto-recovers
-  after a tracking loss.
+- **`rgbd_odometry`** — infra1 + depth → `/odom` (visual odometry, ~3–8 Hz,
+  250–310 tracked features). `Reg/Force3DoF=true` keeps poses planar;
+  `Odom/ResetCountdown=1` auto-recovers after tracking loss. **`publish_tf:=false`
+  (2026-07-18)** — it no longer owns `odom → base_link`; the EKF does (below),
+  because visual yaw is blind to in-place rotation on the reflective floor.
+- **`imu_to_base.py` + `ekf_node`** (`robot_localization`) — the EKF fuses the
+  visual `/odom` (translation) with the D555 **gyro heading** and publishes the
+  `odom → base_link` TF. The relay rotates the gyro into `base_link` and
+  re-stamps it (`/imu/base`) — without that the EKF ignored the gyro. This is
+  what lets Nav2 turn accurately. Full story: **`SENSOR_FUSION_NOTES.md`**.
 - **`rtabmap`** — infra1 + depth → the `map → odom` TF, the `/map` occupancy
   grid, and a **persistent SQLite map** at `/data/rtabmap.db`. Loop closure
   relocalises the robot against the saved map, so **named/known locations
