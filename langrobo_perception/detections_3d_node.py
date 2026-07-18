@@ -16,6 +16,12 @@ Contract rules (ros2_bridge.on_detections on the Pi5):
   - labels are lowercase COCO class names.
   - freshness is judged by receive time on the Pi5 — publish steadily.
 
+YOLO runs ON DEMAND (2026-07-18): it is the single biggest CPU cost on the
+6-core Orin, so it only runs at full detect_rate when something needs it (a
+target hunt is set, or a subscriber is on detections_3d/target_result);
+otherwise it trickles at idle_detect_rate. The look() feed is independent and
+always on. Tune with the detect_rate / idle_detect_rate params.
+
 It ALSO republishes the color stream as JPEG on
 /camera/color/image_raw/compressed (low rate): with the ai_stack voice
 container parked (compute freed for perception), this is the only camera feed
@@ -93,7 +99,16 @@ class Detections3DNode(Node):
         self.declare_parameter("model", "/models/yolov8n.pt")
         self.declare_parameter("confidence", 0.45)
         self.declare_parameter("device", "cuda")
-        self.declare_parameter("detect_rate", 5.0)   # Hz
+        self.declare_parameter("detect_rate", 5.0)   # Hz — rate WHEN IN DEMAND
+        # On-demand gating: YOLO is the biggest CPU draw on the 6-core Orin
+        # (~half a core at 5Hz), but it is only useful when the brain is
+        # actually looking for something. "In demand" = a target hunt is set
+        # (/vision/target) OR someone subscribes to a detection output. When
+        # idle we drop YOLO to idle_detect_rate so /vision/detections_3d stays
+        # fresh for the Pi5 without burning the core; set 0.0 to stop YOLO
+        # entirely while idle (max saving — safe once the brain is confirmed to
+        # subscribe on demand). The look() feed is separate and always on.
+        self.declare_parameter("idle_detect_rate", 1.0)  # Hz — rate WHEN IDLE
         self.declare_parameter("max_range_m", 6.0)
         self.declare_parameter("min_range_m", 0.25)
         self.declare_parameter("depth_patch_px", 7)
@@ -146,6 +161,12 @@ class Detections3DNode(Node):
                 CompressedImage, "/camera/color/image_raw/compressed", 1)
             self.create_timer(1.0 / look_rate, self._publish_look_feed)
 
+        # Timer ticks at the ACTIVE rate; when idle, _tick self-throttles YOLO
+        # to idle_detect_rate (or skips it entirely if that is 0).
+        idle_rate = float(p("idle_detect_rate"))
+        self._idle_period = (1.0 / idle_rate) if idle_rate > 0 else None
+        self._last_infer_mono = 0.0
+        self._in_demand = None  # tri-state so the first transition logs
         self.create_timer(1.0 / float(p("detect_rate")), self._tick)
         self.get_logger().info("detections_3d ready — waiting for camera + TF")
 
@@ -203,9 +224,31 @@ class Detections3DNode(Node):
             }
         self._target_pub.publish(String(data=json.dumps(out)))
 
+    def _demand(self) -> bool:
+        """True when YOLO output is actually wanted: an active target hunt, or
+        a live subscriber on either detection output. Cheap to poll."""
+        return (bool(self._target)
+                or self._pub.get_subscription_count() > 0
+                or self._target_pub.get_subscription_count() > 0)
+
     def _tick(self):
         if self._color is None or self._color_info is None:
             return
+
+        # On-demand gate: only spend YOLO when something needs it. Idle ->
+        # trickle at idle_detect_rate (or skip if disabled). Log transitions.
+        demand = self._demand()
+        if demand != self._in_demand:
+            self.get_logger().info(
+                "YOLO active (demand)" if demand else "YOLO idle (no demand)")
+            self._in_demand = demand
+        if not demand:
+            if self._idle_period is None:
+                return
+            if time.monotonic() - self._last_infer_mono < self._idle_period:
+                return
+        self._last_infer_mono = time.monotonic()
+
         color_msg, depth_msg = self._color, self._depth
 
         img = _decode_image(color_msg)
