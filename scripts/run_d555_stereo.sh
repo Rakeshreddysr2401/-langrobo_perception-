@@ -1,11 +1,18 @@
 #!/bin/bash
-# Start the D555 in stereo-IR mode for cuVSLAM inside the jazzy isaac_ros
-# container. Run from the Jetson HOST.
+# Start the D555 inside the jazzy isaac_ros container. Run from the Jetson HOST.
 #
-# infra1/infra2 @ 896x504x30 (D555 native), emitter OFF so the IR dot pattern
-# does not corrupt cuVSLAM feature tracking. Depth enabled for nvblox (noisier
-# with emitter off — revisit with emitter_on_off toggling if quality hurts).
-# Color still off: Orin bandwidth/CPU budget.
+# infra1 + depth + color @ 896x504, emitter OFF so the IR dot pattern does not
+# corrupt feature tracking. Depth feeds nvblox (noisier with emitter off —
+# revisit with emitter_on_off toggling if quality hurts).
+#
+# infra2 (the second stereo-IR channel) is DISABLED: it exists only for
+# cuVSLAM stereo, which is PARKED (SIGILL on Orin Nano — see
+# CUVSLAM_ORIN_GUIDE.md). RTAB-Map localizes on color+depth (RGBD), nvblox
+# uses depth, and the parity contract exposes infra1 only, so infra2 had ZERO
+# subscribers while streaming a full 30Hz 896x504 mono channel — measured
+# 2026-07-18 as a real drag on the camera driver's CPU, which was starving the
+# depth stream below its 10Hz floor under load. Re-enable it (and the stereo
+# infra_profile) the day cuVSLAM is re-adopted.
 set -eo pipefail
 
 docker exec isaac_ros bash -c 'pkill -f "[r]ealsense2_camera_node" 2>/dev/null; true'
@@ -22,26 +29,18 @@ EOF
     export LD_LIBRARY_PATH=/root/librealsense/install/lib:$LD_LIBRARY_PATH
     exec ros2 launch realsense2_camera rs_launch.py \
         camera_name:=camera0 \
-        enable_infra1:=true enable_infra2:=true \
+        enable_infra1:=true enable_infra2:=false \
         depth_module.infra_profile:=896x504x30 \
         depth_module.emitter_enabled:=0 \
         enable_color:=true enable_depth:=true \
-        pointcloud.enable:=true \
         enable_motion:=true \
         enable_sync:=true \
         > /tmp/rs_infra.log 2>&1'
 
-# Robot geometry: camera mount relative to base_link (servos centred), same
-# values as perception.launch.py cam_x/cam_y/cam_z defaults.
-docker exec isaac_ros bash -c 'pkill -f "[s]tatic_transform_publisher" 2>/dev/null; true'
-docker exec -d isaac_ros bash -c '
-    unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE
-    export ROS_DOMAIN_ID=0
-    source /opt/ros/jazzy/setup.bash
-    exec ros2 run tf2_ros static_transform_publisher \
-        --x 0.10 --y 0.0 --z 0.25 \
-        --frame-id base_link --child-frame-id camera0_link \
-        > /tmp/static_tf.log 2>&1'
+# Robot geometry (base_link -> camera0_link) moved to run_robot_tf.sh: it
+# belongs to the robot model, not the camera, and must also run in sim mode.
+# Kept here for standalone use — idempotent.
+"$(cd "$(dirname "$0")" && pwd)/run_robot_tf.sh"
 
 # CRITICAL: the emitter_enabled launch arg above is silently DROPPED — the DDS
 # driver only declares depth_module.* params after the device connects (launch

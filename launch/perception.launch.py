@@ -25,9 +25,10 @@ odometry tracks the camera and absorbs head pans as apparent base rotation;
 publishing the joint too would double-count it. See JETSON_D555_SETUP.md §3
 in the Pi5 repo.
 
-Run inside the Isaac ROS container:
-  scripts/run_perception_sim.sh      (sim)
-  scripts/run_perception_real.sh     (real)
+LEGACY (2026-07-18): nothing launches this file anymore — its callers
+run_perception_{sim,real}.sh were deleted; superseded by scripts/run_all.sh
++ the per-stage scripts. Kept for the rationale above; Phase 5 deletion
+candidate (see SIM_REAL_PARITY.md §3 note).
 """
 
 import os

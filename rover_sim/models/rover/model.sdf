@@ -1,0 +1,180 @@
+<?xml version="1.0"?>
+<!--
+  LangRobo simulated rover.
+  Geometry mirrors nav2_real.yaml footprint (0.30 x 0.26, placeholder until
+  the real chassis is measured — task #1) and run_robot_tf.sh camera mount
+  (x 0.10, z 0.25). Camera intrinsics/extrinsics come from the captured real
+  contract (config/d555_contract): rgbd camera sits at the infra1 viewpoint
+  (real D555 depth is computed in infra1's frame), color camera at its real
+  -5.9cm Y offset.
+  Known divergence (documented in SIM_REAL_PARITY.md): 2 driven wheels +
+  casters instead of 4-wheel skid-steer — sim turns with less resistance.
+-->
+<sdf version="1.9">
+  <model name="rover">
+    <link name="base_link">
+      <pose>0 0 0.06 0 0 0</pose>
+      <inertial>
+        <mass>2.0</mass>
+        <inertia><ixx>0.013</ixx><iyy>0.017</iyy><izz>0.026</izz>
+                 <ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia>
+      </inertial>
+      <collision name="chassis_col">
+        <geometry><box><size>0.30 0.26 0.10</size></box></geometry>
+      </collision>
+      <visual name="chassis_vis">
+        <geometry><box><size>0.30 0.26 0.10</size></box></geometry>
+        <material><ambient>0.2 0.2 0.8 1</ambient><diffuse>0.2 0.2 0.8 1</diffuse></material>
+      </visual>
+
+      <!-- Images go C++ end-to-end: ros_gz bridges these straight onto the
+           contract topics (run_sim.sh remaps); gz_frame_id makes the bridged
+           header.frame_id the contract optical frame, and gz is launched
+           with -\-initial-sim-time so stamps track the wall clock. A python
+           hop for 896x504 images capped at ~5Hz on this laptop (measured
+           2026-07-17) — only depth (32FC1->16UC1) keeps a python stage. -->
+      <sensor name="infra1" type="camera">
+        <!-- infra1 viewpoint: run_robot_tf.sh mount offset relative to base
+             center (base_link is 0.06 above ground; camera at z 0.25) -->
+        <pose>0.10 0 0.19 0 0 0</pose>
+        <topic>/rover_sim/infra1/image</topic>
+        <gz_frame_id>camera0_infra1_optical_frame</gz_frame_id>
+        <update_rate>15</update_rate>
+        <camera>
+          <camera_info_topic>/rover_sim/infra1/camera_info</camera_info_topic>
+          <!-- hfov = 2*atan(896 / (2*448.284)) from captured infra1 fx -->
+          <horizontal_fov>1.5702</horizontal_fov>
+          <image><width>896</width><height>504</height><format>L8</format></image>
+          <clip><near>0.15</near><far>12.0</far></clip>
+        </camera>
+      </sensor>
+
+      <sensor name="depth" type="depth_camera">
+        <!-- same viewpoint as infra1, like the real depth engine -->
+        <pose>0.10 0 0.19 0 0 0</pose>
+        <topic>/rover_sim/depth/image</topic>
+        <gz_frame_id>camera0_depth_optical_frame</gz_frame_id>
+        <update_rate>15</update_rate>
+        <camera>
+          <camera_info_topic>/rover_sim/depth/camera_info</camera_info_topic>
+          <horizontal_fov>1.5702</horizontal_fov>
+          <image><width>896</width><height>504</height><format>R_FLOAT32</format></image>
+          <clip><near>0.30</near><far>9.0</far></clip>
+          <!-- real depth is noisy with the IR emitter off — do not simulate
+               a perfect sensor -->
+          <noise><type>gaussian</type><mean>0.0</mean><stddev>0.007</stddev></noise>
+        </camera>
+      </sensor>
+
+      <sensor name="color" type="camera">
+        <!-- color extrinsic: y -0.059 from camera0_link (captured tf_static) -->
+        <pose>0.10 -0.059 0.19 0 0 0</pose>
+        <topic>/rover_sim/color/image</topic>
+        <gz_frame_id>camera0_color_optical_frame</gz_frame_id>
+        <update_rate>15</update_rate>
+        <camera>
+          <camera_info_topic>/rover_sim/color/camera_info</camera_info_topic>
+          <!-- hfov = 2*atan(896 / (2*450.262)) from captured color fx -->
+          <horizontal_fov>1.5658</horizontal_fov>
+          <image><width>896</width><height>504</height><format>R8G8B8</format></image>
+          <clip><near>0.15</near><far>12.0</far></clip>
+        </camera>
+      </sensor>
+
+      <sensor name="imu" type="imu">
+        <!-- camera0_motion_frame == camera0_link (captured tf_static) -->
+        <pose>0.10 0 0.19 0 0 0</pose>
+        <topic>/rover_sim/imu</topic>
+        <update_rate>200</update_rate>
+      </sensor>
+    </link>
+
+    <link name="left_wheel">
+      <pose>0 0.12 0.0325 -1.5707963 0 0</pose>
+      <inertial>
+        <mass>0.05</mass>
+        <inertia><ixx>2e-5</ixx><iyy>2e-5</iyy><izz>3e-5</izz>
+                 <ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia>
+      </inertial>
+      <collision name="col">
+        <geometry><cylinder><radius>0.0325</radius><length>0.02</length></cylinder></geometry>
+        <surface><friction><ode><mu>1.0</mu><mu2>1.0</mu2></ode></friction></surface>
+      </collision>
+      <visual name="vis">
+        <geometry><cylinder><radius>0.0325</radius><length>0.02</length></cylinder></geometry>
+        <material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.1 0.1 0.1 1</diffuse></material>
+      </visual>
+    </link>
+
+    <link name="right_wheel">
+      <pose>0 -0.12 0.0325 -1.5707963 0 0</pose>
+      <inertial>
+        <mass>0.05</mass>
+        <inertia><ixx>2e-5</ixx><iyy>2e-5</iyy><izz>3e-5</izz>
+                 <ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia>
+      </inertial>
+      <collision name="col">
+        <geometry><cylinder><radius>0.0325</radius><length>0.02</length></cylinder></geometry>
+        <surface><friction><ode><mu>1.0</mu><mu2>1.0</mu2></ode></friction></surface>
+      </collision>
+      <visual name="vis">
+        <geometry><cylinder><radius>0.0325</radius><length>0.02</length></cylinder></geometry>
+        <material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.1 0.1 0.1 1</diffuse></material>
+      </visual>
+    </link>
+
+    <link name="front_caster">
+      <pose>0.12 0 0.02 0 0 0</pose>
+      <inertial>
+        <mass>0.02</mass>
+        <inertia><ixx>3e-6</ixx><iyy>3e-6</iyy><izz>3e-6</izz>
+                 <ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia>
+      </inertial>
+      <collision name="col">
+        <geometry><sphere><radius>0.02</radius></sphere></geometry>
+        <surface><friction><ode><mu>0.0</mu><mu2>0.0</mu2></ode></friction></surface>
+      </collision>
+      <visual name="vis"><geometry><sphere><radius>0.02</radius></sphere></geometry></visual>
+    </link>
+
+    <link name="rear_caster">
+      <pose>-0.12 0 0.02 0 0 0</pose>
+      <inertial>
+        <mass>0.02</mass>
+        <inertia><ixx>3e-6</ixx><iyy>3e-6</iyy><izz>3e-6</izz>
+                 <ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia>
+      </inertial>
+      <collision name="col">
+        <geometry><sphere><radius>0.02</radius></sphere></geometry>
+        <surface><friction><ode><mu>0.0</mu><mu2>0.0</mu2></ode></friction></surface>
+      </collision>
+      <visual name="vis"><geometry><sphere><radius>0.02</radius></sphere></geometry></visual>
+    </link>
+
+    <joint name="left_wheel_joint" type="revolute">
+      <parent>base_link</parent><child>left_wheel</child>
+      <axis><xyz>0 0 1</xyz><limit><lower>-1e16</lower><upper>1e16</upper></limit></axis>
+    </joint>
+    <joint name="right_wheel_joint" type="revolute">
+      <parent>base_link</parent><child>right_wheel</child>
+      <axis><xyz>0 0 1</xyz><limit><lower>-1e16</lower><upper>1e16</upper></limit></axis>
+    </joint>
+    <joint name="front_caster_joint" type="ball">
+      <parent>base_link</parent><child>front_caster</child>
+    </joint>
+    <joint name="rear_caster_joint" type="ball">
+      <parent>base_link</parent><child>rear_caster</child>
+    </joint>
+
+    <plugin filename="gz-sim-diff-drive-system" name="gz::sim::systems::DiffDrive">
+      <left_joint>left_wheel_joint</left_joint>
+      <right_joint>right_wheel_joint</right_joint>
+      <wheel_separation>0.24</wheel_separation>
+      <wheel_radius>0.0325</wheel_radius>
+      <!-- driven ONLY by contract_bridge.py after firmware emulation
+           (deadband + watchdog) — never bridge /cmd_vel here directly -->
+      <topic>/rover_sim/drive_cmd</topic>
+      <odom_publish_frequency>1</odom_publish_frequency>
+    </plugin>
+  </model>
+</sdf>

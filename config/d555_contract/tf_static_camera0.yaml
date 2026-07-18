@@ -1,0 +1,178 @@
+transforms:
+- header:
+    stamp:
+      sec: 54
+      nanosec: 912238144
+    frame_id: camera0_link
+  child_frame_id: camera0_color_frame
+  transform:
+    translation:
+      x: -0.0002910599869210273
+      y: -0.059008900076150894
+      z: 0.0001831499976105988
+    rotation:
+      x: -0.0015953248366713522
+      y: -0.001861470751464367
+      z: -3.517510776873678e-05
+      w: 0.9999969601631165
+- header:
+    stamp:
+      sec: 54
+      nanosec: 912238144
+    frame_id: camera0_color_frame
+  child_frame_id: camera0_color_optical_frame
+  transform:
+    translation:
+      x: 0.0
+      y: -0.0
+      z: -0.0
+    rotation:
+      x: -0.5
+      y: 0.4999999999999999
+      z: -0.5
+      w: 0.5000000000000001
+- header:
+    stamp:
+      sec: 54
+      nanosec: 932376032
+    frame_id: camera0_link
+  child_frame_id: camera0_infra1_frame
+  transform:
+    translation:
+      x: 0.0
+      y: -0.0
+      z: -0.0
+    rotation:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      w: 1.0
+- header:
+    stamp:
+      sec: 54
+      nanosec: 932376032
+    frame_id: camera0_aligned_depth_to_infra1_frame
+  child_frame_id: camera0_infra1_optical_frame
+  transform:
+    translation:
+      x: 0.0
+      y: -0.0
+      z: -0.0
+    rotation:
+      x: -0.5
+      y: 0.4999999999999999
+      z: -0.5
+      w: 0.5000000000000001
+- header:
+    stamp:
+      sec: 54
+      nanosec: 932376032
+    frame_id: camera0_link
+  child_frame_id: camera0_aligned_depth_to_infra1_frame
+  transform:
+    translation:
+      x: 0.0
+      y: -0.0
+      z: -0.0
+    rotation:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      w: 1.0
+- header:
+    stamp:
+      sec: 54
+      nanosec: 932598496
+    frame_id: camera0_link
+  child_frame_id: camera0_infra2_frame
+  transform:
+    translation:
+      x: 0.0
+      y: 0.09486053138971329
+      z: -0.0
+    rotation:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      w: 1.0
+- header:
+    stamp:
+      sec: 54
+      nanosec: 932598496
+    frame_id: camera0_infra2_frame
+  child_frame_id: camera0_infra2_optical_frame
+  transform:
+    translation:
+      x: 0.0
+      y: -0.0
+      z: -0.0
+    rotation:
+      x: -0.5
+      y: 0.4999999999999999
+      z: -0.5
+      w: 0.5000000000000001
+- header:
+    stamp:
+      sec: 54
+      nanosec: 932756320
+    frame_id: camera0_link
+  child_frame_id: camera0_depth_frame
+  transform:
+    translation:
+      x: 0.0
+      y: -0.0
+      z: -0.0
+    rotation:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      w: 1.0
+- header:
+    stamp:
+      sec: 54
+      nanosec: 932756320
+    frame_id: camera0_depth_frame
+  child_frame_id: camera0_depth_optical_frame
+  transform:
+    translation:
+      x: 0.0
+      y: -0.0
+      z: -0.0
+    rotation:
+      x: -0.5
+      y: 0.4999999999999999
+      z: -0.5
+      w: 0.5000000000000001
+- header:
+    stamp:
+      sec: 54
+      nanosec: 970293824
+    frame_id: camera0_link
+  child_frame_id: camera0_motion_frame
+  transform:
+    translation:
+      x: 0.0
+      y: -0.0
+      z: -0.0
+    rotation:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      w: 1.0
+- header:
+    stamp:
+      sec: 54
+      nanosec: 970293824
+    frame_id: camera0_motion_frame
+  child_frame_id: camera0_motion_optical_frame
+  transform:
+    translation:
+      x: 0.0
+      y: -0.0
+      z: -0.0
+    rotation:
+      x: -0.5
+      y: 0.4999999999999999
+      z: -0.5
+      w: 0.5000000000000001
+---

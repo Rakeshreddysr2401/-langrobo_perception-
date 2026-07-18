@@ -14,6 +14,14 @@
 # Params mirror launch/perception.launch.py mode:=real (the 2026-07-15
 # verified profile) — keep them in sync.
 set -eo pipefail
+DIR=$(cd "$(dirname "$0")" && pwd)
+
+# Sim and real must NEVER share a SLAM memory: localizing the sim world
+# against the real map (or vice versa) corrupts both. Same node, same
+# params — only the database file follows config/hardware.
+HW=$(tr -d '[:space:]' < "$DIR/../config/hardware" 2>/dev/null || echo real)
+DB=/data/rtabmap.db
+[ "$HW" = "sim" ] && DB=/data/rtabmap_sim.db
 
 # NOTE: align_depth.enable is accepted but publishes NOTHING on the DDS
 # driver (same trap as pointcloud.enable — SDK processing blocks don't exist
@@ -35,12 +43,13 @@ sleep 2
 
 # A corrupt DB makes rtabmap abort at start (FATAL, no map frame, vision AI
 # silently dead). Verify it and archive a bad one instead of crash-looping.
-docker exec isaac_ros bash -c '
-    [ -f /data/rtabmap.db ] || exit 0
+docker exec -e DB="$DB" isaac_ros bash -c '
+    [ -f "$DB" ] || exit 0
     python3 - <<"PYEOF"
-import sqlite3, sys
+import os, sqlite3, sys
+db = os.environ["DB"]
 try:
-    ok = sqlite3.connect("file:/data/rtabmap.db?mode=ro", uri=True) \
+    ok = sqlite3.connect(f"file:{db}?mode=ro", uri=True) \
                 .execute("PRAGMA quick_check;").fetchone()[0] == "ok"
 except sqlite3.DatabaseError:
     ok = False
@@ -48,8 +57,8 @@ sys.exit(0 if ok else 1)
 PYEOF
 ' || {
     stamp=$(date +%Y%m%d-%H%M%S)
-    echo "WARNING: /data/rtabmap.db failed integrity check — archiving to rtabmap.db.corrupt-$stamp, starting a fresh map"
-    docker exec isaac_ros mv /data/rtabmap.db "/data/rtabmap.db.corrupt-$stamp"
+    echo "WARNING: $DB failed integrity check — archiving to $DB.corrupt-$stamp, starting a fresh map"
+    docker exec isaac_ros mv "$DB" "$DB.corrupt-$stamp"
 }
 
 docker exec -d isaac_ros bash -c '
@@ -71,7 +80,7 @@ docker exec -d isaac_ros bash -c '
         -r rgb/camera_info:=/camera/camera0/infra1/camera_info \
         > /tmp/rgbd_odometry.log 2>&1'
 
-docker exec -d isaac_ros bash -c '
+docker exec -d -e DB="$DB" isaac_ros bash -c '
     unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE
     export ROS_DOMAIN_ID=0
     source /opt/ros/jazzy/setup.bash
@@ -84,7 +93,7 @@ docker exec -d isaac_ros bash -c '
         -p approx_sync:=true \
         -p qos_image:=2 \
         -p qos_camera_info:=2 \
-        -p database_path:=/data/rtabmap.db \
+        -p database_path:=$DB \
         -p Reg/Force3DoF:="'"'"true"'"'" \
         -p Mem/IncrementalMemory:="'"'"true"'"'" \
         -r rgb/image:=/camera/camera0/infra1/image_rect_raw \

@@ -23,6 +23,9 @@ bt_navigator:
     # while waiting for action server to acknowledge goal request",
     # 2026-07-16 first live approach_object test)
     default_server_timeout: 100
+    # Custom tree = default minus the BackUp recovery (blind reverse into
+    # unseen space — no rear sensing). Path is the in-container repo mount.
+    default_nav_to_pose_bt_xml: "/workspaces/isaac_ros-dev/src/langrobo_perception/config/bt_navigate_to_pose_no_blind_backup.xml"
     navigators: ['navigate_to_pose', 'navigate_through_poses']
     navigate_to_pose:
       plugin: "nav2_bt_navigator::NavigateToPoseNavigator"
@@ -49,19 +52,40 @@ collision_monitor:
     # use the latest transform instead.
     base_shift_correction: False
     transform_tolerance: 0.6
-    source_timeout: 1.0
+    # Source is nvblox back_projected_depth: measured 2.8-3.3Hz with max gaps
+    # up to 1.5s under GPU load (2026-07-18 live, camera-only). A 1.0s timeout
+    # was TIGHTER than the source's worst-case interval, so every slow frame
+    # tripped "stop due to invalid source" and held the robot at zero
+    # indefinitely. 2.5s clears the measured jitter (and leaves headroom for
+    # when YOLO shares the GPU); at 0.30 m/s that is ~0.75m of stale-data
+    # travel, backstopped by the nvblox costmap in the planners. Raising the
+    # source rate is the real fix — tracked as a follow-up.
+    source_timeout: 2.5
     observation_sources: ["depth_points"]
     depth_points:
       type: "pointcloud"
-      # nvblox's GPU back-projected depth (5Hz): the D555/DDS driver has no
-      # pointcloud filter (pointcloud.enable undeclared on this camera).
+      # nvblox's GPU back-projected depth (~3Hz measured): the D555/DDS driver
+      # has no pointcloud filter (pointcloud.enable undeclared on this camera).
       topic: "/nvblox_node/back_projected_depth/camera0_depth_optical_frame"
       min_height: 0.03
       max_height: 0.40
-    polygons: ["SafeZone"]
+    polygons: ["SlowZone", "SafeZone"]
+    # Two rings: slow first, then hard stop. The depth source is only ~5Hz —
+    # at 0.30 m/s the robot covers ~6cm between updates, so the old 0.18m
+    # stop ring left 3cm of margin past the 0.15m footprint nose.
+    SlowZone:
+      type: "circle"
+      radius: 0.45
+      action_type: "slowdown"
+      # NOTE: while cmd_vel_deadband.py is in the loop it re-floors linear
+      # commands at 0.20 m/s, so this ratio only truly bites after the
+      # ESP32-firmware PWM remap replaces the shim (Phase 1 gating item).
+      slowdown_ratio: 0.4
+      min_points: 6
+      enabled: True
     SafeZone:
       type: "circle"
-      radius: 0.18
+      radius: 0.25
       action_type: "stop"
       min_points: 6
       enabled: True
@@ -80,7 +104,11 @@ controller_server:
       plugin: "nav2_controller::StoppedGoalChecker"
       trans_stopped_velocity: 0.1
       rot_stopped_velocity: 0.1
-      xy_goal_tolerance: 0.20
+      # 0.10: approach stops at the FAR edge of this circle (measured
+      # 2026-07-17: 0.45 standoff + 0.20 tol = 0.65m center-to-object).
+      # 0.45+0.10 puts the robot front 30-40cm from the object, per spec.
+      # Fine positioning below 0.15 m/s works via the PWM deadband shim.
+      xy_goal_tolerance: 0.10
       yaw_goal_tolerance: 0.30
     FollowPath:
       plugin: "nav2_mppi_controller::MPPIController"
@@ -91,7 +119,9 @@ controller_server:
       vy_std: 0.0
       wz_std: 0.4
       vx_max: 0.30
-      vx_min: -0.25
+      # Reverse is blind (no rear sensing, local costmap unknown behind the
+      # robot) — allow only short escape nudges, not real reverse driving.
+      vx_min: -0.10
       vy_max: 0.0
       # 1.2 rad/s risks cuVSLAM tracking loss during in-place turns: visual-only
       # (IMU off) at ~20Hz effective with occasional 140ms frame gaps means up to
@@ -213,7 +243,14 @@ global_costmap:
       height: 40
       origin_x: -20.0
       origin_y: -20.0
-      track_unknown_space: False
+      # True: never-seen cells stay NO_INFORMATION so the planner can refuse
+      # them (nvblox layer leaves unknown slice cells untouched — verified in
+      # nvblox_costmap_layer.cpp 4.4.0). With False, the forward-only D555
+      # left everything outside its cone "free" and NavFn planned through
+      # unseen walls (wall strikes while testing, 2026-07-17 analysis).
+      # Local costmap intentionally stays False: unknown-as-lethal there
+      # would paralyze MPPI (the floor behind/under the robot is never seen).
+      track_unknown_space: True
       always_send_full_costmap: False
       plugins: ['nvblox_layer', 'inflation_layer']
       inflation_layer:
@@ -236,7 +273,12 @@ planner_server:
       plugin: "nav2_navfn_planner::NavfnPlanner"
       tolerance: 0.3
       use_astar: false
-      allow_unknown: true
+      # Only plan through space the camera has actually seen (pairs with
+      # global_costmap track_unknown_space: True). Consequence: a goal with
+      # no fully-seen corridor fails with "no path" instead of driving blind
+      # — the mission flow must look toward the goal first (pixel-grounded
+      # goals already imply line of sight).
+      allow_unknown: false
 smoother_server:
   ros__parameters:
     use_sim_time: False
@@ -252,6 +294,11 @@ behavior_server:
     costmap_topic: local_costmap/costmap_raw
     footprint_topic: local_costmap/published_footprint
     cycle_frequency: 10.0
+    # All plugins must stay loaded: BT action nodes wait for their action
+    # server at XML LOAD time, so removing e.g. backup breaks tree loading
+    # entirely (bt_navigator activation failure, seen live 2026-07-17).
+    # Blind maneuvers are instead removed from the TREE:
+    # bt_navigator default_nav_to_pose_bt_xml (no-blind-backup variant).
     behavior_plugins: ["spin", "backup", "drive_on_heading", "assisted_teleop", "wait"]
     spin:
       plugin: "nav2_behaviors::Spin"
@@ -287,7 +334,7 @@ velocity_smoother:
     scale_velocities: False
     feedback: "OPEN_LOOP"
     max_velocity: [0.25, 0.0, 1.2]
-    min_velocity: [-0.15, 0.0, -1.2]
+    min_velocity: [-0.10, 0.0, -1.2]  # match MPPI vx_min: reverse is blind
     max_accel: [1.5, 1.5, 2.5]
     max_decel: [-1.5, -1.5, -2.5]
     odom_duration: 0.1
