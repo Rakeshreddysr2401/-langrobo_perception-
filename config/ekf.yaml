@@ -15,6 +15,11 @@ ekf_filter_node:
     frequency: 20.0           # 20Hz: 30 overran the loaded Orin ("failed to meet
                               # update rate"); plenty for a slow rover, avoids TF lag
     sensor_timeout: 0.2
+    # The D555 IMU stamps lag the image/odom clock ~130-250ms, so the filter was
+    # skipping the gyro as "in the past" and heading stayed 0. Keep a history and
+    # re-insert lagged measurements at their correct time (2026-07-18).
+    smooth_lagged_data: true
+    history_length: 0.5
     two_d_mode: true          # planar rover: lock z, roll, pitch to 0
     publish_tf: true          # EKF owns odom->base_link now
     print_diagnostics: true
