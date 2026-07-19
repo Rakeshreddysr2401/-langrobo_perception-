@@ -35,6 +35,7 @@ from sensor_msgs.msg import Image, CameraInfo
 from nav_msgs.msg import Odometry
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
+from nvblox_msgs.srv import FilePath as NvbloxFilePath
 from geometry_msgs.msg import TransformStamped
 from tf2_ros import TransformBroadcaster, Buffer, TransformListener
 import message_filters
@@ -139,6 +140,9 @@ class CuvslamNode(Node):
                             callback_group=srv_group)
         self.create_service(Trigger, '/slam/localize', self._localize_cb,
                             callback_group=srv_group)
+        # nvblox owns the WALLS the user sees — save its map alongside ours
+        self.nvblox_save_cli = self.create_client(NvbloxFilePath, '/nvblox_node/save_map',
+                                                  callback_group=srv_group)
         self.create_timer(1.0, self._status_tick, callback_group=srv_group)
         self.get_logger().info(
             f'cuvslam_node up (SLAM={"ON" if self.enable_slam else "off"}, '
@@ -300,6 +304,16 @@ class CuvslamNode(Node):
         res.success = result['ok']
         res.message = (f'map saved to {self.map_dir}' if result['ok']
                        else f'cuVSLAM failed to save map to {self.map_dir}')
+        if result['ok'] and self.nvblox_save_cli.service_is_ready():
+            req2 = NvbloxFilePath.Request()
+            req2.file_path = f'{self.map_dir}/nvblox_map.nvblx'
+            fut = self.nvblox_save_cli.call_async(req2)
+            deadline = threading.Event()
+            fut.add_done_callback(lambda _f: deadline.set())
+            if deadline.wait(timeout=30.0) and fut.result() is not None and fut.result().success:
+                res.message += ' + nvblox walls (nvblox_map.nvblx)'
+            else:
+                res.message += ' (nvblox wall save FAILED)'
         self.get_logger().info(res.message)
         return res
 

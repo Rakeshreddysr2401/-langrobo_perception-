@@ -31,9 +31,12 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.time import Time
+from rclpy.qos import qos_profile_sensor_data
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry, OccupancyGrid
+from sensor_msgs.msg import Image
 from std_msgs.msg import Bool, String
+from visualization_msgs.msg import Marker
 from action_msgs.srv import CancelGoal
 from tf2_ros import Buffer, TransformListener
 from scipy.spatial.transform import Rotation
@@ -53,6 +56,13 @@ class SafetyGuard(Node):
         self.declare_parameter('bumper_width', 0.32)  # m (robot width + margin)
         self.declare_parameter('front_offset', 0.10)  # m base_link -> front bumper
         self.declare_parameter('occ_thresh', 60)      # occupancy 0..100
+        # depth bumper: D555 is BLIND <0.4 m, so stop BEFORE things enter the
+        # blind zone. Central-ROI min depth < depth_stop -> forward blocked;
+        # mostly-invalid ROI (something pressed into the blind zone / covering
+        # the lens) also blocks — fail-safe: rotation/reverse stay free.
+        self.declare_parameter('depth_topic', '/camera/camera0/depth/image_rect_raw')
+        self.declare_parameter('depth_stop_m', 0.50)
+        self.declare_parameter('depth_invalid_frac', 0.60)
         p = lambda n: self.get_parameter(n).value
         self.jump_max = float(p('jump_max'))
         self.z_max = float(p('z_max'))
@@ -70,6 +80,11 @@ class SafetyGuard(Node):
         self.sane_since = None           # t_sec when pose last became sane
         self.grid = None                 # latest OccupancyGrid
         self.bumper_hits = 0
+        self.depth_blocked = False
+        self.depth_near_m = 0.0
+        self._depth_n = 0
+        self.depth_stop_m = float(p('depth_stop_m'))
+        self.depth_invalid_frac = float(p('depth_invalid_frac'))
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -78,7 +93,10 @@ class SafetyGuard(Node):
         self.create_subscription(Twist, p('cmd_in'), self._cmd_cb, 10)
         self.create_subscription(Odometry, '/odom', self._odom_cb, 20)
         self.create_subscription(OccupancyGrid, p('grid_topic'), self._grid_cb, 1)
+        self.create_subscription(Image, p('depth_topic'), self._depth_cb,
+                                 qos_profile_sensor_data)
         self.create_subscription(Bool, '/safety/trip', self._manual_cb, 10)
+        self.marker_pub = self.create_publisher(Marker, '/safety/bumper', 2)
         self.cancel_cli = self.create_client(CancelGoal,
                                              '/navigate_to_pose/_action/cancel_goal')
         self.create_timer(1.0, self._state_tick)
@@ -138,6 +156,58 @@ class SafetyGuard(Node):
             self.manual_trip = False
             self.get_logger().info('manual trip released (pose watchdog still applies)')
 
+    # ---- depth bumper (stops BEFORE the 0.4 m blind zone) -----------------
+    def _depth_cb(self, m: Image):
+        self._depth_n += 1
+        if self._depth_n % 5:            # ~6 Hz is plenty
+            return
+        try:
+            if m.encoding == '16UC1':
+                d = np.frombuffer(m.data, dtype=np.uint16).reshape(m.height, m.width)
+                mm = d
+            elif m.encoding == '32FC1':
+                d = np.frombuffer(m.data, dtype=np.float32).reshape(m.height, m.width)
+                mm = (d * 1000.0)
+            else:
+                return
+        except ValueError:
+            return
+        # central ROI (middle third both axes), strided for cheapness
+        roi = mm[m.height // 3:2 * m.height // 3:4, m.width // 3:2 * m.width // 3:4]
+        valid = roi[roi > 150]           # 0/near-0 = invalid (blind/no return)
+        frac_invalid = 1.0 - valid.size / max(roi.size, 1)
+        near = float(valid.min()) / 1000.0 if valid.size else 0.0
+        was = self.depth_blocked
+        self.depth_near_m = near
+        self.depth_blocked = ((valid.size > 0 and near < self.depth_stop_m)
+                              or frac_invalid > self.depth_invalid_frac)
+        if self.depth_blocked and not was:
+            why = (f'obstacle {near:.2f} m ahead' if valid.size and near < self.depth_stop_m
+                   else f'{frac_invalid:.0%} of depth ROI invalid (blind-zone/covered)')
+            self.get_logger().warn(f'depth bumper: {why} — forward blocked')
+        elif was and not self.depth_blocked:
+            self.get_logger().info('depth bumper clear — forward re-enabled')
+        self._publish_bumper_marker()
+
+    def _publish_bumper_marker(self):
+        mk = Marker()
+        mk.header.frame_id = 'base_link'
+        mk.header.stamp = self.get_clock().now().to_msg()
+        mk.ns = 'safety'
+        mk.type = Marker.CUBE
+        mk.pose.position.x = self.front_offset + self.bumper_len / 2
+        mk.pose.position.z = 0.05
+        mk.pose.orientation.w = 1.0
+        mk.scale.x = self.bumper_len
+        mk.scale.y = self.bumper_width
+        mk.scale.z = 0.10
+        blocked = self.depth_blocked or self.tripped
+        mk.color.r = 1.0 if blocked else 0.1
+        mk.color.g = 0.1 if blocked else 1.0
+        mk.color.b = 0.1
+        mk.color.a = 0.75 if blocked else 0.35
+        self.marker_pub.publish(mk)
+
     # ---- virtual bumper ---------------------------------------------------
     def _grid_cb(self, m: OccupancyGrid):
         self.grid = m
@@ -172,16 +242,21 @@ class SafetyGuard(Node):
         if self.tripped:
             self.pub.publish(Twist())    # hold zeros while latched
             return
-        if m.linear.x > 0.0 and self._front_blocked():
+        if m.linear.x > 0.0 and (self.depth_blocked or self._front_blocked()):
             self.bumper_hits += 1
             self.get_logger().warn(
-                'virtual bumper: obstacle in front box — forward blocked '
+                'bumper: obstacle ahead — forward blocked '
                 '(rotate/reverse still allowed)', throttle_duration_sec=2.0)
             m.linear.x = 0.0
         self.pub.publish(m)
 
     def _state_tick(self):
-        s = 'TRIPPED:' + self.trip_reason if self.tripped else 'ok'
+        if self.tripped:
+            s = 'TRIPPED:' + self.trip_reason
+        elif self.depth_blocked:
+            s = f'FWD_BLOCKED:depth {self.depth_near_m:.2f}m'
+        else:
+            s = 'ok'
         self.state_pub.publish(String(data=s))
 
 

@@ -120,7 +120,11 @@ docker exec orin_nav bash -lc 'source /opt/ros/jazzy/setup.bash; export ROS_DOMA
 
 **Fresh map / reset pose after drift or a pose jump** → `./run_stack.sh remap`
 
-**SLAM map: save / relocalize / status** (maps live on the host in `~/orin-nav-stack/maps/current`)
+**SLAM map: save / relocalize / status** (maps live on the host in `~/orin-nav-stack/maps/current`).
+`/slam/save_map` saves BOTH layers: cuVSLAM features (`data.mdb`, for relocalization) and the
+nvblox walls (`nvblox_map.nvblx`, what you see in RViz). ⚠ Wall-map RELOAD across sessions is
+not wired yet — nvblox is anchored to `odom`, which is different each boot; aligning reloaded
+walls needs the nvblox global_frame=map switch + a live loop-closure test (next driven session).
 ```bash
 docker exec orin_nav bash -lc 'source /opt/ros/jazzy/setup.bash; export ROS_DOMAIN_ID=0
   ros2 topic echo --once /slam/status                        # lc/pgo health, corrections
@@ -128,11 +132,18 @@ docker exec orin_nav bash -lc 'source /opt/ros/jazzy/setup.bash; export ROS_DOMA
   ros2 service call /slam/localize std_srvs/srv/Trigger'     # relocalize in saved map (2 m search)
 ```
 
-**Safety guard** — `/safety/state` says `ok` or `TRIPPED:<reason>`. It auto-clears after
-10 s of sane pose. Manual latch: `ros2 topic pub --once /safety/trip std_msgs/msg/Bool "{data: true}"`
-(release with `false`). While tripped: nav goals are cancelled and all wheel commands are zeroed.
-The virtual bumper only zeroes **forward** vx when nvblox shows an obstacle in the
-0.35×0.32 m box ahead — rotate/reverse always stay available.
+**Safety guard** — `/safety/state` says `ok`, `FWD_BLOCKED:depth <x>m`, or `TRIPPED:<reason>`.
+Trips auto-clear after 10 s of sane pose. Manual latch: `ros2 topic pub --once /safety/trip
+std_msgs/msg/Bool "{data: true}"` (release with `false`). While tripped: nav goals cancelled,
+wheels zeroed. THREE bumper layers, all forward-only (rotate/reverse always free):
+1. **Depth bumper** (added 2026-07-19 after user watched nav head for a person): central-ROI
+   min depth < 0.50 m → forward blocked BEFORE the target enters the D555's 0.4 m blind zone;
+   a mostly-invalid ROI (something already in the blind zone / lens covered) also blocks.
+   Verified live with injected 0.3 m frames → `FWD_BLOCKED:depth 0.30m`.
+2. **nvblox virtual bumper**: occupied cell in the 0.35×0.32 m box ahead (remembers walls
+   the camera saw even once inside the blind zone).
+3. Costmap inflation widened 0.35→0.45 m (cost_scaling 10→6) so planner/MPPI keep distance.
+RViz shows the bumper as a box in front of the robot: **green = clear, red = blocked**.
 
 ## 7. Viewing (RViz / laptop)
 

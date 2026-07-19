@@ -224,8 +224,10 @@ local_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         enabled: True
-        cost_scaling_factor: 10.0
-        inflation_radius: 0.35
+        # 0.35/10.0 let paths hug walls (user-observed near-crashes 2026-07-19);
+        # wider radius + gentler falloff pushes MPPI/planner further out
+        cost_scaling_factor: 6.0
+        inflation_radius: 0.45
       nvblox_layer:
         plugin: "nvblox::nav2::NvbloxCostmapLayer"
         enabled: True
@@ -260,8 +262,10 @@ global_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         enabled: True
-        cost_scaling_factor: 10.0
-        inflation_radius: 0.35
+        # 0.35/10.0 let paths hug walls (user-observed near-crashes 2026-07-19);
+        # wider radius + gentler falloff pushes MPPI/planner further out
+        cost_scaling_factor: 6.0
+        inflation_radius: 0.45
       nvblox_layer:
         plugin: "nvblox::nav2::NvbloxCostmapLayer"
         enabled: True

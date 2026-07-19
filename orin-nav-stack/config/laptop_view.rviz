@@ -72,6 +72,15 @@ Visualization Manager:
         Shaft Radius: 0.01
         Head Length: 0.05
         Head Radius: 0.02
+    - Class: rviz_default_plugins/Marker
+      Name: safety bumper (green=clear red=BLOCKED)
+      Enabled: true
+      Value: true
+      Topic:
+        Value: /safety/bumper
+        Depth: 2
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
     - Class: rviz_default_plugins/Image
       Name: camera (optional, laggy on wifi)
       Enabled: false
