@@ -177,7 +177,7 @@ layer parents of `orin-nav:1.1` (until a lean rebuild replaces them).
   `~/orin-nav-stack` is a **symlink** to `~/langrobo_perception/orin-nav-stack` — there is only
   ONE working copy; edit, then `git add/commit/push` from the repo.
 - **Shell alias** (in `~/.bashrc`): `navstack up|nav2|vision|stop|remap|rviz|logs|down`.
-- **isaac-ros CLI: removed from the host (2026-07-19) — but credit where due**: it BOOTSTRAPPED
+- **isaac-ros CLI: installed (dormant) — credit where due**: it BOOTSTRAPPED
   this whole stack. The original `isaac-ros init docker`+`activate` dev container (Jazzy + the
   Isaac ROS apt repo) is where nvblox/nav2/realsense were installed — that environment became
   `isaac_ros:langrobo-prod`, still the base of `orin-nav:1.1`. Its output lives on in those
@@ -186,9 +186,10 @@ layer parents of `orin-nav:1.1` (until a lean rebuild replaces them).
   - **Rebuild without the CLI** (preferred for the lean image): in a Dockerfile add
     `deb [signed-by=/usr/share/keyrings/nvidia-isaac-ros.gpg] https://isaac.download.nvidia.com/isaac-ros/release-4.4 noble-jetpack main`
     then `apt install ros-jazzy-isaac-ros-nvblox ...` (same source the CLI used).
-  - **Reinstall the CLI** if ever wanted: re-add that repo line to
-    `/etc/apt/sources.list.d/nvidia-isaac-ros.list`, `apt install isaac-ros-cli`,
-    `isaac-ros init docker`. Watch isaac_ros_visual_slam issue #223 for Orin support in 4.x.
+  - **CLI status (2026-07-19)**: reinstalled and configured (v2.3.0, release-4.4 repo) but
+    DORMANT — do NOT run `isaac-ros init docker`/`activate` casually: it targets 4.x (cuVSLAM
+    Thor-only), expects ISAAC_ROS_WS, and pulls GB images. Keep for future dev-env needs;
+    watch isaac_ros_visual_slam issue #223 for Orin support in 4.x.
 - **Host caveat**: apt has a pre-existing broken-dependency state (opencv/cmake from old host
   experiments). Everything here runs in Docker and is unaffected — but avoid
   `apt --fix-broken install` casually; it may churn many packages.
