@@ -43,6 +43,9 @@ inside the Jazzy container alongside nvblox/nav2. Modern stack, no version misma
   infra1+infra2 ─┼─► cuvslam_ros_node ──► TF odom→base_link + /odom + /visual_slam/…odometry│
   depth ─────────┼─► nvblox_node ──────► 3D mesh + ESDF + occupancy grid (frame: odom)      │
   color ─────────┼─► detections_3d (YOLO) ─► /vision/target_result, /vision/detections_3d   │
+                 │        └─► 2 Hz JPEG republish on /camera/color/image_raw/compressed      │
+                 │            (feeds Pi5 brain look()/VLM — old topic name kept on purpose;  │
+                 │            pausing YOLO also blinds the brain's vision)                   │
   imu (motion) ──┼─► imu_to_base ─► /imu/base                                               │
                  │        nav2 (planner+MPPI, SAFE BT) ─► cmd_vel_nav                       │
                  │        cmd_vel_deadband (PWM floor + SPEED CAPS) ─► /cmd_vel             │
@@ -67,7 +70,7 @@ Rover must be power-cycled once if the Pi5/agent restarted since (firmware recon
 |---|---|
 | `up` | Start container + D555 (stereo/depth/color/imu, emitter ON) + TFs + cuVSLAM + nvblox |
 | `nav2` | map→odom bridge + nav2 with the **no-blind-recovery BT** |
-| `vision` | YOLO hunt, pixel→goal, motor deadband (capped vx≤0.22 wz≤0.90), imu relay |
+| `vision` | YOLO hunt, pixel→goal, motor deadband (capped vx≤0.22 wz≤0.90), imu relay, 2 Hz look feed → Pi5 brain |
 | `stop` | **E-STOP** — kills every motion node + publishes zero velocity |
 | `down` | **Hard stop** — removes the container (watchdog halts rover ≤0.5 s) |
 | `remap` | Fresh map + pose→(0,0,0): restarts cuVSLAM+nvblox **without touching the camera** |
@@ -129,7 +132,21 @@ docker exec orin_nav bash -lc 'source /opt/ros/jazzy/setup.bash; export ROS_DOMA
    Hardware floors (0.20 / 0.80) are needed to move at all → "slow" = short supervised bursts.
 3. **E-stop**: `./run_stack.sh stop`; if in doubt `./run_stack.sh down` (always works).
 4. **Pause YOLO during motion tests** — CPU overload causes cuVSLAM pose jumps → nav chaos.
-5. Rover moves only with an operator watching the tether.
+   Kill by full path (`pkill -f "nodes/detections_3d.py"`) — a bare `-f detections_3d` inside
+   `docker exec bash -c` matches its own wrapper shell and kills the wrong process.
+5. **Keep YOLO paused until the pose is verified stable AFTER motion too** (incident
+   2026-07-19: restarting YOLO seconds after a nav goal finished — model-load CPU burst —
+   blew an already-shaky pose up to −34 m). Sequence: motion done → watch `logs cuvslam`
+   stay flat ~10 s → then restart YOLO. Note the rover coasts ~15 cm odom past the
+   controller's stop (momentum + 500 ms watchdog) — budget for it near obstacles.
+6. **Emergency zero-velocity when the container is already down**:
+   ```bash
+   docker run --rm --network host --entrypoint bash orin-nav:1.1 -lc \
+     'source /opt/ros/jazzy/setup.bash; export ROS_DOMAIN_ID=0
+      ros2 topic pub -r 20 -t 60 /cmd_vel geometry_msgs/msg/Twist "{}"'
+   ```
+   (`--entrypoint bash` is required — the image entrypoint mangles a plain `bash -lc`.)
+7. Rover moves only with an operator watching the tether.
 
 ## 9. Troubleshooting
 
@@ -143,6 +160,9 @@ docker exec orin_nav bash -lc 'source /opt/ros/jazzy/setup.bash; export ROS_DOMA
 | `ros2 topic hz` says no data but things work | The CLI probe is flaky under load — trust `logs` counters and downstream consumers |
 | MPPI "Optimizer fail" / control loop misses 20 Hz | CPU saturated → pause YOLO, close RViz, retry |
 | Wheels hum but no motion | Below torque floor → speeds ≥ 0.25 m/s for tests; deadband handles nav2 commands |
+| Nav goal SUCCEEDED but rover stopped short/long of it | Pose inflated during motion (seen 2026-07-19: reported 1.0 m while physically shorter) — nav2 closes the loop on the *reported* pose. Re-map before the next goal; if it repeats, treat as tracking degradation, not calibration |
+| `remap` prints nothing / container gone after it | Seen once 2026-07-19: `remap` exited silently with the container down → check `docker ps` after every `remap`; if gone, `./run_stack.sh up` again |
+| Pi5 brain says "I cannot see right now" | look() feed comes from detections_3d (2 Hz JPEG republish on `/camera/color/image_raw/compressed`) — it is DOWN whenever YOLO is paused or the vision layer isn't up |
 
 ## 10. Facts & calibration (measured)
 
