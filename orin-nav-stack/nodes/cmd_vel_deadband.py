@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Motor dead-zone compensation: /cmd_vel_nav -> /cmd_vel.
+"""Motor dead-zone compensation: /cmd_vel_nav -> /cmd_vel_shim (-> safety_guard -> /cmd_vel).
 
 The ESP32 firmware maps commanded m/s linearly onto PWM (0.30 m/s = 100%),
 open loop. The L298N + gearmotors need roughly >=60% PWM to break static
@@ -42,7 +42,7 @@ def _rescale(v, floor, in_max, out_max):
 class Deadband(Node):
     def __init__(self):
         super().__init__('cmd_vel_deadband')
-        self._pub = self.create_publisher(Twist, '/cmd_vel', 10)
+        self._pub = self.create_publisher(Twist, '/cmd_vel_shim', 10)
         self.create_subscription(Twist, '/cmd_vel_nav', self._cb, 10)
 
     def _cb(self, m):

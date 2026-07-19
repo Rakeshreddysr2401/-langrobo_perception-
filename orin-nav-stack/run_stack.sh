@@ -3,9 +3,11 @@
 # Everything (nodes, configs, YOLO weights, behavior tree) is baked into the image
 # at /opt/orin-nav. No workspace mounts.
 #
-#   ./run_stack.sh up       # camera + base TF + cuVSLAM + nvblox
-#   ./run_stack.sh nav2     # map->odom bridge + nav2 (NO blind recoveries BT)
-#   ./run_stack.sh vision   # YOLO + pixel_to_goal + motor shim (speed-capped) + imu_to_base
+#   ./run_stack.sh up       # camera + base TF + cuVSLAM (FULL SLAM: map->odom live,
+#                           #   /slam/save_map + /slam/localize, maps persist in ./maps) + nvblox
+#   ./run_stack.sh nav2     # nav2 (NO blind recoveries BT; map frame from cuVSLAM)
+#   ./run_stack.sh vision   # YOLO + pixel_to_goal + motor shim + SAFETY GUARD + imu_to_base
+#                           #   chain: /cmd_vel_nav -> deadband -> /cmd_vel_shim -> guard -> /cmd_vel
 #   ./run_stack.sh stop     # E-STOP: kill nav/motion nodes + zero /cmd_vel
 #   ./run_stack.sh remap    # fresh map/pose: restart cuVSLAM + nvblox (camera untouched)
 #   ./run_stack.sh rviz     # RViz nav2 view on the Jetson monitor (:1)
@@ -27,10 +29,15 @@ dexec(){ docker exec -d "$NAME" bash -lc "unset ROS_DISCOVERY_SERVER FASTRTPS_DE
 case "${1:-up}" in
 up)
   docker rm -f "$NAME" >/dev/null 2>&1 || true
+  mkdir -p "$HOME/orin-nav-stack/maps"
+  # repo mounted RO over the baked /opt/orin-nav so code/config edits take
+  # effect on restart without an image rebuild; /maps is the rw SLAM-map store.
   docker run -d --name "$NAME" --entrypoint /bin/bash --runtime=nvidia --network=host --privileged \
     -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all -e NVIDIA_DISABLE_REQUIRE=1 -e ROS_DOMAIN_ID=0 \
     -e DISPLAY=:1 -e XAUTHORITY=/root/.Xauthority \
     -v /run/user/1000/gdm/Xauthority:/root/.Xauthority:ro -v /tmp/.X11-unix:/tmp/.X11-unix \
+    -v "$HOME/orin-nav-stack":/opt/orin-nav:ro \
+    -v "$HOME/orin-nav-stack/maps":/maps \
     "$IMAGE" -c 'sleep infinity' >/dev/null
   sleep 2
   echo "[1/4] D555 (stereo IR + depth + color + motion, emitter ON)"
@@ -57,8 +64,8 @@ up)
   echo "perception up. Next: ./run_stack.sh nav2   then   ./run_stack.sh vision"
   ;;
 nav2)
-  dexec 'exec ros2 run tf2_ros static_transform_publisher --frame-id map --child-frame-id odom > /tmp/map_odom_tf.log 2>&1'
-  sleep 2
+  # map->odom now comes LIVE from cuvslam_ros_node (SLAM correction) — no
+  # static publisher here anymore.
   dexec "exec ros2 launch nav2_bringup navigation_launch.py params_file:=$NAV/config/nav2.yaml \
             use_sim_time:=False use_composition:=False autostart:=True use_respawn:=False > /tmp/nav2.log 2>&1"
   echo "nav2 launching (no-blind-recovery BT). Wait for: ./run_stack.sh logs nav2 -> 'Managed nodes are active'"
@@ -67,16 +74,18 @@ vision)
   dexec "exec python3 $NAV/nodes/detections_3d.py --ros-args -p model:=$NAV/models/yolov8n.pt > /tmp/detections_3d.log 2>&1"
   dexec "exec python3 $NAV/nodes/pixel_to_goal.py > /tmp/pixel_to_goal.log 2>&1"
   dexec "exec python3 $NAV/nodes/cmd_vel_deadband.py > /tmp/cmd_vel_deadband.log 2>&1"
+  dexec "exec python3 $NAV/nodes/safety_guard.py > /tmp/safety_guard.log 2>&1"
   dexec "exec python3 $NAV/nodes/imu_to_base.py > /tmp/imu_to_base.log 2>&1"
-  echo "vision + goal + motor shim (vx<=0.22 wz<=0.90) starting"
+  echo "vision + goal + motor shim (vx<=0.22 wz<=0.90) + safety guard starting"
   ;;
 stop)
   # E-STOP: kill everything that can command motion, then hold zeros briefly.
   docker exec "$NAME" bash -lc '
-    for pid in $(pgrep -f "navigation_launch.py"); do kill -9 $pid 2>/dev/null; done
-    for pid in $(pgrep -f cmd_vel_deadband); do kill -9 $pid 2>/dev/null; done
-    for pid in $(pgrep -f visual_approach); do kill -9 $pid 2>/dev/null; done
-    for pid in $(pgrep -f drive_test); do kill -9 $pid 2>/dev/null; done
+    for pid in $(pgrep -f "[n]avigation_launch.py"); do kill -9 $pid 2>/dev/null; done
+    for pid in $(pgrep -f "[c]md_vel_deadband"); do kill -9 $pid 2>/dev/null; done
+    for pid in $(pgrep -f "[s]afety_guard"); do kill -9 $pid 2>/dev/null; done
+    for pid in $(pgrep -f "[v]isual_approach"); do kill -9 $pid 2>/dev/null; done
+    for pid in $(pgrep -f "[d]rive_test"); do kill -9 $pid 2>/dev/null; done
     ps -eo pid,comm | grep -iE "bt_navigat|controller_serv|behavior_ser|velocity_smo|collision_mon|planner_serv|smoother_ser|lifecycle_man|waypoint|docking" | awk "{print \$1}" | xargs -r kill -9 2>/dev/null
     sleep 1
     source /opt/ros/jazzy/setup.bash; export ROS_DOMAIN_ID=0
@@ -85,7 +94,9 @@ stop)
   || { echo "container not running — using hard stop"; docker rm -f "$NAME" >/dev/null 2>&1; }
   ;;
 remap)
-  docker exec "$NAME" bash -lc 'for pid in $(pgrep -f cuvslam_ros_node.py); do kill -9 $pid 2>/dev/null; done; for pid in $(pgrep -x nvblox_node); do kill -9 $pid 2>/dev/null; done; true'
+  # bracket patterns so pgrep -f can't match this wrapper shell itself (a
+  # self-match kill -9'd the exec -> exit 137 -> set -e aborted remap silently)
+  docker exec "$NAME" bash -lc 'for pid in $(pgrep -f "[c]uvslam_ros_node.py"); do kill -9 $pid 2>/dev/null; done; for pid in $(pgrep -x nvblox_node); do kill -9 $pid 2>/dev/null; done; true' || true
   sleep 3
   dexec "export LD_LIBRARY_PATH=$CU12:\$LD_LIBRARY_PATH; exec python3 $NAV/cuvslam_ros_node.py > /tmp/cuvslam.log 2>&1"
   sleep 5

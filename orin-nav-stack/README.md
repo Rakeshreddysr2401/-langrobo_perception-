@@ -40,7 +40,10 @@ inside the Jazzy container alongside nvblox/nav2. Modern stack, no version misma
 ```
                  ┌────────────────────── one container: orin-nav:1.1 ──────────────────────┐
  D555 (ethernet) │                                                                          │
-  infra1+infra2 ─┼─► cuvslam_ros_node ──► TF odom→base_link + /odom + /visual_slam/…odometry│
+  infra1+infra2 ─┼─► cuvslam_ros_node (FULL SLAM: loop closure + pose graph + map persist)  │
+                 │      ├─► TF odom→base_link (smooth odometry) + /odom + /visual_slam/…    │
+                 │      ├─► TF map→odom (LIVE SLAM correction — jumps on loop closure)      │
+                 │      ├─► /slam/status (1 Hz JSON) + srv /slam/save_map /slam/localize    │
   depth ─────────┼─► nvblox_node ──────► 3D mesh + ESDF + occupancy grid (frame: odom)      │
   color ─────────┼─► detections_3d (YOLO) ─► /vision/target_result, /vision/detections_3d   │
                  │        └─► 2 Hz JPEG republish on /camera/color/image_raw/compressed      │
@@ -48,10 +51,12 @@ inside the Jazzy container alongside nvblox/nav2. Modern stack, no version misma
                  │            pausing YOLO also blinds the brain's vision)                   │
   imu (motion) ──┼─► imu_to_base ─► /imu/base                                               │
                  │        nav2 (planner+MPPI, SAFE BT) ─► cmd_vel_nav                       │
-                 │        cmd_vel_deadband (PWM floor + SPEED CAPS) ─► /cmd_vel             │
+                 │        cmd_vel_deadband (PWM floor + SPEED CAPS) ─► /cmd_vel_shim        │
+                 │        safety_guard (pose watchdog + nvblox virtual bumper) ─► /cmd_vel  │
                  └──────────────────────────────────────────────────────────────────────────┘
-   map→odom (static) + base_link→camera0_link (static x0.10 z0.20) complete the TF tree
+   base_link→camera0_link (static x0.10 z0.20) completes the TF tree (map→odom is dynamic!)
    /cmd_vel ─► Pi5 micro-ROS agent ─► ESP32 ─► wheels      Pi5/Mac ─► /vision/*, nav goals
+   SLAM maps persist on the host: ~/orin-nav-stack/maps/  (mounted at /maps, gitignored)
 ```
 
 ## 4. Quick start (nothing autostarts at boot — you run this)
@@ -68,14 +73,14 @@ Rover must be power-cycled once if the Pi5/agent restarted since (firmware recon
 
 | Command | What it does |
 |---|---|
-| `up` | Start container + D555 (stereo/depth/color/imu, emitter ON) + TFs + cuVSLAM + nvblox |
-| `nav2` | map→odom bridge + nav2 with the **no-blind-recovery BT** |
-| `vision` | YOLO hunt, pixel→goal, motor deadband (capped vx≤0.22 wz≤0.90), imu relay, 2 Hz look feed → Pi5 brain |
+| `up` | Start container + D555 (stereo/depth/color/imu, emitter ON) + TFs + cuVSLAM **full SLAM** + nvblox. Repo is bind-mounted RO over `/opt/orin-nav` (edits apply on restart, no rebuild); `./maps` mounted rw at `/maps` |
+| `nav2` | nav2 with the **no-blind-recovery BT** (map frame comes live from cuVSLAM — no static bridge) |
+| `vision` | YOLO hunt, pixel→goal, motor deadband, **safety_guard** (pose watchdog + virtual bumper), imu relay, 2 Hz look feed → Pi5 brain |
 | `stop` | **E-STOP** — kills every motion node + publishes zero velocity |
 | `down` | **Hard stop** — removes the container (watchdog halts rover ≤0.5 s) |
 | `remap` | Fresh map + pose→(0,0,0): restarts cuVSLAM+nvblox **without touching the camera** |
 | `rviz` | RViz (nav2 view) on the Jetson monitor |
-| `logs <name>` | Tail `/tmp/<name>.log` in the container: `realsense cuvslam nvblox nav2 detections_3d pixel_to_goal cmd_vel_deadband imu_to_base` |
+| `logs <name>` | Tail `/tmp/<name>.log` in the container: `realsense cuvslam nvblox nav2 detections_3d pixel_to_goal cmd_vel_deadband safety_guard imu_to_base` |
 
 ## 6. Common tasks (all commands run on the Jetson host)
 
@@ -115,15 +120,29 @@ docker exec orin_nav bash -lc 'source /opt/ros/jazzy/setup.bash; export ROS_DOMA
 
 **Fresh map / reset pose after drift or a pose jump** → `./run_stack.sh remap`
 
+**SLAM map: save / relocalize / status** (maps live on the host in `~/orin-nav-stack/maps/current`)
+```bash
+docker exec orin_nav bash -lc 'source /opt/ros/jazzy/setup.bash; export ROS_DOMAIN_ID=0
+  ros2 topic echo --once /slam/status                        # lc/pgo health, corrections
+  ros2 service call /slam/save_map std_srvs/srv/Trigger      # persist current SLAM db
+  ros2 service call /slam/localize std_srvs/srv/Trigger'     # relocalize in saved map (2 m search)
+```
+
+**Safety guard** — `/safety/state` says `ok` or `TRIPPED:<reason>`. It auto-clears after
+10 s of sane pose. Manual latch: `ros2 topic pub --once /safety/trip std_msgs/msg/Bool "{data: true}"`
+(release with `false`). While tripped: nav goals are cancelled and all wheel commands are zeroed.
+The virtual bumper only zeroes **forward** vx when nvblox shows an obstacle in the
+0.35×0.32 m box ahead — rotate/reverse always stay available.
+
 ## 7. Viewing (RViz / laptop)
 
 - On the Jetson monitor: `./run_stack.sh rviz` (close it when navigating — RAM).
-- From an **Ubuntu laptop** with ROS 2 Jazzy on the same LAN — ready-made config:
+- From the **Ubuntu laptop (192.168.1.12)** — already installed (2026-07-19): just run
   ```bash
-  scp rakhi24@192.168.1.15:~/orin-nav-stack/config/laptop_view.rviz /tmp/
-  unset ROS_DISCOVERY_SERVER; export ROS_DOMAIN_ID=0
-  rviz2 -d /tmp/laptop_view.rviz
+  ~/rover_view.sh        # sources Jazzy, domain 0, opens ~/laptop_view.rviz
   ```
+  (Any other Jazzy laptop: `scp rakhi24@192.168.1.15:~/orin-nav-stack/config/laptop_view.rviz /tmp/`,
+  `unset ROS_DISCOVERY_SERVER; export ROS_DOMAIN_ID=0; rviz2 -d /tmp/laptop_view.rviz`.)
   Shows: TF frames, live nvblox walls, `/plan`, the `/odom` "pencil trail" (300 arrows),
   optional nav2 costmap (durability already set to TRANSIENT_LOCAL) + camera image.
   ⚠ The **"2D Goal Pose" toolbar button publishes a REAL nav goal** — if nav2 is up,
@@ -156,6 +175,11 @@ docker exec orin_nav bash -lc 'source /opt/ros/jazzy/setup.bash; export ROS_DOMA
    ```
    (`--entrypoint bash` is required — the image entrypoint mangles a plain `bash -lc`.)
 7. Rover moves only with an operator watching the tether.
+8. **safety_guard is the last gate** on nav-driven motion (`/cmd_vel_shim`→`/cmd_vel`): it
+   cancels goals + zeroes wheels on pose jumps >0.35 m, |z|>0.25 m, or tilt >0.7 rad
+   (auto-clears after 10 s sane), and blocks forward vx when nvblox shows an obstacle in
+   the 0.35 m box ahead. ⚠ `drive_test.py` and manual `ros2 topic pub /cmd_vel` **bypass
+   the guard** — those remain fully operator-supervised.
 
 ## 9. Troubleshooting
 
@@ -170,7 +194,7 @@ docker exec orin_nav bash -lc 'source /opt/ros/jazzy/setup.bash; export ROS_DOMA
 | MPPI "Optimizer fail" / control loop misses 20 Hz | CPU saturated → pause YOLO, close RViz, retry |
 | Wheels hum but no motion | Below torque floor → speeds ≥ 0.25 m/s for tests; deadband handles nav2 commands |
 | Nav goal SUCCEEDED but rover stopped short/long of it | Pose inflated during motion (seen 2026-07-19: reported 1.0 m while physically shorter) — nav2 closes the loop on the *reported* pose. Re-map before the next goal; if it repeats, treat as tracking degradation, not calibration |
-| `remap` prints nothing / container gone after it | Seen once 2026-07-19: `remap` exited silently with the container down → check `docker ps` after every `remap`; if gone, `./run_stack.sh up` again |
+| `remap` prints nothing / container gone after it | **FIXED 2026-07-19 (root cause)**: the kill-loop's `pgrep -f cuvslam_ros_node.py` matched the wrapper shell's own cmdline → kill -9'd itself → exit 137 → `set -e` aborted before restarting nodes. Patterns are now bracketed (`[c]uvslam…`). If you ever add a kill-loop to run_stack.sh, use `pgrep -f "[x]name"` |
 | Pi5 brain says "I cannot see right now" | look() feed comes from detections_3d (2 Hz JPEG republish on `/camera/color/image_raw/compressed`) — it is DOWN whenever YOLO is paused or the vision layer isn't up |
 
 ## 10. Facts & calibration (measured)
@@ -187,14 +211,16 @@ docker exec orin_nav bash -lc 'source /opt/ros/jazzy/setup.bash; export ROS_DOMA
 ```
 Dockerfile                 # orin-nav:1.1 (FROM isaac_ros:cuvslam-unified + everything baked)
 run_stack.sh               # all operations (see §5)
-cuvslam_ros_node.py        # the Orin cuVSLAM ROS wrapper
-config/  nav2.yaml | nvblox.yaml | bt_navigate_to_pose.xml (safe BT)
-nodes/   detections_3d | pixel_to_goal | cmd_vel_deadband | imu_to_base | visual_approach | drive_test
+cuvslam_ros_node.py        # cuVSLAM wrapper — FULL SLAM (map→odom, save/localize services)
+config/  nav2.yaml | nvblox.yaml | bt_navigate_to_pose.xml (safe BT) | laptop_view.rviz
+nodes/   detections_3d | pixel_to_goal | cmd_vel_deadband | safety_guard | imu_to_base | visual_approach | drive_test
 models/  yolov8n.pt
+maps/                      # persistent SLAM maps (host side of /maps; gitignored)
 standalone/                # ROS-free cuVSLAM dev tools (see standalone/README.md)
 ```
-Rebuild after any edit: `docker build -t orin-nav:1.1 ~/orin-nav-stack`
-(then `./run_stack.sh down && ./run_stack.sh up …`)
+No rebuild needed for code/config edits — the repo is bind-mounted RO over `/opt/orin-nav`;
+restart the affected node (`remap`, or re-run `vision`/`nav2` after `stop`). Rebuild the image
+only for dependency changes: `docker build -t orin-nav:1.1 ~/orin-nav-stack`
 
 **Do not delete** images `isaac_ros:langrobo-prod` / `isaac_ros:cuvslam-unified` — they are the
 layer parents of `orin-nav:1.1` (until a lean rebuild replaces them).
@@ -227,8 +253,10 @@ layer parents of `orin-nav:1.1` (until a lean rebuild replaces them).
 
 1. **Free space under the robot**: camera can't see its own feet → coordinate goals rely on
    `allow_unknown: true`. Better: seed robot cell free / startup mapping arc.
-2. **Loop closure + map save/reload** (cuVSLAM SlamConfig + LocalizeInMap): drift correction,
-   persistent maps, true relocalization — the next big feature.
+2. **Loop closure + map save/reload — DONE 2026-07-19**: cuVSLAM runs full SLAM
+   (planar constraints, loop closure, live map→odom). `/slam/save_map` + `/slam/localize`
+   verified stationary; **relocalization against a real driven map still needs a live
+   test** (a stationary 15 s map is too sparse to relocalize in — expected).
 3. **VLM→goal refinement loop**: coarse far goal from a detection, refined as depth improves.
 4. **Lean image**: rebuild from a minimal isaac-ros base (drops RTABMap etc., frees ~50 GB).
 5. **ESP32 firmware flash** (committed, awaiting USB): fixes reconnect bug + PWM floor →
