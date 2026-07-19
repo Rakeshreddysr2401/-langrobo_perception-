@@ -118,9 +118,18 @@ docker exec orin_nav bash -lc 'source /opt/ros/jazzy/setup.bash; export ROS_DOMA
 ## 7. Viewing (RViz / laptop)
 
 - On the Jetson monitor: `./run_stack.sh rviz` (close it when navigating — RAM).
-- From an **Ubuntu laptop** with ROS 2 Jazzy on the same LAN: `ROS_DOMAIN_ID=0 rviz2` —
-  add TF, `/nvblox_node/static_occupancy_grid` (live map), `/plan`, camera images.
-  Note: `/global_costmap/costmap` QoS is **TRANSIENT_LOCAL** — set the display's durability accordingly.
+- From an **Ubuntu laptop** with ROS 2 Jazzy on the same LAN — ready-made config:
+  ```bash
+  scp rakhi24@192.168.1.15:~/orin-nav-stack/config/laptop_view.rviz /tmp/
+  unset ROS_DISCOVERY_SERVER; export ROS_DOMAIN_ID=0
+  rviz2 -d /tmp/laptop_view.rviz
+  ```
+  Shows: TF frames, live nvblox walls, `/plan`, the `/odom` "pencil trail" (300 arrows),
+  optional nav2 costmap (durability already set to TRANSIENT_LOCAL) + camera image.
+  ⚠ The **"2D Goal Pose" toolbar button publishes a REAL nav goal** — if nav2 is up,
+  the rover MOVES. Treat it like a motion command (§8 rules apply).
+  If nothing shows: laptop must be on the same WiFi, multicast (no discovery-server
+  env), and `ros2 topic list` should show the stack's topics first.
 - Mac: Foxglove Studio → `ws://192.168.1.15:8765` after starting
   `ros2 run foxglove_bridge foxglove_bridge` in the container (works, but laggy over wifi).
 
