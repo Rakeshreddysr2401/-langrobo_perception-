@@ -1,0 +1,24 @@
+# nvblox overrides for the REAL robot profile (RealSense D555 + cuVSLAM).
+# Loaded on top of nvblox_examples_bringup/config/nvblox/nvblox_base.yaml.
+#
+# Reconstruction is anchored to cuVSLAM's odom frame (NVIDIA reference wiring:
+# smooth, no relocalization jumps in the costmaps). Goals arrive in `map`
+# (Pi5 contract); bt_navigator transforms them through cuVSLAM's map->odom.
+/**:
+  ros__parameters:
+    global_frame: "odom"
+    num_cameras: 1
+    use_depth: true
+    # RGB adds mesh color only — skip it; the Orin budget goes to depth + YOLO.
+    use_color: false
+    use_lidar: false
+    esdf_mode: "2d"
+    publish_esdf_distance_slice: true
+    map_clearing_frame_id: "base_link"
+    # Live driver publishes best-effort sensor QoS (sim used reliable).
+    input_qos: "SENSOR_DATA"
+    # Same robot band as sim: obstacles between ankle and camera height.
+    static_mapper:
+      esdf_slice_min_height: 0.05
+      esdf_slice_max_height: 0.40
+      esdf_slice_height: 0.10
