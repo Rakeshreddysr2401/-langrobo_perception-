@@ -81,6 +81,11 @@ class CuvslamNode(Node):
         self.declare_parameter('map_dir', '/maps/current')   # /maps = host volume
         self.declare_parameter('planar_constraints', True)   # floor rover
         self.declare_parameter('max_map_size', 300)          # keyframes
+        # 8GB Orin is CPU-tight: keep SBA off the track thread and throttle
+        # loop-closure searches — LC bursts at revisit moments starved the
+        # tracker and exploded odometry (2 pose explosions, 2026-07-19 night)
+        self.declare_parameter('async_sba', True)
+        self.declare_parameter('lc_throttle_ms', 2000)
         # relocalization search window around the guess pose
         self.declare_parameter('loc_search_radius_m', 2.0)
         self.declare_parameter('loc_search_vertical_m', 0.5)
@@ -166,7 +171,8 @@ class CuvslamNode(Node):
 
         rig = vslam.Rig(); rig.cameras = [left, right]
         cfg = vslam.Tracker.OdometryConfig(
-            async_sba=False, enable_final_landmarks_export=False,
+            async_sba=bool(self.get_parameter('async_sba').value),
+            enable_final_landmarks_export=False,
             enable_observations_export=False, rectified_stereo_camera=True)
         slam_cfg = None
         if self.enable_slam:
@@ -174,6 +180,7 @@ class CuvslamNode(Node):
             slam_cfg.planar_constraints = bool(self.get_parameter('planar_constraints').value)
             slam_cfg.max_map_size = int(self.get_parameter('max_map_size').value)
             slam_cfg.sync_mode = False        # loop closure on a worker thread
+            slam_cfg.throttling_time_ms = int(self.get_parameter('lc_throttle_ms').value)
         self.tracker = vslam.Tracker(rig, cfg, slam_cfg)
         self.get_logger().info(
             f'cuVSLAM tracker built: {li.width}x{li.height} fx={fx:.1f} baseline={baseline:.4f} m'

@@ -137,10 +137,15 @@ The virtual bumper only zeroes **forward** vx when nvblox shows an obstacle in t
 ## 7. Viewing (RViz / laptop)
 
 - On the Jetson monitor: `./run_stack.sh rviz` (close it when navigating — RAM).
-- From the **Ubuntu laptop (192.168.1.12)** — already installed (2026-07-19): just run
+- From the **HP laptop (192.168.1.12, HP Pavilion 14, hostname `rakhi24`, passwordless SSH
+  from the Jetson)** — already installed (2026-07-19): log into the desktop, then run
   ```bash
   ~/rover_view.sh        # sources Jazzy, domain 0, opens ~/laptop_view.rviz
   ```
+  ⚠ **Laptop must be logged in** — at the Ubuntu login screen nothing can display (a
+  remotely-launched rviz runs invisibly). Check it's really up with `pgrep -x rviz2` —
+  **never `pgrep -f rviz2` over ssh: it matches your own ssh command line** (same
+  self-match trap as the run_stack.sh kill loops).
   (Any other Jazzy laptop: `scp rakhi24@192.168.1.15:~/orin-nav-stack/config/laptop_view.rviz /tmp/`,
   `unset ROS_DISCOVERY_SERVER; export ROS_DOMAIN_ID=0; rviz2 -d /tmp/laptop_view.rviz`.)
   Shows: TF frames, live nvblox walls, `/plan`, the `/odom` "pencil trail" (300 arrows),
@@ -196,10 +201,23 @@ The virtual bumper only zeroes **forward** vx when nvblox shows an obstacle in t
 | Nav goal SUCCEEDED but rover stopped short/long of it | Pose inflated during motion (seen 2026-07-19: reported 1.0 m while physically shorter) — nav2 closes the loop on the *reported* pose. Re-map before the next goal; if it repeats, treat as tracking degradation, not calibration |
 | `remap` prints nothing / container gone after it | **FIXED 2026-07-19 (root cause)**: the kill-loop's `pgrep -f cuvslam_ros_node.py` matched the wrapper shell's own cmdline → kill -9'd itself → exit 137 → `set -e` aborted before restarting nodes. Patterns are now bracketed (`[c]uvslam…`). If you ever add a kill-loop to run_stack.sh, use `pgrep -f "[x]name"` |
 | Pi5 brain says "I cannot see right now" | look() feed comes from detections_3d (2 Hz JPEG republish on `/camera/color/image_raw/compressed`) — it is DOWN whenever YOLO is paused or the vision layer isn't up |
+| Pose explodes during forward drive (z≠0, teleport; guard trips) | Fast breakaway (~0.5 m/s) + LC burst starves the tracker. Recover: `remap`. Prevent: short bursts, nav2 off while teleop-mapping, keep node defaults `async_sba=true` `lc_throttle_ms=2000`. Durable fix = ESP32 flash (controllable slow speed) |
+| Laptop RViz "running" but nothing on screen | Laptop at the login screen (log in first!), or your `pgrep -f rviz2` matched itself over ssh — use `pgrep -x rviz2`. Launch as the logged-in user: `bash ~/rover_view.sh` on the laptop |
+| Wheels stall even at cmd 0.30 | Battery sag — breakaway threshold rises as the pack drains. Charge/swap; no software fix until the ESP32 PWM-floor firmware is flashed |
 
 ## 10. Facts & calibration (measured)
 
 - **Tape-verified accuracy**: commanded 1.00 m → real 0.95–1.00 m (closed-loop on cuVSLAM).
+- **Motors are binary + battery-dependent** (first mapping run, 2026-07-19 night): stall-hum
+  or ~0.5 m/s breakaway, nothing between. Fully charged, cmd 0.25 breaks away fast; drained
+  (same evening), even cmd 0.30 stalls. Open-loop PWM can't compensate → ESP32 firmware
+  flash (`e282a13`, Pi5 repo) is the real fix.
+- **Fast translation explodes cuVSLAM tracking** (~0.5 m/s real, close-range floor features,
+  30 fps): two pose explosions during the mapping run, both on straight bursts / at
+  loop-closure revisit moments. Mitigations that WORK: `async_sba=True` +
+  `lc_throttle_ms=2000` (now node defaults — after tuning, a rotate out-and-back returned
+  to 0.000/−0.001 m vs 30 cm drift before), stop nav2 while teleop-mapping (CPU headroom),
+  short motion bursts. safety_guard caught both explosions live (trip + auto-clear verified).
 - cuVSLAM (and RTABMap before it) under-read real distance ×~1.2 → **D555 factory stereo calib
   scale**; `CAL=1.2` inside `drive_test.py` compensates. Baseline 0.0949 m, 896×504@30 IR.
 - IR **emitter ON** (dense depth; does not hurt cuVSLAM in this single-container setup).
