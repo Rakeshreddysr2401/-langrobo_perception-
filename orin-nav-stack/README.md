@@ -170,7 +170,22 @@ Rebuild after any edit: `docker build -t orin-nav:1.1 ~/orin-nav-stack`
 **Do not delete** images `isaac_ros:langrobo-prod` / `isaac_ros:cuvslam-unified` — they are the
 layer parents of `orin-nav:1.1` (until a lean rebuild replaces them).
 
-## 12. Roadmap / known limitations
+## 12. Development, repo & host setup
+
+- **Git home**: this directory lives in the `langrobo_perception` repo
+  (`github.com/Rakeshreddysr2401/-langrobo_perception-`), branch **`dev_0.0.2_cuVslam_nav`**.
+  `~/orin-nav-stack` is a **symlink** to `~/langrobo_perception/orin-nav-stack` — there is only
+  ONE working copy; edit, then `git add/commit/push` from the repo.
+- **Shell alias** (in `~/.bashrc`): `navstack up|nav2|vision|stop|remap|rviz|logs|down`.
+- **isaac-ros CLI: REMOVED** (2026-07-19). It managed Isaac ROS 4.x dev environments — whose
+  cuVSLAM is Thor-only (won't run on Orin; the reason this stack exists). It pointed at the
+  deleted `~/workspaces/isaac_ros-dev` and re-pulled GB images when touched. Don't reinstall
+  unless NVIDIA ships Orin support for 4.x/Jazzy (watch isaac_ros_visual_slam issue #223).
+- **Host caveat**: apt has a pre-existing broken-dependency state (opencv/cmake from old host
+  experiments). Everything here runs in Docker and is unaffected — but avoid
+  `apt --fix-broken install` casually; it may churn many packages.
+
+## 13. Roadmap / known limitations
 
 1. **Free space under the robot**: camera can't see its own feet → coordinate goals rely on
    `allow_unknown: true`. Better: seed robot cell free / startup mapping arc.
