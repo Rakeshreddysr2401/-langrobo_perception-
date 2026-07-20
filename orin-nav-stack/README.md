@@ -8,6 +8,11 @@ live 3D mapping (nvblox), path planning/driving (nav2), and object detection (YO
 This folder is the **single source of truth**: every node, config, model and script the robot
 needs lives here and is baked into the image. No external workspaces.
 
+> **Bring-up / stop / fix:** see [`skills/`](skills/) (start & stop runbooks) and
+> [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md). Fast health check: `./run_stack.sh status`.
+> The D555 is an **ethernet/PoE DDS camera** (`192.168.11.55`), not USB — if it logs
+> `No RealSense devices were found`, power-cycle it, then `./run_stack.sh cam`.
+
 ---
 
 ## 1. What this project is
