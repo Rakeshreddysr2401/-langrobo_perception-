@@ -6,3 +6,6 @@ __pycache__/
 
 # machine-local Claude Code settings (absolute paths, per-session ids)
 .claude/settings.local.json
+
+# JetBrains IDE project metadata
+.idea/
