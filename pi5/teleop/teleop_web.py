@@ -40,13 +40,17 @@ CMD_TIMEOUT = 0.4      # s since last button ping before we treat it as released
 # runs fast — no slow creep). For the inner wheel to COUNTER-ROTATE (go backward)
 # it must be clearly < -0.02, i.e. wz/2 must beat vx/0.30 by a real margin.
 VX = 0.20
-WZ = 0.80          # left/right pivot -> wheels -0.40 / +0.40 (clean spin in place)
-# "slight" = tight forward turn: enough wz over vx that the inner wheel is a clear
-# -0.12 (reverses), outer +0.78 -> carves through tight spots while creeping fwd.
-# (Old 0.10/0.75 put the inner at only -0.04 — right on the park threshold, so it
-# usually just parked and you saw one side, which is the bug you spotted.)
-VX_SLIGHT = 0.10
-WZ_SLIGHT = 0.90
+# Turns need NEAR-MAX PWM: a pivot scrubs both tires in place, so it needs MORE
+# torque than driving straight. Forward runs each wheel at ~84% PWM and works;
+# a pivot at 0.80 wz was only ~71% -> the wheels just buzzed/stalled. The firmware
+# caps angular_pct at wz/2.0, so wz=2.0 = 100% PWM per wheel (teleop bypasses the
+# nav shim, so the 0.90 cap doesn't apply here).
+WZ = 2.0           # left/right pivot: each wheel ~100% PWM, opposite dirs
+# "slight" = tight turn: inner wheel ~80% PWM BACKWARD, outer ~100% forward, with
+# a little net forward creep. (Old 0.10/0.90 left the inner at only ~57% -> it
+# couldn't break free, so you never saw it reverse.)
+VX_SLIGHT = 0.08
+WZ_SLIGHT = 1.7
 MOVES = {
     'forward': (VX, 0.0),
     'back':    (-VX, 0.0),
