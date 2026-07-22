@@ -39,12 +39,22 @@ rexec(){ docker exec "$NAME" bash -lc "unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAU
 
 # Launch the D555 over DDS/ethernet. Shared by `up` and `cam` so the exact
 # stereo-IR + emitter + sync config lives in exactly one place.
+#
+# enable_sync:=false is CRITICAL (2026-07-22): with the camera's cross-stream
+# frame-syncer ON, enabling color gates the infra1/infra2 pair behind color
+# alignment over DDS and STARVES the IR stereo to <1 Hz -> cuVSLAM stalls ->
+# no /odom, no map->odom->base_link TF -> RViz map goes blank and nvblox builds
+# nothing. It is NOT a bandwidth issue (even 424x240x6 color starved IR) and NO
+# camera power-cycle fixes it. With sync OFF, infra1/infra2 stay hardware-synced
+# within the depth module (cuVSLAM stereo is fine) and color+IR coexist:
+# IR ~22-23 Hz, /odom ~18 Hz, color ~7 Hz all together. Do NOT set this back to
+# true. See memory: d555-color-starves-ir-slam.
 launch_cam(){
   dexec 'printf "{\"context\":{\"dds\":{\"enabled\":true,\"domain\":0}}}" > ~/.realsense-config.json;
          export LD_LIBRARY_PATH=/root/librealsense/install/lib:$LD_LIBRARY_PATH;
          exec ros2 launch realsense2_camera rs_launch.py camera_name:=camera0 \
             enable_infra1:=true enable_infra2:=true depth_module.infra_profile:=896x504x30 \
-            depth_module.emitter_enabled:=1 enable_depth:=true enable_color:=true enable_motion:=true enable_sync:=true \
+            depth_module.emitter_enabled:=1 enable_depth:=true enable_color:=true enable_motion:=true enable_sync:=false \
             > /tmp/realsense.log 2>&1'
 }
 
