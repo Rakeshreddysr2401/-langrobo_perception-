@@ -33,13 +33,20 @@ PUB_HZ = 10.0          # publish rate while MANUAL (feeds the 500 ms ESP32 watch
 CMD_TIMEOUT = 0.4      # s since last button ping before we treat it as released (dead-man)
 
 # velocity presets (linear m/s, angular rad/s). +wz turns LEFT (CCW).
+#
+# The ESP32 firmware (driveFromTwist, see rover_sim contract_bridge.py) sets each
+# wheel from the SIGN of: left = vx/0.30 - wz/2.0,  right = vx/0.30 + wz/2.0,
+# with a 0.02 park deadstick and a 0.51 PWM floor (so a wheel is either parked or
+# runs fast — no slow creep). For the inner wheel to COUNTER-ROTATE (go backward)
+# it must be clearly < -0.02, i.e. wz/2 must beat vx/0.30 by a real margin.
 VX = 0.20
-WZ = 0.70
-# "slight" = a TIGHT forward turn: slow forward + strong rotation so the INNER
-# wheel counter-rotates (goes backward) and the rover carves through tight spots
-# instead of one wheel just creeping. Tune vx down / wz up for a tighter turn.
+WZ = 0.80          # left/right pivot -> wheels -0.40 / +0.40 (clean spin in place)
+# "slight" = tight forward turn: enough wz over vx that the inner wheel is a clear
+# -0.12 (reverses), outer +0.78 -> carves through tight spots while creeping fwd.
+# (Old 0.10/0.75 put the inner at only -0.04 — right on the park threshold, so it
+# usually just parked and you saw one side, which is the bug you spotted.)
 VX_SLIGHT = 0.10
-WZ_SLIGHT = 0.75
+WZ_SLIGHT = 0.90
 MOVES = {
     'forward': (VX, 0.0),
     'back':    (-VX, 0.0),
