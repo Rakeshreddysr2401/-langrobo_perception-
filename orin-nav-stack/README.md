@@ -116,6 +116,16 @@ docker exec orin_nav bash -lc 'source /opt/ros/jazzy/setup.bash; export ROS_DOMA
   python3 /opt/orin-nav/nodes/drive_test.py straight 50 0.28'   # 50 cm forward
 ```
 
+**Manual drive + map an area — from your phone** (Pi5 mobile teleop → [`../pi5/teleop/`](../pi5/teleop/README.md))
+Open `http://192.168.1.16:8091` on a phone on the same wifi; tap **MANUAL** and hold the D-pad
+to drive (dead-man — release = stop). MANUAL hard-cancels any active nav2 goal; **AUTO**
+(default) hands `/cmd_vel` back to nav2/brain. To map a fresh area: mount the camera, then
+`./run_stack.sh remap` (fresh 0,0,0 origin + empty map) and drive **slowly** in MANUAL — nvblox
+builds the map as you move; watch it fill on the laptop RViz (§7), then save it (below). ⚠ Teleop
+publishes **directly** to `/cmd_vel` (bypasses safety_guard — drive by sight); keep speeds low and
+turns to **short taps** (fast pivots explode cuVSLAM tracking, §10). Runs as the always-on
+`langrobo-teleop` service on the Pi5.
+
 **Ask YOLO what it sees**
 ```bash
 docker exec orin_nav bash -lc 'source /opt/ros/jazzy/setup.bash; export ROS_DOMAIN_ID=0

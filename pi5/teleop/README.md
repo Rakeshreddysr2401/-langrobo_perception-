@@ -22,17 +22,41 @@ Buttons: forward / back, left / right (pivot in place), slight-left / slight-rig
 > ⚠️ Publishes **directly** to `/cmd_vel` (bypasses `safety_guard`) — drive by sight,
 > there is no automatic obstacle stop in MANUAL.
 
+## Map an area by driving
+
+nvblox builds the map from whoever is driving, so you can map a new place by hand:
+
+1. Mount the D555 **rigidly** on the rover (it must not move relative to the body).
+2. On the Jetson: `./run_stack.sh remap` — fresh `(0,0,0)` origin + empty map.
+3. Phone → **MANUAL**, drive **slowly** to explore. Turn to face walls so the depth
+   camera sees them; watch the 2D map fill in on the laptop RViz.
+4. Save when done (in the `orin_nav` container):
+   `ros2 service call /slam/save_map std_srvs/srv/Trigger` — persists cuVSLAM
+   features + the nvblox walls under `~/orin-nav-stack/maps/`.
+
+Keep it **slow, short bursts, turns in short taps** — fast motion (especially the
+near-max-power pivots) can make cuVSLAM lose tracking and corrupt the map. If the map
+suddenly jumps/smears, `./run_stack.sh remap` and start over.
+
 ## Files
 - `teleop_web.py` — rclpy node + stdlib HTTP server (binds `0.0.0.0:8091`).
 - `run_teleop.sh` — sources ROS (domain 0, FastRTPS, multicast — mirrors the brain).
 - `langrobo-teleop.service` — systemd unit.
 
 Speed constants (tunable) live at the top of `teleop_web.py`: `VX`, `WZ`,
-`VX_SLIGHT`, `WZ_SLIGHT`. Rover caps: `vx <= 0.22 m/s`, `wz <= 0.90 rad/s`.
+`VX_SLIGHT`, `WZ_SLIGHT`. Forward/back is `VX` (m/s). **Turns need near-max PWM**: the
+ESP32 sets each wheel from the sign of `vx/0.30 -/+ wz/2.0` (0.02 park deadstick, 0.51
+PWM floor), and a pivot scrubs both tires so it needs *more* torque than driving
+straight — a low `wz` just buzzes. `WZ=2.0` = ~100% PWM per wheel (teleop bypasses the
+nav shim, so the `wz<=0.90` cap doesn't apply here); `slight` uses a high `wz` over a
+small `vx` so the inner wheel clearly counter-rotates.
 
 ## Deploy on the Pi5
+
+Already installed as the `langrobo-teleop` systemd service (enabled at boot,
+2026-07-22). To (re)install from scratch — copy this folder to the Pi5 as
+`~/langrobo_teleop`, then:
 ```bash
-# copy this folder to the Pi5 as ~/langrobo_teleop, then:
 sudo cp ~/langrobo_teleop/langrobo-teleop.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now langrobo-teleop
