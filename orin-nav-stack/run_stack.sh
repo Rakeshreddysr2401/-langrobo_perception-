@@ -186,13 +186,15 @@ status)
     slam=$(ros2 topic echo /slam/status --once 2>/dev/null | grep -o "\"slam_pose_ok\": [a-z]*" | head -1)
     safe=$(ros2 topic echo /safety/state --once 2>/dev/null | grep -o "data: .*" | head -1)
     esp=$(ros2 topic info /cmd_vel 2>/dev/null | awk "/Subscription count/{print \$3}")
+    # LIVE nav2 check: bt_navigator lifecycle state (not a stale /tmp/nav2.log grep,
+    # which stays "Managed nodes are active" even after nav2 has crashed).
+    nav=$(timeout 5 ros2 lifecycle get /bt_navigator 2>/dev/null | grep -o "^active")
     printf "  camera D555 (infra1 publisher): %s\n" "${campub:-0}  (>=1 = streaming)"
     printf "  cuVSLAM        %s\n" "${slam:-<no /slam/status>}"
     printf "  safety         %s\n" "${safe:-<no /safety/state>}"
     printf "  ESP32 wheels (/cmd_vel subs):   %s\n" "${esp:-0}  (1 = wheels linked)"
+    printf "  nav2           %s\n" "${nav:-<not active / not started>}"
   '
-  docker exec "$NAME" grep -q "Managed nodes are active" /tmp/nav2.log 2>/dev/null \
-    && echo "  nav2           active" || echo "  nav2           <not active / not started>"
   ;;
 logs) docker exec "$NAME" tail -n 40 "/tmp/${2:-cuvslam}.log";;
 down) docker rm -f "$NAME" >/dev/null 2>&1 && echo "removed $NAME (hard stop)";;

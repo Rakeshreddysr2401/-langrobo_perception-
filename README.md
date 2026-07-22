@@ -37,6 +37,14 @@ bridge (`langrobo-microros`) and the Jetson stack
 (`langrobo-perception.service`) all start at boot. When `robot status` is
 green, talk to the robot on Telegram.
 
+### Manual teleop from your phone
+
+Open **`http://192.168.1.16:8091`** on a phone on the same wifi to drive the rover
+by hand. A top button toggles **AUTO** (default — nav2/brain drive, teleop is
+hands-off) vs **MANUAL** (you drive; hold-to-move, and it hard-cancels any active
+nav2 goal so there's no contention). Runs on the Pi5 (`langrobo-teleop`). See
+[`pi5/teleop/`](pi5/teleop/README.md).
+
 ## What the brain can use (all verified end-to-end)
 
 | Capability | Topic contract | Backed by |

@@ -10,6 +10,10 @@ Quick health of everything: `./run_stack.sh status`
 | `ESP32 wheels (/cmd_vel subs)` | `1` | [Wheels](#esp32-wheels-not-linked) |
 | `nav2` | `active` | [nav2](#nav2-fails-to-activate) |
 
+> `nav2` is a **live** `bt_navigator` lifecycle check (`ros2 lifecycle get`), not a
+> `/tmp/nav2.log` grep — so it reports `<not active / not started>` the moment nav2
+> crashes, instead of falsely staying `active` from a stale log line.
+
 ---
 
 ## Camera (D555) — no images
