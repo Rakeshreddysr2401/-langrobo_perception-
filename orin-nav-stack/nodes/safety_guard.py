@@ -159,7 +159,7 @@ class SafetyGuard(Node):
     # ---- depth bumper (stops BEFORE the 0.4 m blind zone) -----------------
     def _depth_cb(self, m: Image):
         self._depth_n += 1
-        if self._depth_n % 5:            # ~6 Hz is plenty
+        if self._depth_n % 3:            # every 3rd frame: ~6 Hz at the ~17 Hz depth rate (enable_sync:=false)
             return
         try:
             if m.encoding == '16UC1':
