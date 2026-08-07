@@ -79,6 +79,11 @@ class CuvslamNode(Node):
         self.declare_parameter('left_ns', '/camera/camera0/infra1')
         self.declare_parameter('right_ns', '/camera/camera0/infra2')
         self.declare_parameter('enable_slam', True)
+        # When False, do NOT broadcast the odom->base_link TF: a downstream
+        # robot_localization EKF owns it (fusing this node's /odom with the D555
+        # gyro, and later wheel encoders). map->odom and the /odom topic are
+        # still published — /odom becomes the EKF's odom0 input.
+        self.declare_parameter('publish_odom_tf', True)
         self.declare_parameter('map_dir', '/maps/current')   # /maps = host volume
         self.declare_parameter('planar_constraints', True)   # floor rover
         self.declare_parameter('max_map_size', 300)          # keyframes
@@ -95,6 +100,7 @@ class CuvslamNode(Node):
         self.base_frame = self.get_parameter('base_frame').value
         self.optical_frame = self.get_parameter('left_optical_frame').value
         self.enable_slam = bool(self.get_parameter('enable_slam').value)
+        self.publish_odom_tf = bool(self.get_parameter('publish_odom_tf').value)
         self.map_dir = self.get_parameter('map_dir').value
         left_ns = self.get_parameter('left_ns').value
         right_ns = self.get_parameter('right_ns').value
@@ -251,10 +257,11 @@ class CuvslamNode(Node):
                 f'map->odom corr=({c[0]:+.3f},{c[1]:+.3f},{c[2]:+.3f}) m slam={self.last_slam_ok}')
 
     def _publish(self, M: np.ndarray, stamp) -> None:
-        self.tf_broadcaster.sendTransform([
-            tf_msg(self.map_from_odom, stamp, self.map_frame, self.odom_frame),
-            tf_msg(M, stamp, self.odom_frame, self.base_frame),
-        ])
+        tfs = [tf_msg(self.map_from_odom, stamp, self.map_frame, self.odom_frame)]
+        if self.publish_odom_tf:
+            # EKF owns odom->base_link when fusion is on — don't fight it.
+            tfs.append(tf_msg(M, stamp, self.odom_frame, self.base_frame))
+        self.tf_broadcaster.sendTransform(tfs)
         q = Rotation.from_matrix(M[:3, :3]).as_quat()
         t = M[:3, 3]
         od = Odometry()
@@ -268,6 +275,12 @@ class CuvslamNode(Node):
         od.pose.pose.orientation.y = float(q[1])
         od.pose.pose.orientation.z = float(q[2])
         od.pose.pose.orientation.w = float(q[3])
+        # Diagonal pose covariance so the EKF has a finite trust on this source
+        # (zero covariance = infinite trust -> filter instability). Visual odom
+        # on this rig is good but not perfect: ~0.1 m / ~0.1 rad 1-sigma.
+        for i, c in ((0, 0.01), (7, 0.01), (14, 0.02),
+                     (21, 0.02), (28, 0.02), (35, 0.01)):
+            od.pose.covariance[i] = c
         self.odom_pub.publish(od)
         self.odom_pub2.publish(od)
 

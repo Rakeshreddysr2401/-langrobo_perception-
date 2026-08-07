@@ -140,8 +140,33 @@ vision)
   dexec "exec python3 $NAV/nodes/pixel_to_goal.py > /tmp/pixel_to_goal.log 2>&1"
   dexec "exec python3 $NAV/nodes/cmd_vel_deadband.py > /tmp/cmd_vel_deadband.log 2>&1"
   dexec "exec python3 $NAV/nodes/safety_guard.py > /tmp/safety_guard.log 2>&1"
-  dexec "exec python3 $NAV/nodes/imu_to_base.py > /tmp/imu_to_base.log 2>&1"
+  # imu_to_base is owned by 'fuse' now (it only feeds the EKF). Run './run_stack.sh
+  # fuse' for visual+IMU odometry; plain vision stays visual-odom-only.
   echo "vision + goal + motor shim (vx<=0.22 wz<=0.90) + safety guard starting"
+  ;;
+fuse)
+  # Visual-inertial fusion: cuVSLAM /odom + D555 gyro -> robot_localization EKF,
+  # which OWNS the odom->base_link TF. So cuVSLAM is restarted with
+  # publish_odom_tf:=false (no TF fight), then imu_to_base + ekf come up.
+  # Run after 'up'. Fresh fusion reset = this command (the fusion-mode 'remap').
+  # See config/ekf.yaml: two_d_mode + gyro-yaw-only (accel NOT fused — diverges).
+  docker exec "$NAME" bash -lc 'for pid in $(pgrep -f "[c]uvslam_ros_node.py"); do kill -9 $pid 2>/dev/null; done; for pid in $(pgrep -f "[i]mu_to_base.py"); do kill -9 $pid 2>/dev/null; done; for pid in $(pgrep -f "[e]kf_node"); do kill -9 $pid 2>/dev/null; done; for pid in $(pgrep -x nvblox_node); do kill -9 $pid 2>/dev/null; done; true' || true
+  sleep 3
+  echo "[1/4] cuVSLAM (odom->base_link TF OFF — EKF owns it)"
+  dexec "export LD_LIBRARY_PATH=$CU12:\$LD_LIBRARY_PATH; exec python3 $NAV/cuvslam_ros_node.py --ros-args -p publish_odom_tf:=false > /tmp/cuvslam.log 2>&1"
+  sleep 5
+  echo "[2/4] imu_to_base (D555 motion -> /imu/base, gyro in base_link)"
+  dexec "exec python3 $NAV/nodes/imu_to_base.py > /tmp/imu_to_base.log 2>&1"
+  sleep 1
+  echo "[3/4] robot_localization EKF (/odom + /imu/base -> odom->base_link)"
+  dexec "exec ros2 run robot_localization ekf_node --ros-args -r __node:=ekf_filter_node --params-file $NAV/config/ekf.yaml > /tmp/ekf.log 2>&1"
+  sleep 3
+  echo "[4/4] nvblox (depth + fused pose -> 3D map/ESDF)"
+  dexec "NVB=\$(python3 -c 'from ament_index_python.packages import get_package_share_directory as g; print(g(\"nvblox_examples_bringup\")+\"/config/nvblox/nvblox_base.yaml\")');
+         exec ros2 run nvblox_ros nvblox_node --ros-args --params-file \$NVB --params-file $NAV/config/nvblox.yaml \
+            -p use_color:=false -r camera_0/depth/image:=/camera/camera0/depth/image_rect_raw \
+            -r camera_0/depth/camera_info:=/camera/camera0/depth/camera_info > /tmp/nvblox.log 2>&1"
+  echo "fusion up: odom->base_link now from the EKF (/odometry/filtered). Verify: ./run_stack.sh status"
   ;;
 stop)
   # E-STOP: kill everything that can command motion, then hold zeros briefly.
@@ -161,7 +186,10 @@ stop)
 remap)
   # bracket patterns so pgrep -f can't match this wrapper shell itself (a
   # self-match kill -9'd the exec -> exit 137 -> set -e aborted remap silently)
-  docker exec "$NAME" bash -lc 'for pid in $(pgrep -f "[c]uvslam_ros_node.py"); do kill -9 $pid 2>/dev/null; done; for pid in $(pgrep -x nvblox_node); do kill -9 $pid 2>/dev/null; done; true' || true
+  # also kill any EKF/imu relay so cuVSLAM (restarted with its own odom TF ON)
+  # doesn't fight the EKF for odom->base_link. 'remap' = clean visual-only reset;
+  # 'fuse' = clean fusion reset.
+  docker exec "$NAME" bash -lc 'for pid in $(pgrep -f "[c]uvslam_ros_node.py"); do kill -9 $pid 2>/dev/null; done; for pid in $(pgrep -f "[e]kf_node"); do kill -9 $pid 2>/dev/null; done; for pid in $(pgrep -f "[i]mu_to_base.py"); do kill -9 $pid 2>/dev/null; done; for pid in $(pgrep -x nvblox_node); do kill -9 $pid 2>/dev/null; done; true' || true
   sleep 3
   dexec "export LD_LIBRARY_PATH=$CU12:\$LD_LIBRARY_PATH; exec python3 $NAV/cuvslam_ros_node.py > /tmp/cuvslam.log 2>&1"
   sleep 5
@@ -198,5 +226,5 @@ status)
   ;;
 logs) docker exec "$NAME" tail -n 40 "/tmp/${2:-cuvslam}.log";;
 down) docker rm -f "$NAME" >/dev/null 2>&1 && echo "removed $NAME (hard stop)";;
-*) echo "usage: $0 {up|cam|nav2|vision|status|stop|remap|rviz|logs <name>|down}";;
+*) echo "usage: $0 {up|cam|nav2|vision|fuse|status|stop|remap|rviz|logs <name>|down}";;
 esac
