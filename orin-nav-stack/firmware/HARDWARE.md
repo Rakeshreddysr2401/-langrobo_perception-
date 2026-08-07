@@ -6,6 +6,39 @@ Companion to `LangRobo_Wiring_Documentation_v1.pdf` (the raw pin list).
 
 ---
 
+## 0. Current status (bench test 2026-08-07, wheels OFF rover)
+
+**VERIFIED GOOD — ready to standardize / mount to rover:**
+- ✅ ESP32 flashes and connects to the micro-ROS agent over WiFi (time sync OK).
+- ✅ All 4 BTS7960-driven motors run; 12 V battery + power-bank scheme works.
+- ✅ All 4 encoders count (LF, LR, RF, RR) at 3V3 supply — no level shifter needed.
+- ✅ Directions correct after flipping the RIGHT side (mirror-mounted): all four
+     wheel-tops drive forward together on a `+vx` command. Closed-loop PID holds speed.
+- ✅ `/cmd_vel` link works (drove forward/stop from ROS).
+
+**OPEN ITEM (does NOT block mounting or driving):**
+- ⚠️ `/wheel_odom` doesn't reach the host yet. The ESP32 publishes it, but
+     `nav_msgs/Odometry` (~700 B) is too big for the micro-ROS WiFi transport, so the
+     packets drop (the small `/cmd_vel` Twist crosses fine). Fix for the nav-fusion
+     phase: ESP32 sends a SMALL message (wheel speeds / tick counts) + a tiny Pi5 relay
+     node rebuilds `/wheel_odom` for the EKF. Localization works meanwhile via cuVSLAM
+     + gyro, so this is an enhancement, not a blocker.
+
+**VERIFIED direction flags (already set in `rover_firmware_v2.ino`):**
+`L_MOTOR_DIR=+1  R_MOTOR_DIR=-1  ENC_LF_DIR=+1  ENC_LR_DIR=+1  ENC_RF_DIR=-1  ENC_RR_DIR=-1`
+
+### Before you STANDARDIZE (permanently mount / solder)
+- [ ] Encoder **Blue → 3V3** on all 4 (NOT 5 V/VIN) — this is what keeps GPIOs safe.
+- [ ] Common ground tied: battery(−), ESP32 GND, both BTS7960 GNDs, all encoder Blacks.
+- [ ] R_IS / L_IS left unconnected on both drivers.
+- [ ] Strain-relief the motor + encoder leads (vibration kills solder joints).
+- [ ] Keep the ESP32 reachable for USB reflash OR set an OTA password (§8) — OTA is
+      currently unauthenticated.
+- [ ] Firmware `WIFI_PASS` filled locally; never commit real credentials.
+- [ ] Router: reserve the ESP32's DHCP lease so its IP doesn't move.
+
+---
+
 ## 1. What the rover is
 
 Differential-drive (skid-steer) rover, 4 driven wheels:
@@ -107,10 +140,10 @@ protection). 5 V on them can damage the chip.
 safe to wire Green/Yellow straight to the GPIOs, no level shifter. The ~15 mA × 4
 encoders is well within the 3V3 regulator.
 
-**Risk / fallback:** 3.3 V is below the datasheet's 5 V, so counts *may* be flaky.
-Verify in the bench test (§8). If flaky: move Blue back to 5 V and add a
-**5 V→3.3 V divider on every Green/Yellow line** — `1 kΩ` in series + `2 kΩ` to GND
-= 3.33 V (8 signals = 16 resistors), or two 4-channel BSS138 level-shifter modules.
+**CONFIRMED (2026-08-07):** all 4 encoders count cleanly at 3V3 — no level shifter
+needed. (Fallback if a future encoder is flaky at 3.3 V: move Blue back to 5 V and add
+a **5 V→3.3 V divider on every Green/Yellow line** — `1 kΩ` series + `2 kΩ` to GND =
+3.33 V, 8 signals = 16 resistors, or two 4-channel BSS138 modules.)
 
 ---
 
@@ -147,24 +180,31 @@ signals are meaningless.
 Firmware: `firmware/rover_firmware_v2.ino`. It is fully calibrated for this rover
 (85 mm wheels, 340 mm track, CPR 1560, max wheel vel 0.86 m/s).
 
-### Flash (first time = USB)
-1. Arduino IDE / arduino-cli with the **ESP32** board package.
-2. Install libraries: **micro_ros_arduino** (jazzy branch) + **ESP32Encoder**.
-3. Fill in `WIFI_PASS` and `OTA_PASS` locally (kept as placeholders — never commit).
-4. USB-flash. (After this, OTA works: `arduino-cli upload -p rover-esp32.local ...`.)
+Requires **ESP32 Arduino core 3.x** (LEDC is by-pin: `ledcAttach`/`ledcWrite`; the
+firmware already uses the 3.x API). QoS is **BEST_EFFORT** both ways (reliable stalls
+over micro-ROS WiFi).
 
-### Phase 1 — bench test, WHEELS OFF THE GROUND
-Open the Serial Monitor @115200 (prints enc counts + velocities at ~2 Hz).
-1. Power up. On the Pi5: `ros2 topic info /cmd_vel` → **Subscription count: 1**;
-   `ros2 topic echo /wheel_odom` shows messages.
-2. **Encoder signs** — spin each wheel forward by hand; its count (LF/LR/RF/RR in
-   the serial line) must go **UP**. If a count goes down, flip that encoder's
-   `ENC_*_DIR` macro and re-flash.
-3. **Motor directions** — `ros2 topic pub /cmd_vel geometry_msgs/msg/Twist '{linear: {x: 0.1}}'`.
-   Both sides should spin **forward** and `velL`/`velR` should be **positive**. If a
-   side spins backward, flip `L_MOTOR_DIR` / `R_MOTOR_DIR`. (velL/velR positive on
-   forward confirms motor dir and encoder dir agree — required or PID runs away.)
+### Flash (first time = USB)
+1. Arduino IDE / arduino-cli with the **ESP32** board package (core **3.x**).
+2. Install libraries: **micro_ros_arduino** (jazzy branch) + **ESP32Encoder** (madhephaestus).
+3. Fill in `WIFI_PASS` locally (placeholder — never commit). OTA password is optional
+   (`#define OTA_PASSWORD ...`); leave undefined for bench, SET before deployment.
+4. USB-flash. (After this, OTA works: `arduino-cli upload -p rover-esp32.local ...`.)
+5. Boot serial should read: `[PWM] attach OK` → `[ENC] 4x quadrature attached` →
+   `[uROS] time sync OK` → `[uROS] CONNECTED`, then the 2 Hz `IN … | OUT …` heartbeat.
+
+### Phase 1 — bench test, WHEELS OFF THE GROUND  ✅ DONE 2026-08-07
+Serial @115200 prints `IN tgt … | OUT velL/velR odom(...) | enc LF/LR/RF/RR` at ~2 Hz.
+1. `ros2 topic info /cmd_vel` → **Subscription count: 1**.
+2. **Encoder signs** — roll each wheel forward by hand; its count must go **UP**.
+   (Right side counted −ve → `ENC_RF_DIR`/`ENC_RR_DIR` set to −1.)
+3. **Motor directions** — `ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist '{linear: {x: 0.12}}'`.
+   All four wheel-tops must go **forward**. (Right side drove backward → `R_MOTOR_DIR`
+   set to −1.) `velL`/`velR` positive on forward = motor dir & encoder dir agree
+   (required, or the PID runs that side to full speed).
 4. **Rotate** — `angular: {z: 0.5}` → wheels counter-rotate.
+> Note: `/wheel_odom` won't echo on the host yet (see §0 open item) — the bench test
+> reads velocities from the **serial** heartbeat instead.
 
 ### Phase 2 — floor calibration
 - Drive a measured **1.0 m** straight; compare `/wheel_odom` `position.x`. Adjust
@@ -193,13 +233,15 @@ wheels scrub.) Then bring up fusion: `./run_stack.sh fuse`.
 
 ## 9. ROS interface summary
 
-| Topic | Type | Dir (ESP32) | Purpose |
-|---|---|---|---|
-| `/cmd_vel` | geometry_msgs/Twist | subscribe | target body vx, wz |
-| `/wheel_odom` | nav_msgs/Odometry | publish | encoder odom (frame odom→base_link), twist vx/vyaw for EKF |
+| Topic | Type | Dir (ESP32) | QoS | Purpose |
+|---|---|---|---|---|
+| `/cmd_vel` | geometry_msgs/Twist | subscribe | best_effort | target body vx, wz |
+| `/wheel_odom` | nav_msgs/Odometry | publish | best_effort | encoder odom (frame odom→base_link), twist vx/vyaw for EKF — see §0 size caveat |
 
-Watchdog: no `/cmd_vel` for 500 ms → motors stop. Agent-reconnect state machine
-recovers from agent restart / Pi5 reboot / WiFi drop without power-cycling.
+Watchdog: no `/cmd_vel` for 500 ms → motors stop. Agent-reconnect state machine drops
+only after 3 consecutive missed pings (reduces WiFi flapping) and recovers from agent
+restart / Pi5 reboot / WiFi drop without power-cycling. This node publishes **no TF** —
+the Jetson robot_localization EKF owns `odom→base_link` (`config/ekf.yaml`).
 
 ---
 

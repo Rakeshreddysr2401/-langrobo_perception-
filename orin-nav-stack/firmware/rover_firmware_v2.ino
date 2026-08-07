@@ -6,34 +6,33 @@
 //             (2 motors per side, paralleled onto ONE BTS7960 per side).
 //  Transport: WiFi UDP -> micro_ros_agent on Pi5 (192.168.1.16:8888)
 //
-//  Subscribes : /cmd_vel     geometry_msgs/Twist   (target body vx, wz)
-//  Publishes  : /wheel_odom  nav_msgs/Odometry     (encoder odom for the EKF)
+//  ── ROS INTERFACE ───────────────────────────────────────────────────────────
+//  IN   /cmd_vel     geometry_msgs/Twist    target body vx, wz   (nav2 / teleop)
+//  OUT  /wheel_odom  nav_msgs/Odometry      encoder odom -> Jetson EKF (odom1)
+//       Both use BEST_EFFORT QoS — reliable stalls over micro-ROS WiFi.
+//       Frames: header=odom, child=base_link. Twist (vx, vyaw) is what the EKF
+//       fuses; pose is integrated too. This node does NOT publish any TF — the
+//       robot_localization EKF owns odom->base_link (see config/ekf.yaml).
 //
-//  WHAT CHANGED FROM v1: v1 drove an L298N OPEN-LOOP (bang-bang, 51% PWM
-//  floor, no encoders). v2 drives the BTS7960 with a per-side PID velocity
-//  loop off the wheel encoders, and publishes wheel odometry so the Jetson
-//  EKF (config/ekf.yaml -> odom1: /wheel_odom) can fuse it with cuVSLAM+gyro.
+//  ── CONTROL ──────────────────────────────────────────────────────────────────
+//  Per-side PID velocity loop off the wheel encoders (avg of front+rear each
+//  side). 500 ms /cmd_vel watchdog. WiFi agent-reconnect state machine.
 //
-//  === WIRING (LangRobo_Wiring_Documentation_v1.pdf + HARDWARE.md) ===
+//  ── TOOLCHAIN (ESP32 Arduino core 3.x + micro_ros_arduino) ──────────────────
+//   * core 3.x LEDC is by-PIN: ledcAttach(pin,freq,res) + ledcWrite(pin,duty).
+//   * time-sync API varies; call is behind a compile guard (see createEntities).
+//   * EXECUTE_EVERY_N_MS uses Arduino millis() (uxr_millis not always exported).
+//   * Encoder internal pull-ups OFF: input-only pads (34/35/36/39) can't have
+//     them (harmless boot errors otherwise); GB37 encoders are push-pull @3V3.
+//
+//  ── WIRING ───────────────────────────────────────────────────────────────────
 //    Left  BTS7960 : RPWM=18 LPWM=19 R_EN=21 L_EN=22
 //    Right BTS7960 : RPWM=23 LPWM=5  R_EN=27 L_EN=13
 //    Encoders (A,B): Left-Front 34/35   Left-Rear  36/39
-//                    Right-Front 32/33  Right-Rear 25/26   (ALL 4 read; per-side avg)
+//                    Right-Front 32/33  Right-Rear 25/26
 //    Encoder power : Blue=3V3, Black=GND, Green=C1(A), Yellow=C2(B)
 //
-//  === ENCODER VOLTAGE ===
-//  GB37 encoders are rated 5V. We run them off the ESP32 3V3 pin so their A/B
-//  outputs are already 3.3V-safe for the GPIOs (no level shifter needed). IF
-//  counts are flaky at 3.3V, move Blue back to 5V and add a 5V->3.3V divider
-//  (1k series + 2k to GND = 3.3V) on every Green/Yellow line.
-//
-//  === LIBRARIES (install once) ===
-//    - micro_ros_arduino   (branch matching the Pi5 agent: jazzy)
-//    - ESP32Encoder        (madhephaestus) — hardware PCNT quadrature decode
-//
-//  === CALIBRATE / BENCH TEST === see HARDWARE.md. Wheels OFF the ground first:
-//  confirm each side spins the RIGHT way and each encoder counts the RIGHT sign
-//  (watch Serial @115200), flipping the *_DIR macros until forward => +count.
+//  LIBRARIES: micro_ros_arduino (jazzy) + ESP32Encoder (madhephaestus)
 // ============================================================
 
 #include <WiFi.h>
@@ -51,12 +50,14 @@
 #include <nav_msgs/msg/odometry.h>
 
 // ── WiFi + agent ─────────────────────────────────────────────────────────────
-const char* WIFI_SSID  = "Airtel_Singireddy's";  // home AP (Jetson+Pi5 on it)
-const char* WIFI_PASS  = "YOUR_PASSWORD";          // <-- fill locally, NEVER commit
-const char* AGENT_IP   = "192.168.1.16";           // Pi5 wlan0 (reserve in router)
+//  Fill WIFI_PASS locally before flashing. Do NOT commit real credentials.
+const char* WIFI_SSID  = "Airtel_Singireddy's";
+const char* WIFI_PASS  = "YOUR_WIFI_PASSWORD";   // <-- set locally
+const char* AGENT_IP   = "192.168.1.16";          // Pi5 wlan0
 const uint16_t AGENT_PORT = 8888;
 const char* OTA_HOSTNAME = "rover-esp32";
-const char* OTA_PASS     = "YOUR_OTA_PASSWORD";    // <-- fill locally, NEVER commit
+// OTA left UNAUTHENTICATED for bench work — set a password before deployment:
+// #define OTA_PASSWORD "choose-something"
 
 // ── Motor driver pins (BTS7960) ──────────────────────────────────────────────
 #define L_RPWM 18
@@ -78,53 +79,51 @@ const char* OTA_PASS     = "YOUR_OTA_PASSWORD";    // <-- fill locally, NEVER co
 #define ENC_RR_A 25
 #define ENC_RR_B 26
 
-// ── LEDC PWM ─────────────────────────────────────────────────────────────────
-#define PWM_FREQ 1000      // Hz (BTS7960 handles up to ~25k; 1k is quiet enough)
+// ── PWM (core 3.x: attach per pin, write per pin) ────────────────────────────
+#define PWM_FREQ 1000      // Hz
 #define PWM_RES  8         // 8-bit -> 0..255
-#define CH_L_R   0
-#define CH_L_L   1
-#define CH_R_R   2
-#define CH_R_L   3
 
 // ╔════════════════════════ CALIBRATION ═══════════════════════════════════════╗
-//  Measured on this rover. Wrong numbers = wrong odometry.
 #define WHEEL_DIAMETER_M 0.085f   // 85 mm tyre OD
 #define WHEEL_BASE_M     0.34f    // 34 cm between L<->R wheel centres
-#define ENCODER_CPR      1560.0f  // Rhino GB37: 13 PPR * 4 (quad) * 30 gear = 1560
-                                  //   counts per WHEEL rev (matches attachFullQuad).
-#define MAX_WHEEL_VEL    0.86f    // m/s at full PWM = (193/60) * PI * 0.085
-                                  //   (193 = GB37 rated RPM)
-// Sign flips — set during the wheels-off bench test (see header / HARDWARE.md):
-#define L_MOTOR_DIR (+1)   // +1/-1 so +cmd spins LEFT side FORWARD
-#define R_MOTOR_DIR (+1)   // +1/-1 so +cmd spins RIGHT side FORWARD
-// One flag per encoder: +1/-1 so forward motion => +count. Front & rear on a
-// side may be mirror-mounted, so each gets its own flag.
-#define ENC_LF_DIR (+1)
+#define ENCODER_CPR      1560.0f  // 13 PPR * 4 (quad) * 30 gear = counts / wheel rev
+#define MAX_WHEEL_VEL    0.86f    // m/s at full PWM = (193/60)*PI*0.085
+
+// Direction flags — SET FROM BENCH TEST. Right side is mounted mirror-image, so
+// both its motor AND its encoders are inverted vs the left (verified 2026-08-07:
+// forward cmd drove left fwd, right backward; right encoders count -ve on fwd).
+#define L_MOTOR_DIR (+1)   // +cmd spins LEFT side forward
+#define R_MOTOR_DIR (-1)   // +cmd spins RIGHT side forward  (flipped)
+#define ENC_LF_DIR (+1)    // forward motion => +count
 #define ENC_LR_DIR (+1)
-#define ENC_RF_DIR (+1)
-#define ENC_RR_DIR (+1)
+#define ENC_RF_DIR (-1)    // right encoders inverted (flipped)
+#define ENC_RR_DIR (-1)
 // ╚═════════════════════════════════════════════════════════════════════════════╝
 
-#define WHEEL_CIRC  (float)(M_PI * WHEEL_DIAMETER_M)
+#define WHEEL_CIRC       (float)(M_PI * WHEEL_DIAMETER_M)
 #define METRES_PER_COUNT (WHEEL_CIRC / ENCODER_CPR)
 
 // ── Control loop + PID ───────────────────────────────────────────────────────
 #define CONTROL_HZ      50.0f
 #define CONTROL_DT      (1.0f / CONTROL_HZ)
-#define CMD_TIMEOUT_MS  500          // stop if no /cmd_vel within this window
-float Kp  = 1.5f;                    // duty per (m/s) error
-float Ki  = 4.0f;                    // duty per (m/s*s)
-float Kff = 1.0f / MAX_WHEEL_VEL;    // feedforward: target m/s -> nominal duty
-#define MIN_MOVE_DUTY   0.12f        // static-friction breakaway when target != 0
+#define CMD_TIMEOUT_MS  500
+float Kp  = 1.5f;
+float Ki  = 4.0f;
+float Kff = 1.0f / MAX_WHEEL_VEL;
+#define MIN_MOVE_DUTY   0.12f
+
+#define DEBUG_SERIAL 1     // 1 = print IN/OUT at ~2 Hz on Serial @115200
 
 // ── Agent connection state machine ──────────────────────────────────────────
 enum AgentState { WAITING_AGENT, AGENT_AVAILABLE, AGENT_CONNECTED, AGENT_DISCONNECTED };
 AgentState agentState = WAITING_AGENT;
 
-#define EXECUTE_EVERY_N_MS(MS, X)  do {            \
-    static volatile int64_t init = -1;             \
-    if (init == -1) { init = uxr_millis(); }       \
-    if (uxr_millis() - init > MS) { X; init = uxr_millis(); } \
+//  Plain Arduino millis(). Unsigned subtraction handles rollover. last=0 fires
+//  the first call immediately.
+#define EXECUTE_EVERY_N_MS(MS, X) do {         \
+    static uint32_t last = 0;                  \
+    uint32_t now = millis();                   \
+    if ((now - last) >= (MS)) { last = now; X; } \
 } while (0)
 
 // ── Encoders ─────────────────────────────────────────────────────────────────
@@ -136,7 +135,7 @@ volatile float targetVx = 0.0f, targetWz = 0.0f;
 unsigned long lastCmdMs = 0;
 float integL = 0.0f, integR = 0.0f;
 
-// ── Odometry pose (integrated on the ESP32) ──────────────────────────────────
+// ── Odometry pose ────────────────────────────────────────────────────────────
 float odomX = 0.0f, odomY = 0.0f, odomTh = 0.0f;
 
 // ── micro-ROS entities ───────────────────────────────────────────────────────
@@ -152,27 +151,27 @@ rcl_node_t      node;
 bool timeSynced = false;
 
 // ── BTS7960 drive: duty -1..+1 for one side ──────────────────────────────────
-void driveSide(int chR, int chL, int dir, float duty) {
+void driveSide(int pinR, int pinL, int dir, float duty) {
     duty *= dir;
     if (duty >  1.0f) duty =  1.0f;
     if (duty < -1.0f) duty = -1.0f;
     int pwm = (int)(fabsf(duty) * 255.0f);
-    if (duty > 0.001f)      { ledcWrite(chR, pwm); ledcWrite(chL, 0);   }
-    else if (duty < -0.001f){ ledcWrite(chR, 0);   ledcWrite(chL, pwm); }
-    else                    { ledcWrite(chR, 0);   ledcWrite(chL, 0);   }
+    if (duty > 0.001f)      { ledcWrite(pinR, pwm); ledcWrite(pinL, 0);   }
+    else if (duty < -0.001f){ ledcWrite(pinR, 0);   ledcWrite(pinL, pwm); }
+    else                    { ledcWrite(pinR, 0);   ledcWrite(pinL, 0);   }
 }
 
 void stopMotors() {
-    ledcWrite(CH_L_R, 0); ledcWrite(CH_L_L, 0);
-    ledcWrite(CH_R_R, 0); ledcWrite(CH_R_L, 0);
+    ledcWrite(L_RPWM, 0); ledcWrite(L_LPWM, 0);
+    ledcWrite(R_RPWM, 0); ledcWrite(R_LPWM, 0);
 }
 
 // ── PID (velocity) for one side -> duty ──────────────────────────────────────
 float pidStep(float target, float meas, float &integ) {
-    if (fabsf(target) < 0.01f) { integ = 0.0f; return 0.0f; }  // parked: no creep/windup
+    if (fabsf(target) < 0.01f) { integ = 0.0f; return 0.0f; }
     float err = target - meas;
     integ += err * CONTROL_DT;
-    float ilim = 1.0f / Ki;                    // clamp so |Ki*integ| <= 1 (anti-windup)
+    float ilim = 1.0f / Ki;                 // anti-windup: |Ki*integ| <= 1
     if (integ >  ilim) integ =  ilim;
     if (integ < -ilim) integ = -ilim;
     float out = Kff * target + Kp * err + Ki * integ;
@@ -186,8 +185,7 @@ float pidStep(float target, float meas, float &integ) {
 void controlCb(rcl_timer_t* timer, int64_t /*last*/) {
     if (!timer) return;
 
-    // 1) measure per-side velocity — AVERAGE both encoders on each side
-    //    (front+rear): more resolution, less noise, survives one bad encoder.
+    // 1) measure per-side velocity — average both encoders on each side
     long cLF = (long)encLF.getCount() * ENC_LF_DIR;
     long cLR = (long)encLR.getCount() * ENC_LR_DIR;
     long cRF = (long)encRF.getCount() * ENC_RF_DIR;
@@ -196,20 +194,26 @@ void controlCb(rcl_timer_t* timer, int64_t /*last*/) {
     long dLR = cLR - lastLR;  lastLR = cLR;
     long dRF = cRF - lastRF;  lastRF = cRF;
     long dRR = cRR - lastRR;  lastRR = cRR;
-    float distL = 0.5f * (dLF + dLR) * METRES_PER_COUNT;  // side avg, metres this tick
+    float distL = 0.5f * (dLF + dLR) * METRES_PER_COUNT;
     float distR = 0.5f * (dRF + dRR) * METRES_PER_COUNT;
-    float velL  = distL / CONTROL_DT;      // m/s
+    float velL  = distL / CONTROL_DT;
     float velR  = distR / CONTROL_DT;
 
-    // 2) watchdog: silence from the Pi5 -> stop
+    // 2) watchdog: silence from the Pi5 -> stop (log the transition once)
+    static bool wdStopped = false;
     float tvx = targetVx, twz = targetWz;
-    if (millis() - lastCmdMs > CMD_TIMEOUT_MS) { tvx = 0.0f; twz = 0.0f; }
+    if (millis() - lastCmdMs > CMD_TIMEOUT_MS) {
+        tvx = 0.0f; twz = 0.0f;
+        if (!wdStopped) { wdStopped = true; Serial.println("[WD] /cmd_vel stale -> stop"); }
+    } else {
+        wdStopped = false;
+    }
 
     // 3) target -> per-wheel setpoints -> PID -> BTS7960
     float wTargetL = tvx - twz * WHEEL_BASE_M * 0.5f;
     float wTargetR = tvx + twz * WHEEL_BASE_M * 0.5f;
-    driveSide(CH_L_R, CH_L_L, L_MOTOR_DIR, pidStep(wTargetL, velL, integL));
-    driveSide(CH_R_R, CH_R_L, R_MOTOR_DIR, pidStep(wTargetR, velR, integR));
+    driveSide(L_RPWM, L_LPWM, L_MOTOR_DIR, pidStep(wTargetL, velL, integL));
+    driveSide(R_RPWM, R_LPWM, R_MOTOR_DIR, pidStep(wTargetR, velR, integR));
 
     // 4) integrate odometry from MEASURED wheel travel
     float ds  = 0.5f * (distL + distR);
@@ -218,7 +222,7 @@ void controlCb(rcl_timer_t* timer, int64_t /*last*/) {
     odomY  += ds * sinf(odomTh + 0.5f * dth);
     odomTh += dth;
 
-    // 5) publish /wheel_odom (twist = the part the EKF fuses)
+    // 5) publish /wheel_odom (twist = vx, vyaw = what the EKF fuses)
     int64_t ns = rmw_uros_epoch_nanos();
     odomMsg.header.stamp.sec     = (int32_t)(ns / 1000000000LL);
     odomMsg.header.stamp.nanosec = (uint32_t)(ns % 1000000000LL);
@@ -226,19 +230,19 @@ void controlCb(rcl_timer_t* timer, int64_t /*last*/) {
     odomMsg.pose.pose.position.y = odomY;
     odomMsg.pose.pose.orientation.z = sinf(odomTh * 0.5f);
     odomMsg.pose.pose.orientation.w = cosf(odomTh * 0.5f);
-    odomMsg.twist.twist.linear.x  = ds  / CONTROL_DT;   // body vx
-    odomMsg.twist.twist.angular.z = dth / CONTROL_DT;   // body vyaw
+    odomMsg.twist.twist.linear.x  = ds  / CONTROL_DT;
+    odomMsg.twist.twist.angular.z = dth / CONTROL_DT;
     rcl_publish(&odomPub, &odomMsg, NULL);
 
-    // --- BENCH-TEST DEBUG (watch on Serial Monitor @115200, ~2 Hz) ---
-    // Roll a wheel FORWARD by hand: its count must go UP. If it goes down,
-    // flip that encoder's ENC_*_DIR. velL/velR must be + when driving forward.
-    static uint16_t dbg = 0;
+#if DEBUG_SERIAL
+    static uint16_t dbg = 0;               // ~2 Hz: IN (tgt) + OUT (vel/enc)
     if (++dbg >= 25) {
         dbg = 0;
-        Serial.printf("enc LF=%ld LR=%ld RF=%ld RR=%ld | velL=%.2f velR=%.2f | tgt vx=%.2f wz=%.2f\n",
-                      cLF, cLR, cRF, cRR, velL, velR, tvx, twz);
+        Serial.printf("IN tgt vx=%.2f wz=%.2f | OUT velL=%.2f velR=%.2f odom(x=%.2f y=%.2f th=%.2f) "
+                      "| enc LF=%ld LR=%ld RF=%ld RR=%ld\n",
+                      tvx, twz, velL, velR, odomX, odomY, odomTh, cLF, cLR, cRF, cRR);
     }
+#endif
 }
 
 // ── /cmd_vel callback ────────────────────────────────────────────────────────
@@ -260,14 +264,13 @@ void initOdomMsg() {
     odomMsg.child_frame_id.size      = strlen(base_frame);
     odomMsg.child_frame_id.capacity  = sizeof(base_frame);
     for (int i = 0; i < 36; i++) { odomMsg.pose.covariance[i] = 0.0; odomMsg.twist.covariance[i] = 0.0; }
-    // small variance on what we actually measure, huge on the rest
-    odomMsg.pose.covariance[0]  = 0.02;  odomMsg.pose.covariance[7]  = 0.02;  // x, y
+    odomMsg.pose.covariance[0]  = 0.02;  odomMsg.pose.covariance[7]  = 0.02;   // x, y
     odomMsg.pose.covariance[14] = 1e6;   odomMsg.pose.covariance[21] = 1e6;
-    odomMsg.pose.covariance[28] = 1e6;   odomMsg.pose.covariance[35] = 0.05;  // yaw
-    odomMsg.twist.covariance[0]  = 0.01;                                       // vx
+    odomMsg.pose.covariance[28] = 1e6;   odomMsg.pose.covariance[35] = 0.05;   // yaw
+    odomMsg.twist.covariance[0]  = 0.01;                                        // vx
     odomMsg.twist.covariance[7]  = 1e6;  odomMsg.twist.covariance[14] = 1e6;
     odomMsg.twist.covariance[21] = 1e6;  odomMsg.twist.covariance[28] = 1e6;
-    odomMsg.twist.covariance[35] = 0.02;                                       // vyaw
+    odomMsg.twist.covariance[35] = 0.02;                                        // vyaw
     odomMsg.pose.pose.orientation.w = 1.0;
 }
 
@@ -279,9 +282,11 @@ bool createEntities() {
     (void) rmw_uros_set_context_entity_destroy_session_timeout(rmw_context, 0);
 
     if (rclc_node_init_default(&node, "rover_esp32", "", &support) != RCL_RET_OK) return false;
-    if (rclc_subscription_init_default(&cmdVelSub, &node,
+
+    // BEST_EFFORT both ways — reliable QoS stalls over the micro-ROS WiFi link.
+    if (rclc_subscription_init_best_effort(&cmdVelSub, &node,
             ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist), "/cmd_vel") != RCL_RET_OK) return false;
-    if (rclc_publisher_init_default(&odomPub, &node,
+    if (rclc_publisher_init_best_effort(&odomPub, &node,
             ROSIDL_GET_MSG_TYPE_SUPPORT(nav_msgs, msg, Odometry), "/wheel_odom") != RCL_RET_OK) return false;
     if (rclc_timer_init_default(&controlTimer, &support,
             RCL_MS_TO_NS((int)(1000.0f / CONTROL_HZ)), controlCb) != RCL_RET_OK) return false;
@@ -290,8 +295,13 @@ bool createEntities() {
     rclc_executor_add_subscription(&executor, &cmdVelSub, &twistMsg, &cmdVelCb, ON_NEW_DATA);
     rclc_executor_add_timer(&executor, &controlTimer);
 
-    // align stamps with the agent clock so robot_localization accepts them
-    timeSynced = (rmw_uros_sync_session_time() == RMW_RET_OK);
+    // Align stamps with the agent clock so robot_localization accepts them.
+#if defined(RMW_UROS_SYNC_SESSION) || __has_include(<rmw_microros/time_sync.h>)
+    timeSynced = (rmw_uros_sync_session(1000) == RMW_RET_OK);
+#else
+    timeSynced = false;
+#endif
+    Serial.printf("[uROS] time sync %s\n", timeSynced ? "OK" : "off (board-time stamps)");
 
     // fresh baseline so the first tick isn't a huge accumulated delta
     lastLF = (long)encLF.getCount() * ENC_LF_DIR;
@@ -300,7 +310,7 @@ bool createEntities() {
     lastRR = (long)encRR.getCount() * ENC_RR_DIR;
     integL = integR = 0.0f;
     lastCmdMs = millis();
-    Serial.println("[uROS] entities live — /cmd_vel sub, /wheel_odom pub");
+    Serial.println("[uROS] entities live — IN /cmd_vel, OUT /wheel_odom (best_effort)");
     return true;
 }
 
@@ -326,32 +336,36 @@ void setup() {
     digitalWrite(L_REN, HIGH); digitalWrite(L_LEN, HIGH);
     digitalWrite(R_REN, HIGH); digitalWrite(R_LEN, HIGH);
 
-    // PWM channels on RPWM/LPWM
-    ledcSetup(CH_L_R, PWM_FREQ, PWM_RES); ledcAttachPin(L_RPWM, CH_L_R);
-    ledcSetup(CH_L_L, PWM_FREQ, PWM_RES); ledcAttachPin(L_LPWM, CH_L_L);
-    ledcSetup(CH_R_R, PWM_FREQ, PWM_RES); ledcAttachPin(R_RPWM, CH_R_R);
-    ledcSetup(CH_R_L, PWM_FREQ, PWM_RES); ledcAttachPin(R_LPWM, CH_R_L);
+    // PWM (core 3.x): ledcAttach(pin, freq, resolution). Verify each.
+    bool pwmOK = true;
+    pwmOK &= ledcAttach(L_RPWM, PWM_FREQ, PWM_RES);
+    pwmOK &= ledcAttach(L_LPWM, PWM_FREQ, PWM_RES);
+    pwmOK &= ledcAttach(R_RPWM, PWM_FREQ, PWM_RES);
+    pwmOK &= ledcAttach(R_LPWM, PWM_FREQ, PWM_RES);
+    Serial.printf("[PWM] attach %s\n", pwmOK ? "OK" : "FAILED — motors won't drive");
     stopMotors();
 
-    // Encoders (PCNT hardware quadrature). 34/35/36/39 are input-only with no
-    // internal pull-up — enable weak pulls; add external pull-ups if the encoder
-    // board is open-collector.
-    ESP32Encoder::useInternalWeakPullResistors = puType::up;
+    // Encoders (PCNT hardware quadrature). Internal pull-ups OFF (input-only
+    // pads can't have them; GB37 encoders are push-pull at 3V3).
+    ESP32Encoder::useInternalWeakPullResistors = puType::none;
     encLF.attachFullQuad(ENC_LF_A, ENC_LF_B);
     encLR.attachFullQuad(ENC_LR_A, ENC_LR_B);
     encRF.attachFullQuad(ENC_RF_A, ENC_RF_B);
     encRR.attachFullQuad(ENC_RR_A, ENC_RR_B);
     encLF.clearCount(); encLR.clearCount();
     encRF.clearCount(); encRR.clearCount();
+    Serial.println("[ENC] 4x quadrature attached");
 
     initOdomMsg();
 
     Serial.printf("[WiFi] agent %s:%d\n", AGENT_IP, AGENT_PORT);
     set_microros_wifi_transports((char*)WIFI_SSID, (char*)WIFI_PASS, (char*)AGENT_IP, AGENT_PORT);
-    WiFi.setSleep(false);   // modem sleep adds ~100ms latency to every cmd
+    WiFi.setSleep(false);   // modem sleep adds ~100 ms latency to every cmd
 
     ArduinoOTA.setHostname(OTA_HOSTNAME);
-    ArduinoOTA.setPassword(OTA_PASS);
+#ifdef OTA_PASSWORD
+    ArduinoOTA.setPassword(OTA_PASSWORD);
+#endif
     ArduinoOTA.onStart([]() { stopMotors(); });
     ArduinoOTA.begin();
 
@@ -366,17 +380,27 @@ void loop() {
     case WAITING_AGENT:
         stopMotors();
         EXECUTE_EVERY_N_MS(1000,
-            agentState = (rmw_uros_ping_agent(500, 2) == RMW_RET_OK) ? AGENT_AVAILABLE : WAITING_AGENT);
+            agentState = (rmw_uros_ping_agent(300, 1) == RMW_RET_OK) ? AGENT_AVAILABLE : WAITING_AGENT);
         break;
+
     case AGENT_AVAILABLE:
-        agentState = createEntities() ? AGENT_CONNECTED : (destroyEntities(), WAITING_AGENT);
+        if (createEntities()) { agentState = AGENT_CONNECTED; Serial.println("[uROS] CONNECTED"); }
+        else                  { destroyEntities(); agentState = WAITING_AGENT; }
         break;
-    case AGENT_CONNECTED:
-        EXECUTE_EVERY_N_MS(2000,
-            agentState = (rmw_uros_ping_agent(500, 3) == RMW_RET_OK) ? AGENT_CONNECTED : AGENT_DISCONNECTED);
+
+    case AGENT_CONNECTED: {
+        // Tolerate transient WiFi: only drop after 3 consecutive missed pings,
+        // so a single lost packet doesn't tear down the session (was flapping).
+        static uint8_t pingMiss = 0;
+        EXECUTE_EVERY_N_MS(2000, {
+            if (rmw_uros_ping_agent(300, 1) == RMW_RET_OK) pingMiss = 0;
+            else if (++pingMiss >= 3) agentState = AGENT_DISCONNECTED;
+        });
         if (agentState == AGENT_CONNECTED)
             rclc_executor_spin_some(&executor, RCL_MS_TO_NS(5));
         break;
+    }
+
     case AGENT_DISCONNECTED:
         stopMotors();
         destroyEntities();
