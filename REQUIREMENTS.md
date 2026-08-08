@@ -31,8 +31,10 @@ Ordered by likely contribution:
 1. **The deadband shim forbids slow motion.** `scripts/cmd_vel_deadband.py`
    rescales every nonzero command onto [0.20, 0.30] m/s and amplifies wz up
    to 1.4 rad/s. MPPI's gentle approach/correction speeds become lunges, on
-   an *open-loop* drivetrain (commanded ≠ physical speed). Near a wall there
-   is no such thing as a small correction.
+   the *old open-loop* drivetrain (commanded ≠ physical speed). Near a wall there
+   is no such thing as a small correction. (As of 2026-08 the drivetrain is
+   closed-loop PID with encoders — see `orin-nav-stack/firmware/HARDWARE.md` — so
+   this shim should be revisited/reduced.)
    *Fix:* the firmware **source** on the Pi5
    (`~/ros2_ws/ESP_32_frimware/rover_firmware.ino`) already contains the
    per-wheel PWM remap (`PWM_MIN 130`), correct `AGENT_IP 192.168.1.16`,

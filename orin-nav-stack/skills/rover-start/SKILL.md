@@ -58,9 +58,10 @@ Brain health: `ssh rakhi24@192.168.1.16 'curl -s 127.0.0.1:8090/health'`.
 ```bash
 docker exec orin_nav bash -lc 'source /opt/ros/jazzy/setup.bash; export ROS_DOMAIN_ID=0; ros2 topic info /cmd_vel' | grep -i subscription
 ```
-`Subscription count: 1` = wheels connected. **If 0: the user must physically power-cycle
-the rover** — old firmware doesn't retry the agent connection (fixed in unflashed firmware
-`e282a13`, Pi5 repo — still awaiting USB flash as of 2026-07-19).
+`Subscription count: 1` = wheels connected. Firmware v2 (flashed 2026-08, Pi5 repo
+`pi5_ros2_ws` — see `orin-nav-stack/firmware/HARDWARE.md`) auto-reconnects to the agent
+(drops only after 3 missed pings), so a WiFi blip recovers on its own. **If it stays 0:**
+confirm the ESP32 is powered and on WiFi.
 
 ## 4. HP-laptop RViz live view
 
@@ -82,5 +83,7 @@ Data check on laptop: `unset ROS_DISCOVERY_SERVER; export ROS_DOMAIN_ID=0; sourc
   the brain's look()/VLM — that's expected.
 - safety_guard gates nav commands only; `drive_test.py` / manual `/cmd_vel` pubs bypass it.
 - Never replace `config/bt_navigate_to_pose.xml` with nav2's default BT (blind recovery spins).
-- Known limit (until ESP32 flash): motors are stall-or-~0.5 m/s; fast straights can explode
-  cuVSLAM tracking — prefer short bursts; battery sag lowers the breakaway threshold.
+- Drivetrain (2026-08): closed-loop BTS7960 + encoder PID (firmware v2 — see
+  `orin-nav-stack/firmware/HARDWARE.md`), ~0.86 m/s top speed. Fast straights can still
+  stress cuVSLAM tracking — prefer short bursts. Wheel odometry is NOT yet fused into the
+  EKF (see HARDWARE.md §0 open item).

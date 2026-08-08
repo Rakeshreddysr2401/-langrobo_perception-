@@ -51,8 +51,9 @@ against a dead camera, and leaves the container up so `cam` can retry.
 (fix the camera first, above). With images flowing, cuVSLAM needs texture and gentle
 motion to lock. Restart pose/map without touching the camera: `./run_stack.sh remap`.
 
-Fast straights can explode tracking (motors are stall-or-~0.5 m/s until the ESP32 flash)
-— prefer short bursts, and pause YOLO before motion (`pkill -9 -f nodes/detections_3d.py`).
+Fast straights can explode tracking — prefer short bursts, and pause YOLO before motion
+(`pkill -9 -f nodes/detections_3d.py`). (The old stall-or-~0.5 m/s open-loop motors were
+replaced 2026-08 by the closed-loop BTS7960 + encoder drivetrain — `firmware/HARDWARE.md`.)
 
 ---
 
@@ -70,6 +71,7 @@ recovery spins (Spin/BackUp) that are unsafe on the tethered rover.
 
 ## ESP32 wheels not linked
 
-`/cmd_vel` subscription count `0` = wheels not connected. Old firmware doesn't retry the
-micro-ROS agent connection (fixed in unflashed firmware `e282a13`, still awaiting USB
-flash). Fix: physically power-cycle the rover, then re-check `./run_stack.sh status`.
+`/cmd_vel` subscription count `0` = wheels not connected. Firmware v2 (flashed 2026-08 —
+see `firmware/HARDWARE.md`) auto-reconnects to the agent (drops only after 3 missed pings),
+so a brief WiFi blip recovers on its own. If it stays `0`: confirm the ESP32 is powered and
+on WiFi, then re-check `./run_stack.sh status`.

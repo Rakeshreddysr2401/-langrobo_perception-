@@ -16,8 +16,11 @@ handle turning, and a small program (an "EKF") to blend the two.
 
 ## 1. Two ways a robot can measure its own motion
 
-- **By the wheels** ("how many times did the wheel spin?"). We do NOT use this —
-  our motors have no encoders, and wheels *skid*, which lies.
+- **By the wheels** ("how many times did the wheel spin?"). As of 2026-08 the rover
+  HAS wheel encoders (Rhino GB37 + firmware v2 — see
+  `orin-nav-stack/firmware/HARDWARE.md`), so wheel odometry is now available as a
+  fusion source. It stays *secondary* because wheels *skid*, which lies, while the
+  camera measures real motion.
 - **By the camera** ("how did the view shift?") — called *visual odometry*. This
   is what we use. Its big advantage: skidding doesn't fool it, because it measures
   the *real* movement of the world, not wheel spin.

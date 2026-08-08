@@ -47,9 +47,11 @@ the **accelerometer**, we deliberately do **not** use for distance: getting
 distance from it means adding acceleration up twice, and tiny errors blow up to
 meters within seconds. So **distance comes from the camera, turning from the gyro.**
 
-Why not measure distance from the wheels? No wheel encoders, and wheels **skid** —
-which lies. The camera measures the *real* movement of the robot through the world,
-so skidding doesn't fool it.
+Why is the camera still the primary distance source even now that we DO have wheel
+encoders (added 2026-08 — see `orin-nav-stack/firmware/HARDWARE.md`)? Because wheels
+**skid**, which lies. The camera measures the *real* movement of the robot through the
+world, so skidding doesn't fool it. The encoders add a valuable *second opinion* (wheel
+odometry) that keeps the estimate alive when the camera briefly loses tracking.
 
 ---
 

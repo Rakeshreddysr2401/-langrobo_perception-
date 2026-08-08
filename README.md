@@ -69,8 +69,9 @@ Pi5-side client for scripts/tests: `pi5/langrobo_client.py`
 4. **Verify rotation direction** (one-time): send
    `ros2 topic pub -r 10 --times 15 /cmd_vel geometry_msgs/msg/Twist "{angular: {z: 1.4}}"`.
    The rover must turn **LEFT (counter-clockwise from above)**. If it turns
-   right, swap the two motor connectors of ONE side, or negate `angularZ` in
-   `ESP_32_frimware/rover_firmware.ino` (Pi5 repo) → reflash.
+   right, flip a side's `*_MOTOR_DIR` (and matching `ENC_*_DIR`) in
+   `ESP_32_frimware/rover_firmware_v2.ino` (Pi5 repo `pi5_ros2_ws`) → reflash.
+   Drivetrain reference: `orin-nav-stack/firmware/HARDWARE.md`.
 5. Drive a slow manual square (Telegram: "turn left", "go forward") and watch
    RViz — the orange path should mirror what the rover did.
 6. First autonomous test: `robot status` all green → Telegram "go one meter
@@ -85,7 +86,7 @@ Pi5-side client for scripts/tests: `pi5/langrobo_client.py`
 | `scripts/run_localization.sh` | backend dispatcher (called by run_all) |
 | `scripts/run_rtabmap.sh` | RTAB-Map backend: rgbd_odometry + rtabmap on infra1 + raw depth |
 | `scripts/run_cuvslam_sidecar.sh` | cuVSLAM backend (parked — see Known quirks) |
-| `scripts/cmd_vel_deadband.py` | motor dead-zone shim: `/cmd_vel_nav` → effective-PWM `/cmd_vel`. DELETE after the ESP32 firmware reflash carries the remap itself |
+| `scripts/cmd_vel_deadband.py` | motor dead-zone shim: `/cmd_vel_nav` → effective-PWM `/cmd_vel`. REVISIT/REDUCE now that firmware v2 is closed-loop PID (`orin-nav-stack/firmware/HARDWARE.md`) |
 | `scripts/run_*.sh` | other stages (camera, nvblox, nav2, vision, rviz) |
 | `docker/cuvslam-sidecar/` | the Isaac ROS 3.2.6 Humble sidecar that makes cuVSLAM run on Orin/JP7 |
 | `langrobo_perception/` | ROS nodes: detections_3d (YOLO + target finder), pixel_to_goal |
@@ -126,11 +127,12 @@ Pi5-side client for scripts/tests: `pi5/langrobo_client.py`
   out of the 10s TF cache mid-drive and abort with "extrapolation into the
   past". langrobo_client and the Pi5 brain already do this — keep it that
   way in new tools.
-- **Motor dead zone**: below ~60% PWM (cmd <≈0.18 m/s) the wheels hum but
-  don't turn. `cmd_vel_deadband.py` rescales Nav2's output for now; the
-  proper fix is the same remap in `ESP_32_frimware/rover_firmware.ino`
-  (Pi5 repo) — after reflashing, delete the shim and set the collision
-  monitor's `cmd_vel_out_topic` back to `cmd_vel`.
+- **Motor dead zone** (old open-loop era): below ~60% PWM the wheels hummed but
+  didn't turn, so `cmd_vel_deadband.py` rescales Nav2's output. Firmware v2
+  (`rover_firmware_v2.ino`, Pi5 repo `pi5_ros2_ws`) is now closed-loop PID with a
+  breakaway floor (`orin-nav-stack/firmware/HARDWARE.md`), so the shim should be
+  reduced/removed — re-tune, then point the collision monitor's `cmd_vel_out_topic`
+  back to `cmd_vel`.
 - **Jazzy↔Humble DDS is NOT trustworthy** (relevant only if reviving the
   cuVSLAM sidecar): /tf_static never deserializes across it and large
   image messages drop even with 16MB buffers ("sequence size exceeds

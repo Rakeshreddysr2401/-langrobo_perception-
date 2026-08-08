@@ -58,7 +58,7 @@ only once the rover is powered.**
  └─────────────────────────────────────────────────────────────────┘
    │  /cmd_vel  (geometry_msgs/Twist)
    ▼
- ESP32 rover (micro-ROS) → firmware PWM map → L298N → 2 gearmotors
+ ESP32 rover (micro-ROS) → firmware v2 PID → 2x BTS7960 → 4 encoder gearmotors
 ```
 
 Everything runs on the Jetson Orin Nano inside the `isaac_ros` container on
@@ -237,8 +237,11 @@ These fix the real wall-hitting incidents documented in REQUIREMENTS.md.
 
 ### Dead-zone compensation (why it exists)
 
-The L298N + gearmotors need ~60 % PWM to overcome static friction; MPPI's slow
-approach speeds (0.07–0.15 m/s) only hummed and stalled a few cm short of goals.
+NOTE (pre-2026-08, open-loop era): the old L298N + gearmotors needed ~60 % PWM to
+overcome static friction; MPPI's slow approach speeds (0.07–0.15 m/s) only hummed and
+stalled a few cm short of goals. The v2 drivetrain (2x BTS7960 + encoder PID — see
+`orin-nav-stack/firmware/HARDWARE.md`) closes the loop, so this shim should be
+re-tuned/reduced once wheel odometry is fused.
 `cmd_vel_deadband.py` rescales every non-zero command onto the effective range
 (linear → [0.20, 0.30] m/s, angular → [0.80, 1.40] rad/s), exact zeros pass
 through as stop. Nav2 keeps planning in ideal velocities; visual odometry closes
