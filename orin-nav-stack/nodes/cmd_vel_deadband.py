@@ -1,5 +1,25 @@
 #!/usr/bin/env python3
-"""Motor dead-zone compensation: /cmd_vel_nav -> /cmd_vel_shim (-> safety_guard -> /cmd_vel).
+"""DEPRECATED (2026-08-10) — DO NOT RUN. Kept only as calibration history.
+
+Retired for two reasons:
+
+  1. Its premise is dead. Firmware v2 (firmware/rover_firmware_v2.ino) runs a
+     50 Hz CLOSED-LOOP PID on encoder velocity (MAX_WHEEL_VEL 0.86 m/s) with
+     gMinDuty 0.08 for static-friction breakaway — exactly the job this node
+     was invented to do, now done properly at the motor.
+  2. It was destroying navigation. Re-flooring every nonzero command to
+     |vx|>=0.20 and |wz|>=0.80 meant MPPI's fine corrections (e.g. vx 0.02,
+     wz 0.05) reached the wheels as (0.21, 0.80) — a hard swerve. The
+     controller had no fine authority left, so it oscillated: overshoot,
+     correct, overshoot the other way. That was the rover's "drunken" weave.
+
+It also sat on /cmd_vel_nav, which (per nav2_bringup's remappings) carries the
+RAW controller_server output — so it forwarded un-smoothed, collision-monitor-
+BYPASSING commands straight to the wheels. See config/nav2.yaml collision_monitor.
+
+Original notes follow.
+--------------------------------------------------------------------------
+Motor dead-zone compensation: /cmd_vel_nav -> /cmd_vel_shim (-> safety_guard -> /cmd_vel).
 
 The ESP32 firmware maps commanded m/s linearly onto PWM (0.30 m/s = 100%),
 open loop. The L298N + gearmotors need roughly >=60% PWM to break static

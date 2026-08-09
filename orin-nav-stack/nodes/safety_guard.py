@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """No-crash layer (phase-1 Step 6): the LAST gate before the wheels.
 
-Chain:  nav2 MPPI -> /cmd_vel_nav -> cmd_vel_deadband -> /cmd_vel_shim
-                                   -> safety_guard (THIS) -> /cmd_vel -> wheels
+Chain:  controller_server -> /cmd_vel_nav -> velocity_smoother -> /cmd_vel_smoothed
+          -> collision_monitor -> /cmd_vel_shim -> safety_guard (THIS) -> /cmd_vel
+
+(cmd_vel_deadband was removed from this chain 2026-08-10 — see that file.)
 
 Two independent protections:
 
@@ -62,7 +64,23 @@ class SafetyGuard(Node):
         # the lens) also blocks — fail-safe: rotation/reverse stay free.
         self.declare_parameter('depth_topic', '/camera/camera0/depth/image_rect_raw')
         self.declare_parameter('depth_stop_m', 0.50)
-        self.declare_parameter('depth_invalid_frac', 0.60)
+        # 0.92, was 0.60 (2026-08-10). The IR emitter is OFF by design (it wrecks
+        # cuVSLAM translation scale — see run_stack.sh), which makes passive-stereo
+        # depth SPARSE on textureless/reflective floors. At 0.60 the central ROI
+        # routinely went "mostly invalid" on bare floor, latching depth_blocked
+        # with nothing actually ahead. Because _cmd_cb zeroes only vx and lets wz
+        # through, nav2 kept commanding forward+turn and ONLY THE TURN reached the
+        # wheels: the rover pirouetted in place until progress_checker aborted.
+        # That is the "rotated here and there and never went there" symptom.
+        self.declare_parameter('depth_invalid_frac', 0.92)
+        # A genuinely covered lens / object inside the 0.4 m blind zone blanks the
+        # ROI almost completely AND leaves any surviving pixels very close. A
+        # textureless floor still returns valid depth at RANGE — so require both
+        # conditions before braking on invalid data.
+        self.declare_parameter('depth_blind_near_m', 1.0)
+        # Consecutive agreeing samples before latching/clearing (~6 Hz -> 0.5 s).
+        # Stops single noisy frames from toggling the bumper mid-drive.
+        self.declare_parameter('depth_debounce', 3)
         p = lambda n: self.get_parameter(n).value
         self.jump_max = float(p('jump_max'))
         self.z_max = float(p('z_max'))
@@ -85,6 +103,11 @@ class SafetyGuard(Node):
         self._depth_n = 0
         self.depth_stop_m = float(p('depth_stop_m'))
         self.depth_invalid_frac = float(p('depth_invalid_frac'))
+        self.depth_blind_near_m = float(p('depth_blind_near_m'))
+        self.depth_debounce = max(1, int(p('depth_debounce')))
+        self._depth_streak = 0           # consecutive samples agreeing with _raw
+        self._depth_raw = False          # latest un-debounced verdict
+        self.depth_reason = ''
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -177,16 +200,37 @@ class SafetyGuard(Node):
         valid = roi[roi > 150]           # 0/near-0 = invalid (blind/no return)
         frac_invalid = 1.0 - valid.size / max(roi.size, 1)
         near = float(valid.min()) / 1000.0 if valid.size else 0.0
-        was = self.depth_blocked
         self.depth_near_m = near
-        self.depth_blocked = ((valid.size > 0 and near < self.depth_stop_m)
-                              or frac_invalid > self.depth_invalid_frac)
-        if self.depth_blocked and not was:
-            why = (f'obstacle {near:.2f} m ahead' if valid.size and near < self.depth_stop_m
-                   else f'{frac_invalid:.0%} of depth ROI invalid (blind-zone/covered)')
-            self.get_logger().warn(f'depth bumper: {why} — forward blocked')
-        elif was and not self.depth_blocked:
-            self.get_logger().info('depth bumper clear — forward re-enabled')
+
+        # A real obstacle: something valid and close.
+        near_block = valid.size > 0 and near < self.depth_stop_m
+        # Blind/covered: ROI almost entirely invalid AND nothing valid at range.
+        # (Sparse-but-distant returns = textureless floor with the emitter off —
+        # NOT a reason to brake. See the depth_invalid_frac note in __init__.)
+        blind_block = (frac_invalid > self.depth_invalid_frac
+                       and (valid.size == 0 or near < self.depth_blind_near_m))
+        raw = near_block or blind_block
+        reason = ''
+        if near_block:
+            reason = f'obstacle {near:.2f} m ahead'
+        elif blind_block:
+            reason = f'{frac_invalid:.0%} of depth ROI invalid (blind-zone/covered)'
+
+        # Debounce: only flip after `depth_debounce` consecutive agreeing samples.
+        if raw == self._depth_raw:
+            self._depth_streak += 1
+        else:
+            self._depth_raw = raw
+            self._depth_streak = 1
+
+        was = self.depth_blocked
+        if self._depth_streak >= self.depth_debounce and raw != self.depth_blocked:
+            self.depth_blocked = raw
+            self.depth_reason = reason
+            if raw and not was:
+                self.get_logger().warn(f'depth bumper: {reason} — forward blocked')
+            elif was and not raw:
+                self.get_logger().info('depth bumper clear — forward re-enabled')
         self._publish_bumper_marker()
 
     def _publish_bumper_marker(self):
@@ -254,7 +298,7 @@ class SafetyGuard(Node):
         if self.tripped:
             s = 'TRIPPED:' + self.trip_reason
         elif self.depth_blocked:
-            s = f'FWD_BLOCKED:depth {self.depth_near_m:.2f}m'
+            s = f'FWD_BLOCKED:depth {self.depth_near_m:.2f}m ({self.depth_reason})'
         else:
             s = 'ok'
         self.state_pub.publish(String(data=s))

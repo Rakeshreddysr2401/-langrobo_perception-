@@ -97,7 +97,13 @@ class Detections3DNode(Node):
         super().__init__("detections_3d")
 
         self.declare_parameter("model", "/models/yolov8n.pt")
-        self.declare_parameter("confidence", 0.45)
+        # 0.35, was 0.45 (2026-08-10). Measured on this rig: a plastic bottle at
+        # 1.4 m comes back as 'vase' 0.40 / 'bottle' 0.15 from yolov8n, so a 0.45
+        # gate published NOTHING for an object filling a good part of the frame
+        # and the approach behaviour lost its target as it closed in. 0.35 keeps
+        # those borderline-but-real detections; downstream consumers still apply
+        # their own thresholds, and the EMA in _smooth() rejects position outliers.
+        self.declare_parameter("confidence", 0.35)
         self.declare_parameter("device", "cuda")
         self.declare_parameter("detect_rate", 5.0)   # Hz — rate WHEN IN DEMAND
         # On-demand gating: YOLO is the biggest CPU draw on the 6-core Orin
@@ -118,6 +124,13 @@ class Detections3DNode(Node):
         self.declare_parameter("depth_info_topic", "/camera/camera0/depth/camera_info")
         self.declare_parameter("output_topic", "/vision/detections_3d")
         self.declare_parameter("target_frame", "map")
+        # Temporal smoothing of map-frame object positions (2026-08-10). A single
+        # YOLO+depth sample is noisy (emitter OFF => sparse depth) and the whole
+        # pipeline lags the robot's pose, so raw per-tick coordinates WANDER —
+        # which made the approach node re-aim at a moving ghost every step.
+        self.declare_parameter("smooth_alpha", 0.4)      # EMA weight on new sample
+        self.declare_parameter("smooth_jump_m", 0.6)     # >this = new object, reset
+        self.declare_parameter("smooth_ttl_s", 3.0)      # forget a track after this
         # look() feed for the brain (0 = disabled). JPEG on
         # /camera/color/image_raw/compressed — the voice container's
         # camera_node used to provide this; with ai_stack parked we do.
@@ -129,6 +142,9 @@ class Detections3DNode(Node):
         self._min_range = float(p("min_range_m"))
         self._patch = int(p("depth_patch_px")) // 2
         self._target_frame = p("target_frame")
+        self._smooth_alpha = float(p("smooth_alpha"))
+        self._smooth_jump = float(p("smooth_jump_m"))
+        self._smooth_ttl = float(p("smooth_ttl_s"))
 
         self.get_logger().info(f"Loading YOLO {p('model')} on {p('device')}...")
         self._model = YOLO(p("model"))
@@ -143,6 +159,8 @@ class Detections3DNode(Node):
         # nothing" with the object in plain view). 2026-08-09.
         self._tf_listener = TransformListener(self._tf_buffer, self, spin_thread=True)
         self._no_tf_logged = False
+        # Per-label position tracks for temporal smoothing — see _smooth().
+        self._track = {}          # label -> [x, y, z, last_seen_monotonic]
 
         self.create_subscription(Image, p("color_topic"), self._on_color,
                                  qos_profile_sensor_data)
@@ -235,6 +253,72 @@ class Detections3DNode(Node):
                 or self._pub.get_subscription_count() > 0
                 or self._target_pub.get_subscription_count() > 0)
 
+    def _smooth(self, label, mp):
+        """EMA-smooth a label's map position so downstream goals stop chasing noise.
+
+        A genuine move (or a different instance of the same class entering the
+        frame) jumps further than smooth_jump_m — that resets the track instead of
+        being averaged, so the robot still follows a bottle that is actually moved.
+        Tracks expire after smooth_ttl_s so a re-detection elsewhere starts clean.
+
+        Known limit: keyed by LABEL, so two bottles in frame at once share one
+        track and will fight. Fine for the single-target approach flow; needs real
+        per-instance association (IoU/nearest-neighbour) if that changes.
+        """
+        now = time.monotonic()
+        x, y, z = float(mp[0]), float(mp[1]), float(mp[2])
+        prev = self._track.get(label)
+        if (prev is not None
+                and now - prev[3] < self._smooth_ttl
+                and float(np.linalg.norm(np.array(prev[:3]) - np.array([x, y, z])))
+                <= self._smooth_jump):
+            a = self._smooth_alpha
+            x = a * x + (1.0 - a) * prev[0]
+            y = a * y + (1.0 - a) * prev[1]
+            z = a * z + (1.0 - a) * prev[2]
+        self._track[label] = [x, y, z, now]
+        return x, y, z
+
+    def _lookup_tf(self, depth_msg):
+        """Snapshot target_frame <- depth optical frame for THIS image.
+
+        MUST be called BEFORE YOLO inference (2026-08-10). The old code ran YOLO
+        first and only then looked up "latest" TF, so the transform applied to the
+        image was taken ~100-250 ms AFTER the image was captured (inference time on
+        the loaded Orin). Rotation dominates that error: at 0.9 rad/s, 200 ms is
+        ~11 deg, which throws a 2 m-away object ~0.4 m sideways. The bottle's map
+        coordinate therefore swung every time the rover turned, and the approach
+        node re-aimed at the moving estimate — a large part of the "drunken" hunt.
+
+        Measured skew on this rig: depth frames arrive 3-20 ms old while the newest
+        cuVSLAM/EKF TF is 46-86 ms old, i.e. the image stamp sits ~30-70 ms in TF's
+        FUTURE. So an exact-stamp lookup legitimately raises ExtrapolationException
+        and no timeout can fix it (tf2's timeout wait is a no-op on a Buffer built
+        without a node, which is the case here). Taking the newest available TF at
+        CAPTURE time is the accurate choice: it is ~50 ms before the image instead
+        of ~200 ms after it — a 4x reduction in motion error, and the EMA in
+        _smooth() absorbs the rest.
+        """
+        if depth_msg is None or self._depth_info is None:
+            return None
+        try:
+            return self._tf_buffer.lookup_transform(
+                self._target_frame, depth_msg.header.frame_id,
+                rclpy.time.Time.from_msg(depth_msg.header.stamp))
+        except Exception:
+            pass
+        try:
+            return self._tf_buffer.lookup_transform(
+                self._target_frame, depth_msg.header.frame_id, rclpy.time.Time())
+        except Exception:
+            if not self._no_tf_logged:
+                self.get_logger().warning(
+                    f"TF {self._target_frame} → {depth_msg.header.frame_id} "
+                    f"not available yet — publishing nothing (correct while "
+                    f"vSLAM starts)")
+                self._no_tf_logged = True
+            return None
+
     def _tick(self):
         if self._color is None or self._color_info is None:
             return
@@ -254,6 +338,10 @@ class Detections3DNode(Node):
         self._last_infer_mono = time.monotonic()
 
         color_msg, depth_msg = self._color, self._depth
+        # Snapshot the pose that belongs to THIS frame before spending 100-250 ms
+        # in YOLO — see _lookup_tf(). Never bail out here: the target-hunt path
+        # below is the deliberate no-map fallback and must run without TF.
+        tf = self._lookup_tf(depth_msg)
 
         img = _decode_image(color_msg)
         if img is None:
@@ -280,17 +368,7 @@ class Detections3DNode(Node):
         # correct.
         if depth_msg is None or self._depth_info is None:
             return
-        try:
-            tf = self._tf_buffer.lookup_transform(
-                self._target_frame, depth_msg.header.frame_id,
-                rclpy.time.Time())
-        except Exception:
-            if not self._no_tf_logged:
-                self.get_logger().warning(
-                    f"TF {self._target_frame} → {depth_msg.header.frame_id} "
-                    f"not available yet — publishing nothing (correct while "
-                    f"vSLAM starts)")
-                self._no_tf_logged = True
+        if tf is None:
             return
         self._no_tf_logged = False
 
@@ -318,9 +396,31 @@ class Detections3DNode(Node):
             patch = dep[max(0, v_d - h):v_d + h + 1,
                         max(0, u_d - h):u_d + h + 1].astype(np.float32)
             patch = patch[patch > 0]
-            if patch.size < 3:
-                continue
-            z = float(np.median(patch))
+            if patch.size >= 3:
+                z = float(np.median(patch))
+            else:
+                # Centre-patch fallback (2026-08-10). A translucent plastic bottle
+                # standing on polished marble returns NO valid depth at its centre
+                # with the IR emitter off (which it must be — see run_stack.sh), so
+                # the object was detected in 2D at conf 0.42 and then silently
+                # dropped here for want of a depth sample. The rover consequently
+                # "forgot" the bottle exactly as it got close.
+                # Widen to the whole box and take a low percentile = the NEAREST
+                # surface inside it, which is the object rather than the wall
+                # behind it. Median would bias onto that background.
+                bu1 = int((u1 - cx_c) / fx_c * fx_d + cx_d)
+                bu2 = int((u2 - cx_c) / fx_c * fx_d + cx_d)
+                bv1 = int((v1 - cy_c) / fy_c * fy_d + cy_d)
+                bv2 = int((v2 - cy_c) / fy_c * fy_d + cy_d)
+                bu1, bu2 = max(0, min(bu1, bu2)), min(dep.shape[1], max(bu1, bu2) + 1)
+                bv1, bv2 = max(0, min(bv1, bv2)), min(dep.shape[0], max(bv1, bv2) + 1)
+                if bu2 - bu1 < 2 or bv2 - bv1 < 2:
+                    continue
+                box_d = dep[bv1:bv2:2, bu1:bu2:2].astype(np.float32)
+                box_d = box_d[box_d > 0]
+                if box_d.size < 5:
+                    continue
+                z = float(np.percentile(box_d, 20))
             if dep.dtype == np.uint16:
                 z /= 1000.0                      # mm → m
             if not (self._min_range < z < self._max_range):
@@ -330,11 +430,12 @@ class Detections3DNode(Node):
                            (v_d - cy_d) / fy_d * z,
                            z])
             mp = _quat_rotate(q.x, q.y, q.z, q.w, pt) + np.array([t.x, t.y, t.z])
+            sx, sy, sz = self._smooth(label, mp)
             objects.append({
                 "label": label,
-                "x": round(float(mp[0]), 3),
-                "y": round(float(mp[1]), 3),
-                "z": round(float(mp[2]), 3),
+                "x": round(sx, 3),
+                "y": round(sy, 3),
+                "z": round(sz, 3),
                 "conf": round(conf, 2),
             })
 

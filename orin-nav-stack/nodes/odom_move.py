@@ -18,6 +18,7 @@ Publishes straight to /cmd_vel (bypasses safety_guard, like drive_test/teleop) �
 drive in clear space and keep tether slack. Rotation/reverse are always allowed
 by safety_guard anyway; forward is the only gated direction.
 """
+import json
 import math
 import sys
 import threading
@@ -26,9 +27,11 @@ import time
 import rclpy
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
+from std_msgs.msg import String
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 
 ODOM_TOPIC = "/odometry/filtered"
+HEALTH_TOPIC = "/odom/health"
 
 # Tunables (calibrated live 2026-08-09, emitter OFF).
 #   straight: cmd 60cm -> odom-stop 58 -> real 65 (odom ~0.97x true + ~5cm coast)
@@ -60,7 +63,25 @@ class Mover:
         qos = QoSProfile(depth=20, reliability=ReliabilityPolicy.RELIABLE,
                          history=HistoryPolicy.KEEP_LAST)
         node.create_subscription(Odometry, ODOM_TOPIC, self._cb, qos)
+        self.health = None          # latest /odom/health JSON, or None
+        node.create_subscription(String, HEALTH_TOPIC, self._health_cb, 10)
         self.pub = node.create_publisher(Twist, "/cmd_vel", 10)
+
+    def _health_cb(self, m):
+        try:
+            self.health = json.loads(m.data)
+        except Exception:
+            pass
+
+    def pose_trustworthy(self):
+        """(ok, message). Unknown health is treated as 'unverified', not 'fine'."""
+        h = self.health
+        if h is None:
+            return False, ("no /odom/health — odom_health.py is not running, so the "
+                           "pose is UNVERIFIED (start it with ./run_stack.sh fuse)")
+        if not h.get("trust", False):
+            return False, f"{h.get('status')}: {h.get('detail')}"
+        return True, h.get("detail", "pose consistent")
 
     def _cb(self, m):
         self.x = m.pose.pose.position.x
@@ -133,19 +154,22 @@ class Mover:
         print(f"  DONE: fused yaw swept {math.degrees(got):.1f}deg (target {deg}) "
               f"-> ~{math.degrees(got)*ROT_CAL:.0f}deg real expected")
 
-    def home(self, speed):
-        """Return to (0,0) then restore heading 0 — using fused pose directly."""
-        print(f"home: from ({self.x:.2f},{self.y:.2f}, yaw {math.degrees(self.yaw):.0f}) -> (0,0, yaw 0)")
+    def home(self, speed, restore_heading=False):
+        """Return to (0,0) using fused pose. restore_heading adds a final spin to
+        yaw 0 (extra rotation — skip it on a tether to avoid tangling)."""
+        print(f"home: from ({self.x:.2f},{self.y:.2f}, yaw {math.degrees(self.yaw):.0f}) -> (0,0)"
+              f"{' + yaw 0' if restore_heading else ' (position only)'}")
         dist = math.hypot(self.x, self.y)
         if dist > TOL_D:
             # 1) rotate to face the origin
             bearing = math.atan2(-self.y, -self.x)
-            self._turn_to(bearing, speed_w=W_CRUISE)
+            self._turn_to(bearing, speed_w=0.9)
             # 2) drive the straight-line distance to origin
             self.straight(dist * 100.0, speed)
-        # 3) restore original heading (yaw 0)
-        self._turn_to(0.0, speed_w=W_CRUISE)
-        print(f"  HOME DONE: now at ({self.x:.2f},{self.y:.2f}, yaw {math.degrees(self.yaw):.0f})")
+        if restore_heading:
+            self._turn_to(0.0, speed_w=0.9)
+        print(f"  HOME DONE: now at ({self.x:.2f},{self.y:.2f}, yaw {math.degrees(self.yaw):.0f}) "
+              f"-> dist from origin {math.hypot(self.x, self.y)*100:.0f}cm")
 
     def _turn_to(self, target_yaw, speed_w):
         err = math.atan2(math.sin(target_yaw - self.yaw), math.cos(target_yaw - self.yaw))
@@ -184,7 +208,31 @@ def main():
             wz = float(a[4]) if len(a) > 4 else W_CRUISE
             mv.rotate(float(a[2]), right, wz)
         elif mode == "home":
-            mv.home(float(a[2]) if len(a) > 2 else V_CRUISE)
+            # `home` is the one primitive that drives a LONG way on nothing but the
+            # fused pose — a wrong pose here means driving confidently across the
+            # room into a wall. Refuse on a pose that odom_health says is bad.
+            # Short straight/rotate moves stay ungated: they are small, supervised,
+            # and are how you diagnose the pose in the first place.
+            time.sleep(1.0)                     # let one /odom/health tick land
+            ok, why = mv.pose_trustworthy()
+            if not ok and "--force" not in a:
+                print(f"REFUSING to drive home: {why}")
+                print("  The pose it would navigate on is not trustworthy, so it "
+                      "would drive to the WRONG place.")
+                print("  Fix the odometry first (see /odom/health), or re-run with "
+                      "--force if you are supervising it in clear space.")
+                return
+            if not ok:
+                print(f"WARNING (--force): {why}")
+            speed = V_CRUISE                    # skip flags when reading speed
+            for arg in a[2:]:
+                if not arg.startswith("--"):
+                    try:
+                        speed = float(arg)
+                        break
+                    except ValueError:
+                        pass
+            mv.home(speed)
     finally:
         mv.stop()
         ex.shutdown()

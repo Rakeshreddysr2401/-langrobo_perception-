@@ -9,8 +9,10 @@
 #   ./run_stack.sh cam      # relaunch ONLY the D555 camera node (use after a power-cycle;
 #                           #   cuVSLAM re-locks automatically once images return)
 #   ./run_stack.sh nav2     # nav2 (NO blind recoveries BT; map frame from cuVSLAM)
-#   ./run_stack.sh vision   # YOLO + pixel_to_goal + motor shim + SAFETY GUARD + imu_to_base
-#                           #   chain: /cmd_vel_nav -> deadband -> /cmd_vel_shim -> guard -> /cmd_vel
+#   ./run_stack.sh vision   # YOLO + pixel_to_goal + SAFETY GUARD
+#                           #   chain: controller_server -> /cmd_vel_nav -> velocity_smoother
+#                           #     -> /cmd_vel_smoothed -> collision_monitor -> /cmd_vel_shim
+#                           #     -> safety_guard -> /cmd_vel -> ESP32   (single path, no bypass)
 #   ./run_stack.sh status   # one-shot health: camera / SLAM / nav2 / safety / ESP32 wheel link
 #   ./run_stack.sh stop     # E-STOP: kill nav/motion nodes + zero /cmd_vel
 #   ./run_stack.sh remap    # fresh map/pose: restart cuVSLAM + nvblox (camera untouched)
@@ -23,7 +25,8 @@
 # shows "No RealSense devices were found" the camera must be PHYSICALLY power-cycled
 # (unplug PoE cable ~5s, replug) — no software restart recovers a dead DDS server.
 #
-# SAFETY (tethered rover): BT has NO Spin/BackUp; deadband caps vx<=0.22 wz<=0.90.
+# SAFETY (tethered rover): BT has NO Spin/BackUp; speed caps live in nav2.yaml
+# (MPPI vx_max 0.30 / wz_max 1.0, velocity_smoother 0.25 / 1.0).
 # Rover motion tests: pause YOLO first (CPU overload -> cuVSLAM pose jumps).
 set -eo pipefail
 IMAGE=${IMAGE:-orin-nav:1.1}
@@ -143,6 +146,18 @@ cam)
 nav2)
   # map->odom now comes LIVE from cuvslam_ros_node (SLAM correction) — no
   # static publisher here anymore.
+  #
+  # Kill any existing nav2 FIRST (added 2026-08-10). Re-running this command
+  # used to stack a second full nav2 stack on top of the first: duplicate
+  # action servers on /navigate_to_pose and /follow_path, which surfaces as
+  #   "unknown goal response, ignoring..."
+  #   "BtActionNode::Tick: invalid status value"
+  # and goals aborting at random. Same guard 'fuse'/'remap' already use.
+  docker exec "$NAME" bash -lc '
+    for pid in $(pgrep -f "[n]avigation_launch.py"); do kill -9 $pid 2>/dev/null; done
+    ps -eo pid,comm | grep -iE "bt_navigat|controller_serv|behavior_ser|velocity_smo|collision_mon|planner_serv|smoother_ser|lifecycle_man|waypoint|docking|route_serv" | awk "{print \$1}" | xargs -r kill -9 2>/dev/null
+    true' >/dev/null 2>&1 || true
+  sleep 4
   dexec "exec ros2 launch nav2_bringup navigation_launch.py params_file:=$NAV/config/nav2.yaml \
             use_sim_time:=False use_composition:=False autostart:=True use_respawn:=False > /tmp/nav2.log 2>&1"
   echo "nav2 launching (no-blind-recovery BT). Wait for: ./run_stack.sh logs nav2 -> 'Managed nodes are active'"
@@ -150,11 +165,19 @@ nav2)
 vision)
   dexec "exec python3 $NAV/nodes/detections_3d.py --ros-args -p model:=$NAV/models/yolov8n.pt > /tmp/detections_3d.log 2>&1"
   dexec "exec python3 $NAV/nodes/pixel_to_goal.py > /tmp/pixel_to_goal.log 2>&1"
-  dexec "exec python3 $NAV/nodes/cmd_vel_deadband.py > /tmp/cmd_vel_deadband.log 2>&1"
+  # nav2's collision_monitor obstacle source. MUST be running before nav2 drives:
+  # with no fresh source the monitor fail-safes to "stop due to invalid source"
+  # and holds the rover at zero. See nodes/depth_to_cloud.py.
+  dexec "exec python3 $NAV/nodes/depth_to_cloud.py > /tmp/depth_to_cloud.log 2>&1"
+  # cmd_vel_deadband.py is DELIBERATELY NOT started (2026-08-10). It was built for
+  # the old open-loop L298N firmware and re-floored every command to vx>=0.20 /
+  # wz>=0.80, which left MPPI with no fine control authority (bang-bang steering ->
+  # the rover weaved and spun instead of tracking the path). Firmware v2's 50 Hz
+  # encoder PID + gMinDuty now does the static-friction job properly.
   dexec "exec python3 $NAV/nodes/safety_guard.py > /tmp/safety_guard.log 2>&1"
   # imu_to_base is owned by 'fuse' now (it only feeds the EKF). Run './run_stack.sh
   # fuse' for visual+IMU odometry; plain vision stays visual-odom-only.
-  echo "vision + goal + motor shim (vx<=0.22 wz<=0.90) + safety guard starting"
+  echo "vision + goal + safety guard starting (no deadband shim — firmware PID owns low speed)"
   ;;
 fuse)
   # Visual-inertial fusion: cuVSLAM /odom + D555 gyro -> robot_localization EKF,
@@ -173,6 +196,11 @@ fuse)
   echo "[3/4] robot_localization EKF (/odom + /imu/base -> odom->base_link)"
   dexec "exec ros2 run robot_localization ekf_node --ros-args -r __node:=ekf_filter_node --params-file $NAV/config/ekf.yaml > /tmp/ekf.log 2>&1"
   sleep 3
+  # Cross-checks cuVSLAM against /cmd_vel and /wheel_odom and publishes
+  # /odom/health. cuVSLAM fails SILENTLY on low-texture floors (reports
+  # slam=True while under-reporting travel and drifting yaw) — this is what
+  # stops the motion behaviours acting on a pose that has gone bad.
+  dexec "exec python3 $NAV/nodes/odom_health.py > /tmp/odom_health.log 2>&1"
   echo "[4/4] nvblox (depth + fused pose -> 3D map/ESDF)"
   dexec "NVB=\$(python3 -c 'from ament_index_python.packages import get_package_share_directory as g; print(g(\"nvblox_examples_bringup\")+\"/config/nvblox/nvblox_base.yaml\")');
          exec ros2 run nvblox_ros nvblox_node --ros-args --params-file \$NVB --params-file $NAV/config/nvblox.yaml \

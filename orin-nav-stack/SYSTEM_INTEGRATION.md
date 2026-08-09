@@ -40,7 +40,8 @@ Telegram/voice "go near the chair"
         (a) if chair pose is known in the map  → navigate_to_pose(x,y)   [nav2, obstacle-aware]
         (b) else if chair visible in 3D dets   → goal from /vision/detections_3d → nav2   ★ (not wired: uses 2D mono servo today)
         (c) else                               → visual search: pan head / rotate to find it   ★ (head servo not driven)
-  → nav2 (Jetson): plan on nvblox map → MPPI → cmd_vel_deadband → safety_guard → /cmd_vel
+  → nav2 (Jetson): plan on nvblox map → MPPI → velocity_smoother → collision_monitor
+                   → safety_guard → /cmd_vel      (cmd_vel_deadband REMOVED 2026-08-10)
   → ESP32: PID wheels; encoders → /wheel_state → EKF (fused odom keeps pose steady through pivots)
   → arrival report back to the originating Telegram chat
 ```
@@ -84,6 +85,21 @@ D555 depth + `/vision/detections_3d` giving metric map poses, this should become
 | `/wheel_state` | out | `Vector3` (velL,velR,cmd_vx) [BEST_EFFORT] | ✓ → Pi5 relay → `/wheel_odom` → EKF |
 | `/servo_pan` `/servo_tilt` | in | `UInt16` | ★ not implemented |
 
+### Jetson-internal motion chain (corrected 2026-08-10)
+```
+controller_server ─► /cmd_vel_nav ─► velocity_smoother ─► /cmd_vel_smoothed
+   ─► collision_monitor ─► /cmd_vel_shim ─► safety_guard ─► /cmd_vel ─► ESP32
+```
+`cmd_vel_nav` is ALSO the velocity_smoother's input (nav2_bringup remaps it), so the collision
+monitor must NOT publish there — doing so created a feedback loop *and* bypassed the monitor.
+collision_monitor's obstacle source is `/perception/depth_points` from `nodes/depth_to_cloud.py`
+(10 Hz); it hard-stops the robot if that source goes stale.
+
+### Pose trust (new)
+| Topic | Type | Producer | Meaning |
+|---|---|---|---|
+| `/odom/health` | `String` JSON | Jetson `odom_health` | `trust:false` ⇒ pose unreliable — do not start a move, do not believe "arrived". Catches `VO_STALLED`, `CAMERA_STARVED`, `VO_UNDER_REPORTING`, `VO_DRIFT_STATIONARY`, `VO_SCALE_OFF`. |
+
 ### Odometry fusion chain (this session)
 ```
 cuVSLAM /odom (x,y,yaw abs) ─┐
@@ -91,8 +107,11 @@ D555 gyro  /imu/base (vyaw)  ├─► ekf_filter_node ─► odom→base_link T
 wheel_odom /wheel_odom (vx)  ┘   (config/ekf.yaml: odom0 pose, imu0 vyaw, odom1 vx)
 ```
 Wheel path = `ESP32 /wheel_state → Pi5 langrobo_ros/wheel_odom_relay → /wheel_odom`.
-**Blocked:** the flashed ESP32 emits 1 Hz, not the 20 Hz the HEAD firmware produces — reflash
-required (see the wheel-odom memory + §6 G1).
+**Relay is running** (started manually on the Pi5 2026-08-10; no systemd unit, so it does not
+survive a reboot). Chain verified end-to-end: `/wheel_state` 1 Hz → `/wheel_odom` 1 Hz → EKF.
+**Still blocked:** the flashed ESP32 emits 1 Hz, not the 20 Hz the HEAD firmware produces —
+reflash required (see the wheel-odom memory + §6 G1). At 1 Hz the encoder path cannot bridge
+cuVSLAM dropouts and `odom_health` cannot use it as ground truth.
 
 ---
 
