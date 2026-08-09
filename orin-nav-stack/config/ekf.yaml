@@ -42,6 +42,23 @@ ekf_filter_node:
     odom0_relative: false
     odom0_queue_size: 10
 
+    # --- wheel encoders: forward velocity vx (index 6) ------------------------
+    # Pi5 wheel_odom_relay turns the ESP32 /wheel_state (velL, velR) into this
+    # nav_msgs/Odometry. Fuse vx ONLY: it is the low-latency dead-reckoning that
+    # bridges the brief cuVSLAM dropout on fast pivots (README §10). The gyro
+    # (imu0) still owns yaw-rate — wheels slip in pivots, so vyaw stays false
+    # here (flip index 11 to true only if wheel vyaw proves reliable on-robot).
+    # Twist-only source: pose covariance is huge in the relay, never fused.
+    odom1: /wheel_odom
+    odom1_config: [false, false, false,
+                   false, false, false,
+                   true,  false, false,
+                   false, false, false,
+                   false, false, false]
+    odom1_differential: false
+    odom1_relative: false
+    odom1_queue_size: 10
+
     # --- D555 gyro: yaw-rate only (index 11 = vyaw) ---------------------------
     imu0: /imu/base
     imu0_config: [false, false, false,
