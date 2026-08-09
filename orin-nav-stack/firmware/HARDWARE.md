@@ -45,7 +45,17 @@ Differential-drive (skid-steer) rover, 4 driven wheels:
 
 - **Compute:** Jetson Orin (perception/nav) + Raspberry Pi 5 (brain + micro-ROS agent).
 - **MCU:** ESP32 DevKit V1 — runs `rover_firmware_v2.ino`, talks micro-ROS over
-  **WiFi UDP** to the agent on the Pi5 (`192.168.1.16:8888`). ESP32 IP `192.168.1.11`.
+  **WiFi UDP** to the agent on the Pi5 (`192.168.1.16:8888`).
+
+  **ESP32 address: use `rover-esp32.local`, NOT a hardcoded IP.** The board takes a DHCP
+  lease, so its IP moves. It was documented as `192.168.1.11`; measured 2026-08-10 it was
+  actually **`192.168.1.12`**, and a different device answered at `.11`. An OTA upload aimed
+  at the stale `.11` silently flashes nothing (or the wrong device) while the rover keeps
+  running its old firmware — which is exactly how a "completed" reflash left `/wheel_state`
+  still at 1 Hz. Confirm the target before every OTA:
+
+      getent hosts rover-esp32.local     # authoritative — OTA_HOSTNAME in the firmware
+      ros2 topic hz /wheel_state         # 20 Hz = new firmware, 1 Hz = still old
 - **Motor drivers:** 2× **BTS7960 (IBT-2)** H-bridges — one per side, each driving
   the two motors of that side in parallel.
 - **Motors:** 4× **Rhino GB37 12V geared encoder motors** (see §3).

@@ -20,7 +20,7 @@ Last synced: 2026-08-08 (encoder-odom fusion session).
 | **Jetson Orin Nano 8 GB** (`orin-nav-stack`, this repo) | Perception + navigation: **cuVSLAM** (standalone pyCuVSLAM cu12 wheel — *not* RTAB-Map), **nvblox** 3D map, **nav2** (planner+MPPI+safety_guard), **YOLO** detections (2D bearing + 3D metric), **pixel→goal**, **EKF** odom fusion | The 8 GB Orin is saturated by perception — **voice/TTS is OFF here in rover mode** |
 | **Pi 5 8 GB** (`pi5_ros2_ws`, `~/ros2_ws`) | The **brain**: LangGraph supervisor + agents (chat, vision `local_agent`, `navigate`, status, errands…), Qdrant memory, Telegram, **micro-ROS agent** (ESP32 WiFi bridge, UDP 8888) | `langrobo_core` is a pure LangGraph zone (zero rclpy); only `langrobo_ros` touches ROS |
 | **Mac mini** | **VLM** — llama.cpp Gemma multimodal at `singireddys-mac-mini.local:8080` (OpenAI-compatible) | Answers vision questions (`look()`) and pixel queries |
-| **ESP32** (`192.168.1.11`) | Drivetrain: 2×BTS7960 + 180 RPM encoder motors, **50 Hz PID** closed-loop wheel control | Firmware v2 (`firmware/rover_firmware_v2.ino`); WiFi micro-ROS |
+| **ESP32** (`rover-esp32.local` — DHCP, was `.11` in these docs but measured `192.168.1.12` on 2026-08-10; **always resolve the mDNS name before an OTA flash**) | Drivetrain: 2×BTS7960 + 180 RPM encoder motors, **50 Hz PID** closed-loop wheel control | Firmware v2 (`firmware/rover_firmware_v2.ino`); WiFi micro-ROS |
 
 Because voice is off on the Orin in rover mode, **the human interface today is Telegram**
 (text) + the phone teleop web page. Wake-word voice (`Hey Chotu`) is a future add that needs
