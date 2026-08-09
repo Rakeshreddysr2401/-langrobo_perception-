@@ -18,7 +18,12 @@
 # optionally vyaw); keep odom0 (visual) for x,y,yaw. No other change needed.
 ekf_filter_node:
   ros__parameters:
-    frequency: 30.0
+    # 20 Hz not 30: on the loaded Orin Nano (cuVSLAM+nvblox+nav2+YOLO all live)
+    # the 30 Hz filter missed its 33 ms budget (updates took 40-90 ms), so the
+    # odom->base_link TF came out laggy/intermittent -> nav2 TF-extrapolation
+    # errors + detections_3d "TF not available -> publish nothing". 20 Hz (50 ms
+    # budget) meets the rate and still oversamples the wheel/imu inputs. (2026-08-09)
+    frequency: 20.0
     sensor_timeout: 0.2
     two_d_mode: true
     publish_tf: true
