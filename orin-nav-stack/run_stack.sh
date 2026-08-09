@@ -49,12 +49,24 @@ rexec(){ docker exec "$NAME" bash -lc "unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAU
 # within the depth module (cuVSLAM stereo is fine) and color+IR coexist:
 # IR ~22-23 Hz, /odom ~18 Hz, color ~7 Hz all together. Do NOT set this back to
 # true. See memory: d555-color-starves-ir-slam.
+#
+# emitter_enabled:=0 is CRITICAL (2026-08-09): the IR PROJECTOR is rigidly
+# mounted on the camera, so its dot pattern is re-painted from the camera's
+# viewpoint every frame -> on a low-texture/reflective floor the dots stay
+# ~fixed in the image as the rig TRANSLATES, and cuVSLAM (which tracks infra1/2
+# features) sees almost no motion -> it UNDER-REPORTS translation badly. Measured
+# emitter ON: 100 cm real push -> 26 cm /odom (~4x under, floor-dependent);
+# emitter OFF: 100 cm -> 97 cm (3%). Passive-stereo DEPTH stays metric-correct
+# either way (verified 140 cm wall -> 1.40 m), so nvblox still works; emitter-off
+# depth is just noisier on textureless surfaces. Localization > perfect depth, so
+# emitter stays OFF. Refinement if depth suffers: emitter_on_off:=true
+# (alternating) + feed cuVSLAM only the emitter-off frames.
 launch_cam(){
   dexec 'printf "{\"context\":{\"dds\":{\"enabled\":true,\"domain\":0}}}" > ~/.realsense-config.json;
          export LD_LIBRARY_PATH=/root/librealsense/install/lib:$LD_LIBRARY_PATH;
          exec ros2 launch realsense2_camera rs_launch.py camera_name:=camera0 \
             enable_infra1:=true enable_infra2:=true depth_module.infra_profile:=896x504x30 \
-            depth_module.emitter_enabled:=1 enable_depth:=true enable_color:=true enable_motion:=true enable_sync:=false \
+            depth_module.emitter_enabled:=0 enable_depth:=true enable_color:=true enable_motion:=true enable_sync:=false \
             > /tmp/realsense.log 2>&1'
 }
 
@@ -99,7 +111,7 @@ up)
     -v "$HOME/orin-nav-stack/maps":/maps \
     "$IMAGE" -c 'sleep infinity' >/dev/null
   sleep 2
-  echo "[1/4] D555 (stereo IR + depth + color + motion, emitter ON)"
+  echo "[1/4] D555 (stereo IR + depth + color + motion, emitter OFF — cuVSLAM scale)"
   launch_cam
   # Gate on real streaming instead of a blind sleep — if the camera never comes
   # up we abort HERE with a power-cycle message rather than starting SLAM blind.
