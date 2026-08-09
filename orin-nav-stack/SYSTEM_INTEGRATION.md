@@ -5,6 +5,10 @@ machines), the exact ROS 2 contract between them, and the prioritized gaps towar
 product goal: *a household robot that can **see, understand, move in sync with its
 environment**, and do tasks* — starting with the flagship command **"go near the chair."**
 
+> **See also [`SESSION_2026-08-10.md`](SESSION_2026-08-10.md)** — the debugging session that
+> fixed the go-to-object path end to end (cmd_vel chain, floor-as-obstacle, pose trust),
+> with the measurements behind each change and the current blocked state.
+
 > This doc is the cross-machine source of truth. The Jetson perception/nav details live in
 > [`README.md`](README.md); the Pi5 brain details live in that repo's `ARCHITECTURE.md` /
 > `HOW_IT_WORKS.md`. Where those disagree with reality, see **§7 Doc drift** — fix there.
