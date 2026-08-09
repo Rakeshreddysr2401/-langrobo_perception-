@@ -137,7 +137,11 @@ class Detections3DNode(Node):
         self._color = self._depth = None
         self._color_info = self._depth_info = None
         self._tf_buffer = Buffer()
-        self._tf_listener = TransformListener(self._tf_buffer, self)
+        # spin_thread=True: own executor thread for TF, so the buffer stays fresh
+        # even while YOLO inference hogs the main thread (on the loaded Orin the
+        # single-threaded spin starved TF -> "map->camera not available -> publish
+        # nothing" with the object in plain view). 2026-08-09.
+        self._tf_listener = TransformListener(self._tf_buffer, self, spin_thread=True)
         self._no_tf_logged = False
 
         self.create_subscription(Image, p("color_topic"), self._on_color,
