@@ -123,8 +123,19 @@ up)
   # Gate on real streaming instead of a blind sleep — if the camera never comes
   # up we abort HERE with a power-cycle message rather than starting SLAM blind.
   cam_wait || { echo "  Aborting bring-up. Container left running so 'cam' can retry after power-cycle."; exit 1; }
-  echo "[2/4] base_link -> camera0_link static TF (x0.10 z0.20)"
-  dexec 'exec ros2 run tf2_ros static_transform_publisher --x 0.10 --y 0.0 --z 0.20 \
+  # z was 0.20 until 2026-08-10. MEASURED with nodes/floor_probe.py: open floor
+  # deprojected to z = +0.037 m in base_link (19k points, 16-84% spread only
+  # 0.035-0.041), i.e. the TF overstated the camera height by 3.7 cm. base_link's
+  # origin is on the ground, so floor MUST read ~0.000.
+  #
+  # That 4 cm error is what made nvblox map the floor as an obstacle (the old
+  # esdf_slice_min_height of 0.05 sat 1 cm above the apparent floor, inside depth
+  # noise) -> inflation plateau, MPPI crawling at 0.082 m/s, "Failed to make
+  # progress". It also biased the z of every 3D detection.
+  #
+  # Re-verify after ANY camera remount:  python3 nodes/floor_probe.py  -> want ~0.000
+  echo "[2/4] base_link -> camera0_link static TF (x0.10 z0.163 — floor_probe measured)"
+  dexec 'exec ros2 run tf2_ros static_transform_publisher --x 0.10 --y 0.0 --z 0.163 \
             --frame-id base_link --child-frame-id camera0_link > /tmp/basetf.log 2>&1'
   sleep 2
   echo "[3/4] cuVSLAM wrapper node (pyCuVSLAM cu12; publishes /odom too)"
@@ -269,7 +280,9 @@ status)
     nav=$(timeout 5 ros2 lifecycle get /bt_navigator 2>/dev/null | grep -o "^active")
     printf "  cuVSLAM        %s\n" "${slam:-<no /slam/status>}"
     printf "  safety         %s\n" "${safe:-<no /safety/state>}"
-    printf "  ESP32 wheels (/cmd_vel subs):   %s\n" "${esp:-0}  (1 = wheels linked)"
+    # >=1 because odom_health also subscribes to /cmd_vel (it cross-checks commanded
+    # vs visual travel), so this is 2 with fusion up. 0 = the ESP32 is NOT linked.
+    printf "  ESP32 wheels (/cmd_vel subs):   %s\n" "${esp:-0}  (0 = wheels NOT linked)"
     printf "  nav2           %s\n" "${nav:-<not active / not started>}"
     echo
   '

@@ -130,17 +130,45 @@ non-zero rates for camera and cuVSLAM. **Nothing has moved yet.**
 
 ---
 
-### Phase 1 — "Where am I, and which way did I go?" *(want #3)*
+### Phase 1 — "Where am I, and which way did I go?" *(want #3)* — **IN PROGRESS**
 
 **Goal.** Drive by hand and watch the pose trail be *correct*.
 
-**Tasks**
-- `./run_stack.sh up`, then `fuse` (EKF owns `odom→base_link`).
-- Watch the `/odom` arrow trail in RViz while you push the rover **by hand** (motors off —
-  this isolates perception from the drivetrain entirely).
-- Tape-measure check: push exactly 1.00 m, confirm the trail says ~1.00 m.
-- **Tape-measure the camera height** and fix the `base_link→camera0_link` static TF in
-  `run_stack.sh` (currently z=0.20; floor deprojection implies **~0.16**, see `nvblox.yaml`).
+**✅ Camera height TF — FIXED AND VERIFIED 2026-08-10.**
+`nodes/floor_probe.py` (new) deprojects the depth image into `base_link` and reports where
+the floor sits. Since base_link's origin is on the ground, open floor **must** read ~0.000.
+
+| | floor z (median) | spread (16–84%) |
+|---|---|---|
+| before (TF z = 0.200) | **+0.037 m** | +0.035 … +0.041 |
+| after (TF z = **0.163**) | **+0.000 m** | −0.002 … +0.004 |
+
+19.5k sampled points both times, so this is not noise. It independently reproduces the
++0.04 m seen on 2026-08-10 and removes a **4 cm systematic error** that (a) made nvblox map
+the floor as an obstacle and (b) biased the z of every 3D detection.
+
+The probe also fits a plane: **+1.07° nose-up pitch** remains. That is partly a genuine
+mount tilt and partly far-range depth bias (only ~500 points beyond 1 m vs 14.6k under
+0.75 m). It is below the 1.5° threshold where a z-only fix stops working — worth a spirit
+level at some point, not worth blocking on.
+
+**⏳ Remaining — needs you at the rover:**
+- Watch the `/odom` arrow trail in RViz while you push the rover **by hand**.
+  ✔ **Hand-pushing is safe**: verified in `firmware/rover_firmware_v2.ino` that `pidStep()`
+  returns 0 whenever the target is <0.01, and `driveSide()` at zero duty pulls both BTS7960
+  PWM pins low — that is **coast, not brake**. The wheels free-wheel; the PID will not fight
+  you. (Do not skip this check on a future firmware — a PID that *held* zero would resist.)
+- Tape-measure check with the new **`nodes/odom_ruler.py`**: push exactly 1.00 m and compare
+  every odometry source at once.
+  ```bash
+  docker exec -it orin_nav bash -lc 'source /opt/ros/jazzy/setup.bash; export ROS_DOMAIN_ID=0
+    python3 /opt/orin-nav/nodes/odom_ruler.py --expect 1.00'
+  ```
+  It zeroes, shows a live readout as you push, and on Ctrl-C grades cuVSLAM against the tape
+  (≤5% pass / ≤15% marginal / else fail).
+- **Cross-check the camera height with an actual tape** against the measured 0.163 m. The
+  probe infers it from the floor plane; a tape is an independent instrument. If they
+  disagree by more than ~1 cm, the tape wins and the floor reading needs explaining.
 
 **What you will learn.** What visual odometry actually is, why the emitter must stay **OFF**
 (ON → cuVSLAM under-read 100 cm as 26 cm), and how to read `/odom/health`.
@@ -161,6 +189,13 @@ clean line, not a scribble.
   time in this plan, but **you** are the controller.
 - `./run_stack.sh remap` for a fresh origin, then drive slowly and watch nvblox fill in.
 - `ros2 service call /slam/save_map std_srvs/srv/Trigger` at the end.
+- **Carried over from Phase 1: lower `esdf_slice_min_height`.** It was raised 0.05 → **0.12**
+  purely to dodge the 4 cm camera-height error, at the cost of no longer mapping obstacles
+  shorter than 12 cm. That error is now fixed (floor reads 0.000 ±0.004), so the band can
+  come down toward **~0.06**. Deliberately *not* done in Phase 1 — it changes what nav2 treats
+  as an obstacle, so it must be validated while actually driving: after lowering it, check the
+  costmap has **no floor plateau** (`ros2 topic echo /local_costmap/costmap --once` — a wide
+  band of nonzero cost with no lethal cells is the floor). Revert to 0.12 if it reappears.
 
 **What you will learn.** Why the map is a **forward cone only (~87°)** — no head servo, so
 it is blind to the sides and behind (gap G2). This is the single biggest reason the map looks

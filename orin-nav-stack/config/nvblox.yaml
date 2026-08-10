@@ -33,10 +33,19 @@
     # shorter than ~12 cm are no longer mapped. The 85 mm wheels make most of
     # those non-issues, and safety_guard's depth bumper still sees them.
     #
-    # NOTE the floor reading at +0.04 rather than 0.00 implies the base_link ->
-    # camera0_link static TF in run_stack.sh overstates camera height by ~4 cm
-    # (z 0.20; the data implies ~0.16). Worth a tape measure — fixing it would
-    # let this band come back down and would de-bias detection z.
+    # UPDATE 2026-08-10 (Phase 1): the camera-height TF IS NOW FIXED. nodes/floor_probe.py
+    # measured open floor at +0.037 m with the old z=0.20 TF; after correcting the static
+    # TF to z=0.163 the floor deprojects to +0.000 m (16-84%: -0.002..+0.004, 19.5k points).
+    #
+    # So the 0.12 below is now OVER-CONSERVATIVE — it exists only to dodge an error that no
+    # longer exists, and it costs us every obstacle shorter than 12 cm. It can come down
+    # toward ~0.06 (still ~6 cm above the measured floor, and above the residual +1.07 deg
+    # nose-up pitch which lifts floor to ~+0.009 m at 1.25 m range).
+    #
+    # NOT changed yet ON PURPOSE: this alters what nav2 treats as an obstacle, so it must be
+    # validated while driving (ThingsTodo.md Phase 2). After lowering, confirm the costmap
+    # has no wide nonzero-cost band with zero lethal cells -- that pattern IS the floor.
+    # Re-run nodes/floor_probe.py after ANY camera remount before touching this.
     static_mapper:
       esdf_slice_min_height: 0.12
       esdf_slice_max_height: 0.40
