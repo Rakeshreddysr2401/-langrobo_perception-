@@ -38,7 +38,7 @@ pose trust, then flags anything running-but-wrong. Healthy looks like:
 - `camera IR left ~29 Hz` · `camera depth ~25 Hz` (⚠ **<10 Hz => cuVSLAM freezes silently**)
 - `cuVSLAM odom ~28 Hz` (0 Hz **with the camera alive** = cuVSLAM frozen → restart it)
 - `nvblox slice ~9 Hz` · `TF map->odom` and `odom->base_link` both < 1 s old
-- `ESP32 encoders ~20 Hz` (**1.0 Hz = still on OLD firmware, reflash**)
+- `ESP32 encoders ~20 Hz` (measured **10.0 Hz** on 2026-08-11 — half rate, known bug: `learn/03-imu.md`)
 - `orin load1 < 8` — CPU is a safety property here; load starves the camera
 - `cuVSLAM "slam_pose_ok": true` · `safety data: ok` · `/cmd_vel subs: 1` · `nav2 active`
 
@@ -112,9 +112,9 @@ Data check on laptop: `unset ROS_DISCOVERY_SERVER; export ROS_DOMAIN_ID=0; sourc
   `orin-nav-stack/firmware/HARDWARE.md`), ~0.86 m/s top speed. Fast straights can still
   stress cuVSLAM tracking — prefer short bursts.
 - Wheel odometry **is wired** into the EKF (`config/ekf.yaml` odom1, via the Pi5
-  `wheel_odom_relay` → `/wheel_odom`), but is **not yet useful**: the flashed ESP32 still
-  emits `/wheel_state` at **1 Hz** instead of 20 Hz. Reflash is the open item —
-  `ThingsTodo.md` Phase 3. The relay also has **no systemd unit**, so it must be restarted
+  `wheel_odom_relay` → `/wheel_odom`), but is **degraded**: `/wheel_state` arrives at
+  **10 Hz** instead of the 20 Hz the firmware asks for (`rover_firmware_v2.ino:391`). The
+  cause is not yet found — tracked as `learn/03-imu.md`. The relay also has **no systemd unit**, so it must be restarted
   by hand after any Pi5 reboot: `ros2 run langrobo_ros wheel_odom_relay`.
 - **Check `/odom/health` before any move** (needs `fuse`): `trust: false` ⇒ do not drive and
   do not believe any "arrived".

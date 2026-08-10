@@ -30,7 +30,8 @@ docker run --rm --network host --entrypoint bash orin-nav:1.1 -lc \
 ## 2. Laptop RViz cleanup
 
 ```bash
-ssh rakhi24@192.168.1.12 'pkill -x rviz2'      # -x exact; pgrep/pkill -f self-matches over ssh
+ssh rakhi24@192.168.1.10 'pkill -x rviz2'      # laptop is .10 — .12 is the ESP32 (DHCP swap 2026-08-10)
+                                               # -x exact; pgrep/pkill -f self-matches over ssh
 ```
 
 ## 3. What to LEAVE RUNNING

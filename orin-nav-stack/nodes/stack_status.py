@@ -11,6 +11,7 @@ WHY THIS EXISTS
         stops (publisher count: still 1)
       * nvblox back_projected_depth at 0.47 Hz with 7.3 s gaps (publisher count: still 1)
       * ESP32 /wheel_state at 1 Hz instead of 20 Hz (publisher count: still 1)
+        — since reflashed; it now runs at 10 Hz, still half the firmware's 20 (learn/03-imu.md)
 
     A publisher count of 1 was printed in every one of those cases. So it measures rates,
     TF freshness, and pose trust instead.
@@ -61,7 +62,8 @@ WATCH = [
     ("/perception/depth_points",              "collision src",    5.0, "vision",
      "nav2 collision_monitor source. Stale => monitor HOLDS THE ROBOT AT ZERO"),
     ("/wheel_state",                          "ESP32 encoders",  15.0, "esp32",
-     "MUST be ~20 Hz. 1 Hz = ESP32 still on OLD firmware, reflash it"),
+     "MUST be ~20 Hz. Measured 10 Hz 2026-08-11 = half rate, cause unknown (learn/03-imu.md). "
+     "1 Hz = ESP32 on pre-f4be55a firmware, reflash it"),
     ("/cmd_vel",                              "cmd_vel out",      0.0, "-",
      "final motor command (0 Hz when parked is correct)"),
 ]

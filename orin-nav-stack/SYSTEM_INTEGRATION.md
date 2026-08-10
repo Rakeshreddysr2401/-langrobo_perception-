@@ -5,7 +5,7 @@ machines), the exact ROS 2 contract between them, and the prioritized gaps towar
 product goal: *a household robot that can **see, understand, move in sync with its
 environment**, and do tasks* — starting with the flagship command **"go near the chair."**
 
-> **See also [`SESSION_2026-08-10.md`](SESSION_2026-08-10.md)** — the debugging session that
+> **See also [`../archive/docs/SESSION_2026-08-10.md`](../archive/docs/SESSION_2026-08-10.md)** — the debugging session that
 > fixed the go-to-object path end to end (cmd_vel chain, floor-as-obstacle, pose trust),
 > with the measurements behind each change and the current blocked state.
 
@@ -112,10 +112,11 @@ wheel_odom /wheel_odom (vx)  ┘   (config/ekf.yaml: odom0 pose, imu0 vyaw, odom
 ```
 Wheel path = `ESP32 /wheel_state → Pi5 langrobo_ros/wheel_odom_relay → /wheel_odom`.
 **Relay is running** (started manually on the Pi5 2026-08-10; no systemd unit, so it does not
-survive a reboot). Chain verified end-to-end: `/wheel_state` 1 Hz → `/wheel_odom` 1 Hz → EKF.
-**Still blocked:** the flashed ESP32 emits 1 Hz, not the 20 Hz the HEAD firmware produces —
-reflash required (see the wheel-odom memory + §6 G1). At 1 Hz the encoder path cannot bridge
-cuVSLAM dropouts and `odom_health` cannot use it as ground truth.
+survive a reboot). Chain verified end-to-end: `/wheel_state` → `/wheel_odom` → EKF.
+**Half rate (measured 2026-08-11):** `/wheel_state` publishes at **10.0 Hz**, not the 20 Hz the
+firmware asks for at `rover_firmware_v2.ino:391` (50 ms). Earlier notes saying "1 Hz, still on
+OLD firmware" are **out of date** — a reflash has happened; the remaining half-rate is a real
+bug. Tracked as `learn/03-imu.md`.
 
 ---
 
@@ -123,7 +124,7 @@ cuVSLAM dropouts and `odom_health` cannot use it as ground truth.
 
 | Capability | Built | Gap |
 |---|---|---|
-| **SEE** — localize | cuVSLAM VO + loop closure; EKF odom | encoders not yet fused live (1 Hz reflash) |
+| **SEE** — localize | cuVSLAM VO + loop closure; EKF odom | encoders fused but at half rate (10 Hz, want 20) |
 | **SEE** — 3D map | nvblox mesh + ESDF + occupancy | **front FOV only** — no head pan → blind sides/back |
 | **SEE** — detect | YOLO 2D bearing + 3D metric (D555 depth) | — |
 | **UNDERSTAND** — VLM | Mac Gemma via `look()`/`local_agent` | not fused with 3D map (no VLM-grounded object poses) |

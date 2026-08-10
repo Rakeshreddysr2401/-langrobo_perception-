@@ -25,8 +25,9 @@ how far the robot has moved:
     wheels      integral of /wheel_odom twist vx     "what the ground says"
 
 Wheels are the honest witness: encoders do not care about texture or reflections.
-Until the ESP32 is reflashed, /wheel_state arrives at 1 Hz instead of 20 Hz, so the
+/wheel_state currently arrives at 10 Hz, not the 20 Hz the firmware asks for, so the
 wheel comparison is coarse and is reported as LOW_RATE rather than trusted blindly.
+(It was 1 Hz before the reflash; the remaining half-rate is tracked in learn/03-imu.md.)
 The commanded-vs-visual and stationary-drift checks work regardless.
 
     /odom/health  std_msgs/String  JSON:

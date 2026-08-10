@@ -3,7 +3,7 @@
 odom_ruler.py — a tape measure for the robot's own sense of distance.
 
 WHY
-    Phase 1 of ThingsTodo.md: before trusting ANY autonomous motion, prove the pose
+    learn/02-odometry.md: before trusting ANY autonomous motion, prove the pose
     is metrically honest. Push the rover a tape-measured 1.00 m BY HAND (motors off)
     and see what each odometry source claims.
 

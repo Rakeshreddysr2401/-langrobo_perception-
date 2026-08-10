@@ -55,7 +55,7 @@ Differential-drive (skid-steer) rover, 4 driven wheels:
   still at 1 Hz. Confirm the target before every OTA:
 
       getent hosts rover-esp32.local     # authoritative — OTA_HOSTNAME in the firmware
-      ros2 topic hz /wheel_state         # 20 Hz = new firmware, 1 Hz = still old
+      ros2 topic hz /wheel_state         # want 20 Hz; measured 10 Hz 2026-08-11 (learn/03-imu.md)
 - **Motor drivers:** 2× **BTS7960 (IBT-2)** H-bridges — one per side, each driving
   the two motors of that side in parallel.
 - **Motors:** 4× **Rhino GB37 12V geared encoder motors** (see §3).

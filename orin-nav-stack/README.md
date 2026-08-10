@@ -35,7 +35,7 @@ inside the Jazzy container alongside nvblox/nav2. Modern stack, no version misma
 | Compute | Jetson Orin Nano 8 GB, JetPack 7.2 (L4T R39.2), Ubuntu 24.04, CUDA 13.2 |
 | Camera | Intel RealSense **D555** (PoE/ethernet, DDS) at `192.168.11.55`, S/N 261522301413 |
 | Rover base | L **30 cm** × W **17 cm**; camera 5 cm behind nose, 20 cm high; **powered by cable tether** |
-| Motors | ESP32 (wifi, `192.168.1.11`) via micro-ROS agent on the Pi5 (`:8888`); 500 ms cmd watchdog |
+| Motors | ESP32 (wifi, `rover-esp32.local` — DHCP, measured `192.168.1.12` on 2026-08-10; **always resolve the mDNS name, never type the IP**) via micro-ROS agent on the Pi5 (`:8888`); 500 ms cmd watchdog |
 | Brain | Pi5 `192.168.1.16` (`rakhi24-desktop`, passwordless ssh) — LangGraph + micro-ROS agent |
 | VLM | Mac mini on the LAN — vision-language decisions, sends pixel queries |
 | Jetson net | wifi `192.168.1.15` (LAN/ROS), eth `192.168.11.70` + `192.168.2.20` (camera subnet) |
@@ -78,9 +78,9 @@ Rover must be power-cycled once if the Pi5/agent restarted since (firmware recon
 
 | Command | What it does |
 |---|---|
-| `up` | Start container + D555 (stereo/depth/color/imu, emitter ON) + TFs + cuVSLAM **full SLAM** + nvblox. Repo is bind-mounted RO over `/opt/orin-nav` (edits apply on restart, no rebuild); `./maps` mounted rw at `/maps` |
+| `up` | Start container + D555 (stereo/depth/color/imu, **emitter OFF** — ON breaks cuVSLAM scale ~4x, see §10) + TFs + cuVSLAM **full SLAM** + nvblox. Repo is bind-mounted RO over `/opt/orin-nav` (edits apply on restart, no rebuild); `./maps` mounted rw at `/maps` |
 | `nav2` | nav2 with the **no-blind-recovery BT** (map frame comes live from cuVSLAM — no static bridge) |
-| `vision` | YOLO hunt, pixel→goal, motor deadband, **safety_guard** (pose watchdog + virtual bumper), imu relay, 2 Hz look feed → Pi5 brain |
+| `vision` | YOLO hunt, pixel→goal, depth→cloud for the collision monitor, **safety_guard** (pose watchdog + virtual bumper), imu relay, 2 Hz look feed → Pi5 brain |
 | `stop` | **E-STOP** — kills every motion node + publishes zero velocity |
 | `down` | **Hard stop** — removes the container (watchdog halts rover ≤0.5 s) |
 | `remap` | Fresh map + pose→(0,0,0): restarts cuVSLAM+nvblox **without touching the camera** |
@@ -238,7 +238,7 @@ RViz shows the bumper as a box in front of the robot: **green = clear, red = blo
 | Goal "SUCCEEDED" but no motion | NavFn tolerance quirk when goal unreachable — treat as failure; re-map and retry |
 | `ros2 topic hz` says no data but things work | The CLI probe is flaky under load — trust `logs` counters and downstream consumers |
 | MPPI "Optimizer fail" / control loop misses 20 Hz | CPU saturated → pause YOLO, close RViz, retry |
-| Wheels hum but no motion | Was the open-loop L298N torque floor. Firmware v2's encoder PID + `gMinDuty` handles breakaway, so this should no longer happen — if it does, suspect **battery sag** (row below) or that the ESP32 is still on old firmware (`ros2 topic hz /wheel_state` must be ~20 Hz, not 1 Hz) |
+| Wheels hum but no motion | Was the open-loop L298N torque floor. Firmware v2's encoder PID + `gMinDuty` handles breakaway, so this should no longer happen — if it does, suspect **battery sag** (row below) or a wheel-telemetry problem (`ros2 topic hz /wheel_state` should be ~20 Hz; measured 2026-08-10 it runs at **10 Hz** — see `learn/03-imu.md`) |
 | Nav goal SUCCEEDED but rover stopped short/long of it | Pose inflated during motion (seen 2026-07-19: reported 1.0 m while physically shorter) — nav2 closes the loop on the *reported* pose. Re-map before the next goal; if it repeats, treat as tracking degradation, not calibration |
 | `remap` prints nothing / container gone after it | **FIXED 2026-07-19 (root cause)**: the kill-loop's `pgrep -f cuvslam_ros_node.py` matched the wrapper shell's own cmdline → kill -9'd itself → exit 137 → `set -e` aborted before restarting nodes. Patterns are now bracketed (`[c]uvslam…`). If you ever add a kill-loop to run_stack.sh, use `pgrep -f "[x]name"` |
 | Pi5 brain says "I cannot see right now" | look() feed comes from detections_3d (2 Hz JPEG republish on `/camera/color/image_raw/compressed`) — it is DOWN whenever YOLO is paused or the vision layer isn't up |
@@ -266,7 +266,7 @@ RViz shows the bumper as a box in front of the robot: **green = clear, red = blo
   ⚠ **Suspect this now.** That ×1.2 was measured with the **emitter ON**, which is itself a
   scale bug (previous bullet). With the emitter OFF, 100 cm read 97 cm — i.e. ~3% error, not
   20%. So `CAL=1.2` is very likely over-correcting today. **Re-measure before trusting
-  `drive_test.py` distances** (Phase 1 of `ThingsTodo.md` does exactly this).
+  `drive_test.py` distances** (`learn/02-odometry.md` does exactly this).
 - IR **emitter OFF** — `depth_module.emitter_enabled:=0` in `run_stack.sh launch_cam`.
   **Corrected 2026-08-09; this line previously said "emitter ON, does not hurt cuVSLAM" and
   that was wrong.** The projector is rigidly mounted on the camera, so its dot pattern is
