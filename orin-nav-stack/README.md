@@ -163,15 +163,24 @@ RViz shows the bumper as a box in front of the robot: **green = clear, red = blo
 ## 7. Viewing (RViz / laptop)
 
 - On the Jetson monitor: `./run_stack.sh rviz` (close it when navigating — RAM).
-- From the **HP laptop (192.168.1.12, HP Pavilion 14, hostname `rakhi24`, passwordless SSH
-  from the Jetson)** — already installed (2026-07-19): log into the desktop, then run
+- From the **HP laptop (`192.168.1.10`, HP Pavilion 14, hostname `rakhi24`, passwordless SSH
+  from the Jetson)** — already installed (2026-07-19).
+
+  ⚠ **The IP moved.** This was documented as `192.168.1.12` until 2026-08-10; DHCP has since
+  given `.12` to the **ESP32** (`rover-esp32.local` resolves there, ssh refused). Everything
+  on this LAN is DHCP — **verify before trusting any hardcoded IP here**. Fastest check:
+  `./run_stack.sh view`, which resolves the laptop and tells you if someone is logged in.
+
+  **Step 1: log into the laptop desktop physically** (see the warning below), then run:
   ```bash
   ~/rover_view.sh        # sources Jazzy, domain 0, opens ~/laptop_view.rviz
   ```
   ⚠ **Laptop must be logged in** — at the Ubuntu login screen nothing can display (a
-  remotely-launched rviz runs invisibly). Check it's really up with `pgrep -x rviz2` —
-  **never `pgrep -f rviz2` over ssh: it matches your own ssh command line** (same
-  self-match trap as the run_stack.sh kill loops).
+  remotely-launched rviz runs invisibly, with **no error**). Verify from the Jetson with
+  `ssh rakhi24@192.168.1.10 loginctl list-sessions`: if the only seat0 session belongs to
+  `gdm`, **nobody is logged in** and RViz cannot appear no matter what you run.
+  Check rviz is really up with `pgrep -x rviz2` — **never `pgrep -f rviz2` over ssh: it
+  matches your own ssh command line** (same self-match trap as the run_stack.sh kill loops).
   (Any other Jazzy laptop: `scp rakhi24@192.168.1.15:~/orin-nav-stack/config/laptop_view.rviz /tmp/`,
   `unset ROS_DISCOVERY_SERVER; export ROS_DOMAIN_ID=0; rviz2 -d /tmp/laptop_view.rviz`.)
   Shows: TF frames, live nvblox walls, `/plan`, the `/odom` "pencil trail" (300 arrows),
@@ -187,8 +196,14 @@ RViz shows the bumper as a box in front of the robot: **green = clear, red = blo
 
 1. **Tethered power cable**: blind rotations tangle it. The BT (`config/bt_navigate_to_pose.xml`)
    has **NO Spin/BackUp** — never replace it with nav2's default (caused a live incident 2026-07-19).
-2. Output speeds capped in `nodes/cmd_vel_deadband.py`: vx ≤ 0.22 m/s, wz ≤ 0.90 rad/s.
-   Hardware floors (0.20 / 0.80) are needed to move at all → "slow" = short supervised bursts.
+2. **Speed caps live in `config/nav2.yaml`** — MPPI `vx_max: 0.30` / `vx_min: -0.10` /
+   `wz_max: 1.0`, and velocity_smoother `max_velocity: [0.25, 0.0, 1.0]`.
+   ⚠ `nodes/cmd_vel_deadband.py` is **RETIRED** (2026-08-10) and is no longer started by
+   `run_stack.sh vision`. It was built for the old open-loop L298N firmware and re-floored
+   every command to vx ≥ 0.20 / wz ≥ 0.80, so a fine MPPI correction of (0.02, 0.05) reached
+   the wheels as (0.21, 0.80) — a hard swerve. That was the weave. **There are no hardware
+   speed floors any more**: firmware v2's 50 Hz encoder PID with `gMinDuty` does the
+   static-friction job, so low speeds are now genuinely controllable.
 3. **E-stop**: `./run_stack.sh stop`; if in doubt `./run_stack.sh down` (always works).
 4. **Pause YOLO during motion tests** — CPU overload causes cuVSLAM pose jumps → nav chaos.
    Kill by full path (`pkill -f "nodes/detections_3d.py"`) — a bare `-f detections_3d` inside
@@ -223,12 +238,13 @@ RViz shows the bumper as a box in front of the robot: **green = clear, red = blo
 | Goal "SUCCEEDED" but no motion | NavFn tolerance quirk when goal unreachable — treat as failure; re-map and retry |
 | `ros2 topic hz` says no data but things work | The CLI probe is flaky under load — trust `logs` counters and downstream consumers |
 | MPPI "Optimizer fail" / control loop misses 20 Hz | CPU saturated → pause YOLO, close RViz, retry |
-| Wheels hum but no motion | Below torque floor → speeds ≥ 0.25 m/s for tests; deadband handles nav2 commands |
+| Wheels hum but no motion | Was the open-loop L298N torque floor. Firmware v2's encoder PID + `gMinDuty` handles breakaway, so this should no longer happen — if it does, suspect **battery sag** (row below) or that the ESP32 is still on old firmware (`ros2 topic hz /wheel_state` must be ~20 Hz, not 1 Hz) |
 | Nav goal SUCCEEDED but rover stopped short/long of it | Pose inflated during motion (seen 2026-07-19: reported 1.0 m while physically shorter) — nav2 closes the loop on the *reported* pose. Re-map before the next goal; if it repeats, treat as tracking degradation, not calibration |
 | `remap` prints nothing / container gone after it | **FIXED 2026-07-19 (root cause)**: the kill-loop's `pgrep -f cuvslam_ros_node.py` matched the wrapper shell's own cmdline → kill -9'd itself → exit 137 → `set -e` aborted before restarting nodes. Patterns are now bracketed (`[c]uvslam…`). If you ever add a kill-loop to run_stack.sh, use `pgrep -f "[x]name"` |
 | Pi5 brain says "I cannot see right now" | look() feed comes from detections_3d (2 Hz JPEG republish on `/camera/color/image_raw/compressed`) — it is DOWN whenever YOLO is paused or the vision layer isn't up |
 | Pose explodes during forward drive (z≠0, teleport; guard trips) | Fast breakaway (~0.5 m/s) + LC burst starves the tracker. Recover: `remap`. Prevent: short bursts, nav2 off while teleop-mapping, keep node defaults `async_sba=true` `lc_throttle_ms=2000`. Durable fix = ESP32 flash (controllable slow speed) |
-| Laptop RViz "running" but nothing on screen | Laptop at the login screen (log in first!), or your `pgrep -f rviz2` matched itself over ssh — use `pgrep -x rviz2`. Launch as the logged-in user: `bash ~/rover_view.sh` on the laptop |
+| Laptop RViz "running" but nothing on screen | Laptop at the login screen (log in first! check `loginctl list-sessions` — only `gdm` on seat0 = nobody logged in), or your `pgrep -f rviz2` matched itself over ssh — use `pgrep -x rviz2`. Launch as the logged-in user: `bash ~/rover_view.sh` on the laptop |
+| Can't reach the laptop / ssh refused | **The laptop is `192.168.1.10`, not `.12`** — DHCP gave `.12` to the ESP32 (2026-08-10). Run `./run_stack.sh view`, which resolves it and checks the login state for you |
 | Wheels stall even at cmd 0.30 | Battery sag — breakaway threshold rises as the pack drains. Charge/swap; no software fix until the ESP32 PWM-floor firmware is flashed |
 
 ## 10. Facts & calibration (measured)
@@ -244,9 +260,23 @@ RViz shows the bumper as a box in front of the robot: **green = clear, red = blo
   `lc_throttle_ms=2000` (now node defaults — after tuning, a rotate out-and-back returned
   to 0.000/−0.001 m vs 30 cm drift before), stop nav2 while teleop-mapping (CPU headroom),
   short motion bursts. safety_guard caught both explosions live (trip + auto-clear verified).
-- cuVSLAM (and RTABMap before it) under-read real distance ×~1.2 → **D555 factory stereo calib
-  scale**; `CAL=1.2` inside `drive_test.py` compensates. Baseline 0.0949 m, 896×504@30 IR.
-- IR **emitter ON** (dense depth; does not hurt cuVSLAM in this single-container setup).
+- cuVSLAM (and RTABMap before it) under-read real distance ×~1.2 → assumed to be **D555
+  factory stereo calib scale**; `CAL=1.2` inside `drive_test.py` compensates. Baseline
+  0.0949 m, 896×504@30 IR.
+  ⚠ **Suspect this now.** That ×1.2 was measured with the **emitter ON**, which is itself a
+  scale bug (previous bullet). With the emitter OFF, 100 cm read 97 cm — i.e. ~3% error, not
+  20%. So `CAL=1.2` is very likely over-correcting today. **Re-measure before trusting
+  `drive_test.py` distances** (Phase 1 of `ThingsTodo.md` does exactly this).
+- IR **emitter OFF** — `depth_module.emitter_enabled:=0` in `run_stack.sh launch_cam`.
+  **Corrected 2026-08-09; this line previously said "emitter ON, does not hurt cuVSLAM" and
+  that was wrong.** The projector is rigidly mounted on the camera, so its dot pattern is
+  re-painted from the camera's own viewpoint every frame: on a low-texture/reflective floor
+  the dots stay ~fixed in the image while the rig *translates*, and cuVSLAM (which tracks
+  infra1/2 features) sees almost no motion. Measured — emitter ON: a 100 cm push read as
+  **26 cm** on `/odom` (~4× under). Emitter OFF: 100 cm → **97 cm** (3%).
+  Passive-stereo DEPTH stays metric either way (140 cm wall → 1.40 m verified), so nvblox
+  still works; emitter-off depth is just noisier on textureless surfaces. Localization beats
+  perfect depth, so **the emitter stays off**. See memory: `emitter-breaks-cuvslam-scale`.
 - D555 IMU: single combined `motion` stream 200 Hz; DDS driver reports identity extrinsics
   (why VIO is parked — needs Kalibr).
 

@@ -13,7 +13,11 @@
 #                           #   chain: controller_server -> /cmd_vel_nav -> velocity_smoother
 #                           #     -> /cmd_vel_smoothed -> collision_monitor -> /cmd_vel_shim
 #                           #     -> safety_guard -> /cmd_vel -> ESP32   (single path, no bypass)
-#   ./run_stack.sh status   # one-shot health: camera / SLAM / nav2 / safety / ESP32 wheel link
+#   ./run_stack.sh status   # one-shot health — measures RATES (not publisher counts),
+#                           #   TF freshness and /odom/health pose trust, then SLAM/nav2/
+#                           #   safety/ESP32 link. Optional arg = sample window in seconds.
+#   ./run_stack.sh view     # laptop RViz: resolve it, prove someone is logged in, say what
+#                           #   to run. 'view start' also launches it remotely.
 #   ./run_stack.sh stop     # E-STOP: kill nav/motion nodes + zero /cmd_vel
 #   ./run_stack.sh remap    # fresh map/pose: restart cuVSLAM + nvblox (camera untouched)
 #   ./run_stack.sh rviz     # RViz nav2 view on the Jetson monitor (:1)
@@ -245,26 +249,102 @@ rviz)
   echo "RViz nav2 view on the Jetson monitor (:1)"
   ;;
 status)
-  # One-shot health of every layer. Empty/0 values flag what's not up yet.
+  # One-shot health of every layer.
+  #
+  # This used to print PUBLISHER COUNTS. That is the wrong instrument: every failure
+  # this rig has had was a RATE COLLAPSE with the publisher count still sitting at 1
+  # (IR 22->0.97 Hz, cuVSLAM frozen but /odom's publisher still registered, wheel_state
+  # at 1 Hz instead of 20). nodes/stack_status.py measures actual rates, TF freshness
+  # and pose trust; the lifecycle/link checks that it can't do stay here.
   if ! docker ps --format '{{.Names}}' | grep -qx "$NAME"; then
     echo "container '$NAME' not running — start with ./run_stack.sh up"; exit 1
   fi
+  rexec "python3 $NAV/nodes/stack_status.py --window ${2:-4}" || true
   rexec '
-    campub=$(ros2 topic info '"$CAM_NS"'/infra1/image_rect_raw 2>/dev/null | awk "/Publisher count/{print \$3}")
-    slam=$(ros2 topic echo /slam/status --once 2>/dev/null | grep -o "\"slam_pose_ok\": [a-z]*" | head -1)
-    safe=$(ros2 topic echo /safety/state --once 2>/dev/null | grep -o "data: .*" | head -1)
+    safe=$(timeout 5 ros2 topic echo /safety/state --once 2>/dev/null | grep -o "data: .*" | head -1)
+    slam=$(timeout 5 ros2 topic echo /slam/status --once 2>/dev/null | grep -o "\"slam_pose_ok\": [a-z]*" | head -1)
     esp=$(ros2 topic info /cmd_vel 2>/dev/null | awk "/Subscription count/{print \$3}")
     # LIVE nav2 check: bt_navigator lifecycle state (not a stale /tmp/nav2.log grep,
     # which stays "Managed nodes are active" even after nav2 has crashed).
     nav=$(timeout 5 ros2 lifecycle get /bt_navigator 2>/dev/null | grep -o "^active")
-    printf "  camera D555 (infra1 publisher): %s\n" "${campub:-0}  (>=1 = streaming)"
     printf "  cuVSLAM        %s\n" "${slam:-<no /slam/status>}"
     printf "  safety         %s\n" "${safe:-<no /safety/state>}"
     printf "  ESP32 wheels (/cmd_vel subs):   %s\n" "${esp:-0}  (1 = wheels linked)"
     printf "  nav2           %s\n" "${nav:-<not active / not started>}"
+    echo
   '
+  ;;
+view)
+  # Locate the laptop RViz view and say plainly why it is not showing.
+  #
+  # Two traps, both of which have cost a session:
+  #   1. The laptop's IP MOVED (.12 -> .10). DHCP handed .12 to the ESP32, so the
+  #      documented address ssh-refuses and looks like "the laptop is off".
+  #   2. If the laptop sits at the GDM login screen, an rviz launched over ssh runs
+  #      INVISIBLY and exits non-zero nowhere. Nothing is broken; nobody is logged in.
+  LAPTOP_USER=${LAPTOP_USER:-rakhi24}
+  LAPTOP_IP=${LAPTOP_IP:-192.168.1.10}
+  echo
+  echo "  laptop RViz view — $LAPTOP_USER@$LAPTOP_IP"
+  echo "  (override with: LAPTOP_IP=x.x.x.x ./run_stack.sh view)"
+  echo
+  if ! ping -c1 -W2 "$LAPTOP_IP" >/dev/null 2>&1; then
+    echo "  ✗ $LAPTOP_IP does not respond to ping — laptop off, asleep, or on another network."
+    echo "    Find it:  getent hosts rover-esp32.local   # make sure you are not looking at the ESP32"
+    exit 1
+  fi
+  echo "  ok  host is up"
+  if ! timeout 8 ssh -o BatchMode=yes -o ConnectTimeout=4 "$LAPTOP_USER@$LAPTOP_IP" true 2>/dev/null; then
+    echo "  ✗ ssh refused/failed. If this is 192.168.1.12 you are talking to the ESP32,"
+    echo "    not the laptop (DHCP swapped them 2026-08-10). The laptop is 192.168.1.10."
+    exit 1
+  fi
+  echo "  ok  ssh works"
+  # A desktop session = a session that is NOT gdm and has a real graphical type.
+  desk=$(timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$LAPTOP_IP" '
+    for s in $(loginctl list-sessions --no-legend 2>/dev/null | awk "{print \$1}"); do
+      n=$(loginctl show-session "$s" -p Name --value 2>/dev/null)
+      t=$(loginctl show-session "$s" -p Type --value 2>/dev/null)
+      d=$(loginctl show-session "$s" -p Display --value 2>/dev/null)
+      if [ "$n" != "gdm" ] && { [ "$t" = "x11" ] || [ "$t" = "wayland" ]; }; then
+        echo "$n ${d:-:0}"; break
+      fi
+    done' 2>/dev/null)
+  if [ -z "$desk" ]; then
+    echo "  ✗ NOBODY IS LOGGED IN to the laptop desktop (only gdm holds the seat)."
+    echo
+    echo "    RViz CANNOT display in this state — launching it over ssh runs it invisibly"
+    echo "    with no error. This is the #1 cause of 'RViz shows nothing'."
+    echo
+    echo "    FIX: physically log into the laptop, then on the laptop run:"
+    echo "         bash ~/rover_view.sh"
+    exit 1
+  fi
+  echo "  ok  desktop session: $desk"
+  if timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$LAPTOP_IP" 'pgrep -x rviz2 >/dev/null' 2>/dev/null; then
+    echo "  ok  rviz2 is ALREADY running — look at the laptop screen"
+  else
+    echo "  --  rviz2 not running. Start it ON THE LAPTOP:   bash ~/rover_view.sh"
+    echo "      (or from here:  ./run_stack.sh view start)"
+  fi
+  if [ "${2:-}" = "start" ]; then
+    disp=$(echo "$desk" | awk '{print $2}')
+    echo "  launching rviz2 remotely on DISPLAY=$disp ..."
+    timeout 10 ssh -o BatchMode=yes "$LAPTOP_USER@$LAPTOP_IP" \
+      "DISPLAY=$disp XDG_RUNTIME_DIR=/run/user/\$(id -u) nohup bash ~/rover_view.sh >/tmp/rviz.log 2>&1 &" \
+      >/dev/null 2>&1 || true
+    sleep 4
+    if timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$LAPTOP_IP" 'pgrep -x rviz2 >/dev/null' 2>/dev/null; then
+      echo "  ok  rviz2 started (verified with pgrep -x, not -f — -f matches our own ssh cmdline)"
+    else
+      echo "  ✗ rviz2 did not stay up. On the laptop: cat /tmp/rviz.log"
+    fi
+  fi
+  echo
+  echo "  ⚠ RViz's '2D Goal Pose' button sends a REAL nav goal — the rover moves."
+  echo
   ;;
 logs) docker exec "$NAME" tail -n 40 "/tmp/${2:-cuvslam}.log";;
 down) docker rm -f "$NAME" >/dev/null 2>&1 && echo "removed $NAME (hard stop)";;
-*) echo "usage: $0 {up|cam|nav2|vision|fuse|status|stop|remap|rviz|logs <name>|down}";;
+*) echo "usage: $0 {up|cam|nav2|vision|fuse|status [secs]|view [start]|stop|remap|rviz|logs <name>|down}";;
 esac

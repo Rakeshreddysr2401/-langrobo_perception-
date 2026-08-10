@@ -6,7 +6,13 @@ description: Full LangRobo rover bring-up — Jetson nav stack (SLAM+nav2+vision
 # Rover full-system start (run from the Jetson, /home/rakhi24)
 
 Machines: Jetson (this host, 192.168.1.15) · Pi5 `rakhi24@192.168.1.16` (passwordless SSH) ·
-HP laptop `rakhi24@192.168.1.12` (passwordless SSH) · ESP32 rover 192.168.1.11 · Mac VLM `singireddys-mac-mini.local` (mDNS ONLY, IP moves).
+HP laptop `rakhi24@192.168.1.10` (passwordless SSH) · ESP32 rover `rover-esp32.local`
+(= 192.168.1.12 as of 2026-08-10) · Mac VLM `singireddys-mac-mini.local` (mDNS ONLY, IP moves).
+
+⚠ **This LAN is all DHCP and the addresses have already swapped once.** The laptop was
+documented as `.12` and the ESP32 as `.11`; measured 2026-08-10, the **laptop is `.10`** and
+the **ESP32 holds `.12`**. Resolve the mDNS name (`getent hosts rover-esp32.local`) rather
+than typing an IP, and use `./run_stack.sh view` to locate the laptop.
 
 ## 1. Jetson perception + nav (order matters)
 
@@ -14,20 +20,31 @@ HP laptop `rakhi24@192.168.1.12` (passwordless SSH) · ESP32 rover 192.168.1.11 
 cd ~/orin-nav-stack
 ./run_stack.sh up        # camera + cuVSLAM FULL SLAM + nvblox   (~40 s)
 ./run_stack.sh nav2      # nav2, safe no-recovery BT             (~20 s)
-./run_stack.sh vision    # YOLO + goal nodes + deadband + safety_guard + look feed
+./run_stack.sh vision    # YOLO + goal nodes + depth_to_cloud + safety_guard + look feed
 ./run_stack.sh status    # one-shot health of every layer (run after each step)
 ```
+
+For visual+inertial fusion (EKF owns `odom->base_link`, adds `/odom/health` pose trust)
+run `./run_stack.sh fuse` after `up`. ⚠ Both `fuse` and `remap` **wipe the nvblox map** —
+save it first if it matters.
+⚠ `cmd_vel_deadband` is **retired** (2026-08-10) and no longer part of `vision`.
 
 `up` now GATES on the D555 actually streaming — it no longer plows ahead on a blind
 sleep. If the camera doesn't come up it ABORTS with a power-cycle message (see §1a),
 leaving the container running so `./run_stack.sh cam` can retry after you fix it.
 
-Wait/verify (don't skip) — easiest is `./run_stack.sh status`, which prints:
-- `camera D555 (infra1 publisher): >=1` = streaming
-- `cuVSLAM "slam_pose_ok": true`
-- `safety data: ok`
-- `ESP32 wheels (/cmd_vel subs): 1` = wheels linked
-- `nav2 active`
+Wait/verify (don't skip) — `./run_stack.sh status` measures **rates**, TF freshness and
+pose trust, then flags anything running-but-wrong. Healthy looks like:
+- `camera IR left ~29 Hz` · `camera depth ~25 Hz` (⚠ **<10 Hz => cuVSLAM freezes silently**)
+- `cuVSLAM odom ~28 Hz` (0 Hz **with the camera alive** = cuVSLAM frozen → restart it)
+- `nvblox slice ~9 Hz` · `TF map->odom` and `odom->base_link` both < 1 s old
+- `ESP32 encoders ~20 Hz` (**1.0 Hz = still on OLD firmware, reflash**)
+- `orin load1 < 8` — CPU is a safety property here; load starves the camera
+- `cuVSLAM "slam_pose_ok": true` · `safety data: ok` · `/cmd_vel subs: 1` · `nav2 active`
+
+It separates real problems ("running but wrong") from layers you simply haven't started yet.
+Publisher counts are NOT a health check — every failure this rig has had kept a count of 1
+while the rate collapsed.
 
 ### 1a. Camera (D555) — ethernet/PoE DDS at `192.168.11.55`, NOT USB
 The D555 is a **PoE/ethernet DDS camera** on `enP8p1s0` (Jetson eth `192.168.11.70`).
@@ -65,12 +82,20 @@ confirm the ESP32 is powered and on WiFi.
 
 ## 4. HP-laptop RViz live view
 
-⚠ The laptop must be **logged in to the desktop** — if it sits at the Ubuntu login screen,
-nothing can show (2026-07-19 lesson). Easiest: user opens a terminal (Ctrl+Alt+T) and runs
-`bash ~/rover_view.sh`. Remote alternative from the Jetson (after they log in):
 ```bash
-ssh rakhi24@192.168.1.12 'DISPLAY=:1 XDG_RUNTIME_DIR=/run/user/1000 nohup bash ~/rover_view.sh >/tmp/rviz.log 2>&1 &'
-ssh rakhi24@192.168.1.12 'pgrep -x rviz2'    # -x EXACT match — pgrep -f matches your own ssh cmdline!
+./run_stack.sh view      # resolves the laptop, checks it's logged in, prints the next step
+```
+
+⚠ The laptop must be **logged in to the desktop** — if it sits at the Ubuntu login screen,
+nothing can show and rviz launched over ssh runs **invisibly with no error** (2026-07-19
+lesson; hit again 2026-08-10). `view` checks this for you: it reports NOT LOGGED IN when the
+only seat0 session belongs to `gdm`.
+
+Easiest: user opens a terminal (Ctrl+Alt+T) **on the laptop** and runs `bash ~/rover_view.sh`.
+Remote alternative from the Jetson (only after they log in):
+```bash
+ssh rakhi24@192.168.1.10 'DISPLAY=:1 XDG_RUNTIME_DIR=/run/user/1000 nohup bash ~/rover_view.sh >/tmp/rviz.log 2>&1 &'
+ssh rakhi24@192.168.1.10 'pgrep -x rviz2'    # -x EXACT match — pgrep -f matches your own ssh cmdline!
 ```
 Data check on laptop: `unset ROS_DISCOVERY_SERVER; export ROS_DOMAIN_ID=0; source /opt/ros/jazzy/setup.bash; ros2 topic hz /odom`.
 ⚠ RViz "2D Goal Pose" button sends a REAL nav goal — rover moves.
@@ -85,5 +110,11 @@ Data check on laptop: `unset ROS_DISCOVERY_SERVER; export ROS_DOMAIN_ID=0; sourc
 - Never replace `config/bt_navigate_to_pose.xml` with nav2's default BT (blind recovery spins).
 - Drivetrain (2026-08): closed-loop BTS7960 + encoder PID (firmware v2 — see
   `orin-nav-stack/firmware/HARDWARE.md`), ~0.86 m/s top speed. Fast straights can still
-  stress cuVSLAM tracking — prefer short bursts. Wheel odometry is NOT yet fused into the
-  EKF (see HARDWARE.md §0 open item).
+  stress cuVSLAM tracking — prefer short bursts.
+- Wheel odometry **is wired** into the EKF (`config/ekf.yaml` odom1, via the Pi5
+  `wheel_odom_relay` → `/wheel_odom`), but is **not yet useful**: the flashed ESP32 still
+  emits `/wheel_state` at **1 Hz** instead of 20 Hz. Reflash is the open item —
+  `ThingsTodo.md` Phase 3. The relay also has **no systemd unit**, so it must be restarted
+  by hand after any Pi5 reboot: `ros2 run langrobo_ros wheel_odom_relay`.
+- **Check `/odom/health` before any move** (needs `fuse`): `trust: false` ⇒ do not drive and
+  do not believe any "arrived".
