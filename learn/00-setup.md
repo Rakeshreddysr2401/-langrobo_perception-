@@ -28,6 +28,27 @@ RViz launched over ssh starts, renders into nothing, and reports no error. It
 looks broken. It isn't — there is simply no desktop to draw on. **You must be
 physically logged in at the laptop**, not just able to ssh to it.
 
+**Trap 3 — Wayland hides the display (found 2026-08-11, now fixed).** The laptop
+runs a Wayland desktop, and on Wayland `loginctl` reports an **empty** display.
+`run_stack.sh view start` used to guess `:0` and pass no X authorization cookie,
+so rviz2 died in under a second with:
+
+```
+Authorization required, but no authorization protocol specified
+qt.qpa.xcb: could not connect to display :0
+```
+
+…written to `/tmp/rviz.log` **on the laptop**, where nobody thinks to look. From
+the Jetson it just said "rviz2 did not stay up".
+
+The fix reads both the display number and the cookie path from the **Xwayland
+process itself** (`pgrep -a Xwayland` → `-auth /run/user/1000/.mutter-Xwaylandauth.XXXXXX`),
+which is authoritative for both. `view` now also prints the tail of the laptop's
+log when the launch fails, instead of telling you to go and read it.
+
+This is the third variation on the same theme: **RViz fails silently and the
+evidence lands on the other machine.**
+
 ### Why the robot is a container
 
 The whole stack (cuVSLAM, nvblox, nav2, YOLO, all the nodes and configs) lives in
@@ -160,6 +181,7 @@ does is a frame problem, and issues 01–08 all assume you have this.
 | `up` aborts, log says "No RealSense devices were found" | The D555's on-camera DDS server is dead | **Physically power-cycle it** — unplug the PoE cable ~5 s, replug. No software restart recovers this. It still answers ping while dead, so ping is not a health check. |
 | `view` says "does not respond to ping" | Laptop off/asleep, or you're on `.12` | It's `192.168.1.10`. Check with `getent hosts rover-esp32.local` that you're not looking at the ESP32. |
 | `view` says "NOBODY IS LOGGED IN" | Trap 2 | Physically log in at the laptop. |
+| `view start` says "rviz2 did not stay up" | Trap 3, or a genuine RViz error | `view` now prints the tail of the laptop's `/tmp/rviz.log` for you. If it mentions "Authorization required" or "could not connect to display", the Xwayland cookie lookup failed — check `pgrep -a Xwayland` on the laptop. |
 | RViz opens but everything is empty | `Fixed Frame` is set to a frame that doesn't exist yet | Set it to `odom`. |
 | RViz opens, no topics at all | Domain mismatch | Use `bash ~/rover_view.sh` — it sets `ROS_DOMAIN_ID=0` and clears stale discovery vars. |
 | `status` shows camera at ~1 Hz | Orin is overloaded | Check `orin load1`. Above ~8 the camera starves and **cuVSLAM freezes silently and never recovers**. Stop something and restart the stack. |

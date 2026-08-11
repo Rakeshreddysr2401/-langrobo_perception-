@@ -314,14 +314,29 @@ view)
   fi
   echo "  ok  ssh works"
   # A desktop session = a session that is NOT gdm and has a real graphical type.
+  # Emits: "<user> <display> <xauthority>".
+  #
+  # Trap 3 (found 2026-08-11): on a WAYLAND session `loginctl -p Display` is EMPTY,
+  # so the old code fell back to a guessed ":0" and passed NO auth cookie. rviz2 then
+  # died instantly with "Authorization required, but no authorization protocol
+  # specified / could not connect to display :0" — into /tmp/rviz.log on the laptop,
+  # where nobody looks. The authoritative source for BOTH the display number and the
+  # cookie path is the Xwayland process cmdline (it is started with -auth <path>).
   desk=$(timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$LAPTOP_IP" '
     for s in $(loginctl list-sessions --no-legend 2>/dev/null | awk "{print \$1}"); do
       n=$(loginctl show-session "$s" -p Name --value 2>/dev/null)
       t=$(loginctl show-session "$s" -p Type --value 2>/dev/null)
-      d=$(loginctl show-session "$s" -p Display --value 2>/dev/null)
-      if [ "$n" != "gdm" ] && { [ "$t" = "x11" ] || [ "$t" = "wayland" ]; }; then
-        echo "$n ${d:-:0}"; break
+      [ "$n" = "gdm" ] && continue
+      [ "$t" = "x11" ] || [ "$t" = "wayland" ] || continue
+      xw=$(pgrep -a Xwayland 2>/dev/null | head -1)
+      if [ -n "$xw" ]; then
+        d=$(echo "$xw" | grep -oE " :[0-9]+" | head -1 | tr -d " ")
+        a=$(echo "$xw" | sed -nE "s/.* -auth ([^ ]+).*/\1/p")
+      else
+        d=$(loginctl show-session "$s" -p Display --value 2>/dev/null)
+        a=$HOME/.Xauthority
       fi
+      echo "$n ${d:-:0} ${a:-$HOME/.Xauthority}"; break
     done' 2>/dev/null)
   if [ -z "$desk" ]; then
     echo "  ✗ NOBODY IS LOGGED IN to the laptop desktop (only gdm holds the seat)."
@@ -342,15 +357,17 @@ view)
   fi
   if [ "${2:-}" = "start" ]; then
     disp=$(echo "$desk" | awk '{print $2}')
-    echo "  launching rviz2 remotely on DISPLAY=$disp ..."
+    xa=$(echo "$desk" | awk '{print $3}')
+    echo "  launching rviz2 remotely on DISPLAY=$disp (XAUTHORITY=$xa) ..."
     timeout 10 ssh -o BatchMode=yes "$LAPTOP_USER@$LAPTOP_IP" \
-      "DISPLAY=$disp XDG_RUNTIME_DIR=/run/user/\$(id -u) nohup bash ~/rover_view.sh >/tmp/rviz.log 2>&1 &" \
+      "DISPLAY=$disp XAUTHORITY=$xa XDG_RUNTIME_DIR=/run/user/\$(id -u) nohup bash ~/rover_view.sh >/tmp/rviz.log 2>&1 &" \
       >/dev/null 2>&1 || true
-    sleep 4
+    sleep 6
     if timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$LAPTOP_IP" 'pgrep -x rviz2 >/dev/null' 2>/dev/null; then
       echo "  ok  rviz2 started (verified with pgrep -x, not -f — -f matches our own ssh cmdline)"
     else
-      echo "  ✗ rviz2 did not stay up. On the laptop: cat /tmp/rviz.log"
+      echo "  ✗ rviz2 did not stay up. Its error is ON THE LAPTOP, not here:"
+      timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$LAPTOP_IP" 'tail -6 /tmp/rviz.log' 2>/dev/null | sed 's/^/       /'
     fi
   fi
   echo
