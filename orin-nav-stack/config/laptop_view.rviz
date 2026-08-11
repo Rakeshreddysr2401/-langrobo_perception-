@@ -63,10 +63,23 @@ Visualization Manager:
       Line Style: Billboards
       Line Width: 0.03
       Color: 25; 255; 25
-    - Class: rviz_default_plugins/Odometry
-      Name: pencil line (/odom trail)
+    - Class: rviz_default_plugins/Path
+      Name: WHERE I HAVE BEEN (driven trail)
       Enabled: true
       Value: true
+      Topic:
+        Value: /rover/trail
+        Depth: 1
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+      Line Style: Billboards
+      Line Width: 0.04
+      Color: 255; 170; 0
+      Pose Style: None
+    - Class: rviz_default_plugins/Odometry
+      Name: raw cuVSLAM arrows (/odom) - OFF, use the trail above
+      Enabled: false
+      Value: false
       Topic:
         Value: /odom
         Depth: 5

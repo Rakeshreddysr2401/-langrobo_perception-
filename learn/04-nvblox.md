@@ -45,6 +45,49 @@ without driving yet.
     walls instead of letting them fade. If ghosts become a problem, the fix is a
     slow decay (a factor like 0.9999), not the aggressive default.
 
+## The open question this issue must answer (measured 2026-08-11)
+
+The 2D occupancy map does **not** look like a room. Snapshot taken with the rover
+standing still, looking forward:
+
+```
+grid      : 128 x 240 @ 0.05 m/cell
+unknown   : 85.1 %
+free      :  5.6 %
+occupied  :  9.3 %      <-- MORE OCCUPIED THAN FREE. That is backwards.
+known bbox: 5.3 x 9.3 m  (= exactly the 87 deg FOV cone at the 5 m
+                            projective_integrator_max_integration_distance_m,
+                            so the EXTENT is correct — the fill is not)
+```
+
+Rendered, it is a solid black wedge: a small white free triangle near the rover,
+then everything from ~1.5 m to ~4.5 m painted as obstacle, then grey unknown.
+
+Do the arithmetic, because it is the whole point. A far wall at 4 m across an
+87° cone is an arc ~6.1 m long. One 5 cm cell thick, that is ~122 occupied
+cells. **We measured 2850** — over 20x too many, i.e. the "wall" averages about
+a metre thick. That is not a wall, it is a volume being filled in.
+
+Candidate causes, none yet confirmed:
+
+1. **The floor entering the slice band.** The band is 0.12–0.40 m in odom z. A
+   small pitch error, or depth noise that grows with range, lifts far floor into
+   the band — and the black region starting only at ~1.5 m fits that shape well.
+2. **Depth noise accumulating.** Stereo depth error grows roughly with range²,
+   and the map now **never forgets** (decay disabled, see below). A stationary
+   rover re-integrates the same noisy surface indefinitely and it thickens.
+3. **Unobserved space behind the surface being read as occupied** by the ESDF
+   slice rather than left unknown.
+
+**How to test (1):** raise `esdf_slice_min_height` to ~0.35 in
+`config/nvblox.yaml` and restart. If the wedge collapses to thin walls, it is
+the floor. Note that `ros2 param set` does **not** work for this — nvblox reads
+the slice heights at init, verified 2026-08-11 (the map came back byte-identical).
+
+> ⚠️ Restart with `./run_stack.sh fuse`, never by killing `nvblox_node` alone.
+> And do **not** attach ad-hoc subscribers to the raw camera topics while
+> investigating — that is what took the D555 offline mid-experiment.
+
 ## Likely work
 
 Mostly looking, not changing: enable the nvblox mesh in RViz, walk objects in

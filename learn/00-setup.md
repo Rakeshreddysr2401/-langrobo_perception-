@@ -171,6 +171,29 @@ walls is issue 05.
 > `config/nvblox.yaml` now disables both, so what you map **stays** mapped.
 > Details in [`ARCHITECTURE.md` §5](ARCHITECTURE.md).
 
+> 🚨 **Never subscribe to a raw D555 topic just to look at it.** This is the
+> most expensive mistake on this rig, and it has now killed the camera **twice**
+> (2026-08-11, both times mine): once by toggling the RViz camera Image display,
+> once by running a throwaway script that subscribed to `depth/image_rect_raw`
+> and `color/image_raw` to inspect a frame.
+>
+> The mechanism: those topics are **lazily published**. Nothing streams until
+> something subscribes, so a new subscriber makes the driver start/stop streams
+> over the D555's **DDS control channel** — and on this camera that channel is
+> fragile. The log says it plainly:
+>
+> ```
+> ERROR (dds-device-impl.cpp:677) timeout waiting for reply #6294 ... "id":"hwm"
+> ERROR (dds-device.cpp:46)      throwing: device is offline
+> ```
+>
+> `hwm` = hardware monitor. Once it reports **`device is offline`, no software
+> restart recovers it** — `up` aborts and only a physical PoE power-cycle brings
+> it back. The camera answers ping the whole time it is dead.
+>
+> **To see what the camera sees, use `./run_stack.sh vision`** — 2 Hz compressed,
+> one long-lived subscriber. Never attach an ad-hoc subscriber to the raw topics.
+
 > ⚠️ **Do not enable the camera image display over wifi.** Measured 2026-08-11:
 > turning on `/camera/camera0/color/image_raw` (uncompressed, ~30 Hz) dropped the
 > nvblox map arriving at the laptop from **9.4 Hz to zero**, and stretched `/odom`

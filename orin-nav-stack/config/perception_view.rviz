@@ -59,6 +59,19 @@ Visualization Manager:
         Reliability Policy: Reliable
       Color Scheme: map
       Draw Behind: true
+    - Class: rviz_default_plugins/Path
+      Name: WHERE I HAVE BEEN (driven trail)
+      Enabled: true
+      Value: true
+      Topic:
+        Value: /rover/trail
+        Depth: 1
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+      Line Style: Billboards
+      Line Width: 0.04
+      Color: 255; 170; 0
+      Pose Style: None
     - Class: rviz_default_plugins/Odometry
       Name: TRAIL cyan = EKF fused (the pose in charge)
       Enabled: true

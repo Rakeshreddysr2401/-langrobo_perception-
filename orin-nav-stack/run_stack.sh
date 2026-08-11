@@ -142,6 +142,10 @@ up)
   # hit in learn/00-setup.md. Also draws the ~87 deg FOV wedge, which is the
   # honest picture of how much it is blind to.
   dexec "exec python3 $NAV/nodes/rover_marker.py > /tmp/rover_marker.log 2>&1"
+  # The line showing where the rover has BEEN. Reads the FUSED pose, so it stays
+  # idle until './run_stack.sh fuse' has run — that is deliberate, the raw /odom
+  # is the drifting one. Survives 'fuse' (which only restarts cuVSLAM/nvblox).
+  dexec "exec python3 $NAV/nodes/rover_trail.py > /tmp/rover_trail.log 2>&1"
   sleep 2
   echo "[3/4] cuVSLAM wrapper node (pyCuVSLAM cu12; publishes /odom too)"
   dexec "export LD_LIBRARY_PATH=$CU12:\$LD_LIBRARY_PATH; exec python3 $NAV/cuvslam_ros_node.py > /tmp/cuvslam.log 2>&1"
