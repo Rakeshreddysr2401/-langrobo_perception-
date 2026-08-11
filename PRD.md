@@ -1,10 +1,38 @@
 # PRD — what we are building
 
-## The one sentence
+## The real goal
+
+**A rover that moves autonomously and intelligently, the way real robots do.**
+
+That is too big to build in one go, so it is split into two stages with a hard
+line between them. **Stage 1 must fully pass before stage 2 starts.**
+
+### Stage 1 — reliable (tasks 01–07)
 
 **Click a goal in RViz, and the rover drives there, on a map it built itself.**
 
-If a change does not move that sentence closer, it does not belong in this repo.
+Note what this is *not*: at this stage **you** are still the intelligence. You
+decide where it goes. Stage 1 is the foundation, and it is worth being honest
+that finishing it does not produce an autonomous robot.
+
+### Stage 2 — autonomous (task 08)
+
+**Switch it on in an unmapped room, and it maps the room by itself.**
+
+No pushing, no clicking. It works out where it has not looked, drives there,
+looks, and repeats until nothing is left. That is the literal meaning of "moves
+autonomously", and it is the honest test of stage 1: exploration only works if
+the pose and the map are genuinely good.
+
+### Why this order
+
+Every stage-2 behaviour is stage 1 plus a decision layer. If the pose is wrong,
+an autonomous robot just gets lost faster and with more confidence. **Building
+stage 2 on an unverified stage 1 is how you get a robot that drives into walls
+while reporting success.**
+
+If a change does not move one of those two sentences closer, it does not belong
+in this repo.
 
 ---
 
@@ -30,15 +58,35 @@ layer can be run alone, proven alone, and understood alone.
 
 ## Definition of done
 
-Seven things, in order. Each is a task, each has a pass/fail gate.
+Eight things, in order. Each is a task, each has a pass/fail gate.
+
+**Stage 1 — reliable**
 
 1. The camera streams, alone, stably, for five minutes.
 2. cuVSLAM reports a **tape-measured 2.00 m push within 5%**.
-3. The fused pose survives the camera being briefly blinded.
+3. The fused pose survives the camera being briefly blinded, **and survives a
+   full 360° rotation** — see the note below, this one grew.
 4. Driving a room produces walls that are **lines, not blobs**.
 5. That map can be **saved and reloaded**, and the rover finds itself on it.
 6. Obstacles are detected without the floor being called an obstacle.
 7. A goal clicked in RViz makes the rover drive there and stop.
+
+**Stage 2 — autonomous**
+
+8. Switched on in an unmapped room, it produces a complete map **with no human
+   input and no collision**.
+
+### Why item 3 grew
+
+The camera sees **87° forwards** and there is no working pan/tilt head. So for
+task 08 the rover fills in its surroundings by **stopping and spinning in place**
+at each waypoint, sweeping that cone around a full circle.
+
+Which means rotation stops being a nice-to-have and becomes **load-bearing** —
+and rotation is exactly what visual odometry is worst at, because features leave
+the frame fast. So the pivot check in task 03 is no longer a formality; it is the
+capability the whole of stage 2 rests on. Better to find it broken in task 03,
+by hand, than in task 08 with the robot driving itself.
 
 ---
 

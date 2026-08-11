@@ -64,6 +64,11 @@ collision layer effectively has no obstacle input, and nothing says so out loud.
 This must be fixed or consciously accepted **before task 07 (nav2)** ever moves
 the robot. `safety_guard.py` is the remaining protection.
 
+**Upgraded to a hard blocker for task 08.** Stage 2 is the first time nothing
+human decides where the robot goes, and it is blind to its sides and back. An
+autonomously exploring rover whose collision monitor silently ignores its own
+obstacle input is genuinely dangerous, not merely degraded.
+
 ---
 
 ## 🟠 4. `esdf_slice_min_height` is still at a stale workaround value
@@ -138,17 +143,39 @@ once and their real steady-state rates are known.
 
 ---
 
-## ⚪ 9. The camera sees forward only
+## 🟠 9. Rotation is now load-bearing, and it is untested
+
+Task 08 fills in the 87° blind spot by **stopping and spinning in place** at each
+waypoint. That makes rotation a core capability rather than a nice-to-have — and
+rotation is what visual odometry handles worst, because features leave the frame
+fast and there is little parallax.
+
+Nothing has measured how well the pose survives a full 360° turn on this rig.
+Task 03's gate now includes a hand-rotated 360° check specifically to find this
+out early, at zero speed, before the robot is doing it under its own power.
+
+If heading drifts badly in a turn, task 08 cannot work as designed and the
+fallback options are the pan/tilt head (which fights cuVSLAM) or a 2D lidar.
+
+---
+
+## ⚪ 10. The camera sees forward only
 
 ~87°, no pan/tilt head. The rover is blind to its sides and behind, so a map is
 only ever as complete as the path you drove. Hardware limitation.
 
-A pan/tilt head is the single biggest capability upgrade available, and it is
-out of scope until the goal in `PRD.md` is met.
+The pan/tilt **servos are already wired** to GPIO18/19, but firmware v2 has no
+servo driver and there is no Jetson node to model the pan in TF. So the hardware
+gap is smaller than it looks — the software gap is not.
+
+And it is not a free win: panning the camera while the body is still makes
+**cuVSLAM think the robot moved**. Pan and visual SLAM on one camera fight each
+other, and the pan would have to be compensated out of the SLAM input. That is
+why task 08 spins the whole robot instead.
 
 ---
 
-## ⚪ 10. The Pi 5 services do not survive a reboot
+## ⚪ 11. The Pi 5 services do not survive a reboot
 
 Neither the wheel-odom relay nor the micro-ROS agent has a systemd unit, so both
 must be started by hand after every reboot. This is the likely cause of item 2.
@@ -157,7 +184,7 @@ Fixing it means working on the Pi 5, in the `pi5_ros2_ws` repo — **not here**.
 
 ---
 
-## ⚪ 11. Nothing is verified about nav2 in this repo
+## ⚪ 12. Nothing is verified about nav2 in this repo
 
 `config/nav2.yaml` was copied across and its behaviour-tree path corrected, but
 nav2 has not been launched from this repo at all. The costmaps use

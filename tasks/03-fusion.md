@@ -61,10 +61,35 @@ between two answers.
 [ ] /odometry/filtered z is EXACTLY 0.0
 [ ] pivot the rover 90 deg on the spot by hand -> heading follows, does not jump
 [ ] cover the lens for ~2 s -> the pose does not explode; it recovers
+[ ] rotate a FULL 360 deg slowly by hand -> heading returns to its start
+    within ~5 deg, and x,y have not wandered more than ~0.10 m
 ```
 
 The z check is the one people skip. **If z is not 0.000, the EKF is not running**
 and you are about to map with the pose that smeared the map last time.
+
+### Why the 360° check is here, and why it matters more than it looks
+
+It would be easy to treat this as pedantry. It is not.
+
+The camera sees **87° forwards** and there is no working pan/tilt head. So in
+task 08 — autonomous exploration — the rover fills in its surroundings by
+**stopping and spinning in place**, sweeping that cone around a full circle,
+before choosing where to go next. Rotation is therefore not incidental to the
+robot's autonomy; it *is* the mechanism.
+
+And rotation is precisely what visual odometry handles worst. In a spin,
+features leave the frame within a few frames and there is little parallax to
+work with, so pure vision degrades exactly when you need it. That is what the
+gyro is there for.
+
+So this check is really asking: **does the gyro genuinely carry the pose through
+a rotation?** If the heading is off by 30° after one turn, task 08 cannot work —
+the rover will spin, believe it is facing somewhere it is not, and write the
+whole scan into the map at the wrong angle.
+
+Find that out here, by hand, at zero speed. Not in task 08 with the robot
+driving itself.
 
 ## If it fails
 

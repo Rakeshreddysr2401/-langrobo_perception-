@@ -1,8 +1,16 @@
 # rover
 
-**Click a goal in RViz, and the rover drives there, on a map it built itself.**
+**A rover that moves autonomously and intelligently, the way real robots do.**
 
-That is the whole objective. Everything here serves it.
+Two stages, with a hard line between them:
+
+| Stage | Goal | Tasks |
+|---|---|---|
+| **1 — reliable** | click a goal in RViz, it drives there, on a map it built | 01–07 |
+| **2 — autonomous** | switch it on in an unmapped room, it maps the room **by itself** | 08 |
+
+Stage 1 does not produce an autonomous robot — at that point *you* are still the
+intelligence. It is the foundation, and stage 2 does not start until it passes.
 
 ---
 
