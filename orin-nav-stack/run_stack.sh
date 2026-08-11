@@ -249,6 +249,9 @@ remap)
   # also kill any EKF/imu relay so cuVSLAM (restarted with its own odom TF ON)
   # doesn't fight the EKF for odom->base_link. 'remap' = clean visual-only reset;
   # 'fuse' = clean fusion reset.
+  # Was fusion running before we tore it down? If so the user is about to be
+  # silently DOWNGRADED to visual-only, and that has a real cost (see below).
+  WAS_FUSED=$(docker exec "$NAME" bash -lc 'pgrep -f "[e]kf_node" >/dev/null && echo yes || echo no' 2>/dev/null || echo no)
   docker exec "$NAME" bash -lc 'for pid in $(pgrep -f "[c]uvslam_ros_node.py"); do kill -9 $pid 2>/dev/null; done; for pid in $(pgrep -f "[e]kf_node"); do kill -9 $pid 2>/dev/null; done; for pid in $(pgrep -f "[i]mu_to_base.py"); do kill -9 $pid 2>/dev/null; done; for pid in $(pgrep -x nvblox_node); do kill -9 $pid 2>/dev/null; done; true' || true
   sleep 3
   dexec "export LD_LIBRARY_PATH=$CU12:\$LD_LIBRARY_PATH; exec python3 $NAV/cuvslam_ros_node.py > /tmp/cuvslam.log 2>&1"
@@ -258,6 +261,22 @@ remap)
             -p use_color:=false -r camera_0/depth/image:=/camera/camera0/depth/image_rect_raw \
             -r camera_0/depth/camera_info:=/camera/camera0/depth/camera_info > /tmp/nvblox.log 2>&1"
   echo "fresh map/pose: cuVSLAM + nvblox restarted (camera untouched)"
+  # DIAGNOSED 2026-08-11: a user remapped, drove a whole room, and got a smeared
+  # map with thick blobs instead of walls. Cause: visual-only cuVSLAM lets odom z
+  # DRIFT (measured -0.27 m here; README/ekf.yaml record ~0.45 m). nvblox slices
+  # obstacles in a fixed odom-z band (0.12-0.40), so a sinking pose slides that
+  # band through the floor and back, integrating floor as wall the whole way.
+  # The EKF's two_d_mode pins z to 0 and stops it dead. Never silently leave
+  # someone in visual-only after a remap again.
+  echo
+  echo "  ⚠ You are now VISUAL-ONLY (no EKF). odom z will DRIFT, and nvblox slices"
+  echo "    obstacles in a fixed odom-z band — a drifting z smears the map and turns"
+  echo "    floor into fake walls. Fine for a quick pose check; NOT for mapping."
+  if [ "$WAS_FUSED" = "yes" ]; then
+    echo "    Fusion WAS running before this remap. Get it back:  ./run_stack.sh fuse"
+  else
+    echo "    Before you drive and map:                           ./run_stack.sh fuse"
+  fi
   ;;
 rviz)
   DISPLAY=:1 XAUTHORITY=/run/user/1000/gdm/Xauthority xhost +local:root >/dev/null 2>&1 || true

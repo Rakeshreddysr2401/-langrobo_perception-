@@ -116,7 +116,7 @@ Visualization Manager:
       Distance: 6
       Pitch: 0.9
       Yaw: 3.14
-      Target Frame: base_link
+      Target Frame: <Fixed Frame>
     Saved: ~
 Window Geometry:
   Height: 800
