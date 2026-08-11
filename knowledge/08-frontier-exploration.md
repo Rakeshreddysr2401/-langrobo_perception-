@@ -115,9 +115,12 @@ must be blacklist-and-choose-another.
 
 This is the first behaviour where **no person decides where the robot goes**.
 
-- `TODO.md §3` must be resolved first. An autonomously exploring robot whose
-  collision monitor silently ignores its own obstacle input is genuinely
-  dangerous, not merely degraded.
+- `TODO.md §3` must be resolved first: `/perception/depth_points` must be proven
+  to hold ≥ 5 Hz **while driving**, against the monitor's 1.5 s `source_timeout`.
+  A source that goes stale does not make the rover blind — the monitor is
+  fail-safe and holds it at zero — but an exploration run that freezes at a
+  random frontier and cannot say why is its own kind of dangerous, and here
+  nobody is watching the goal it was heading for.
 - The rover is blind to its sides and back. It can turn into something it has
   never seen.
 - First run in **one small room with the door shut**.

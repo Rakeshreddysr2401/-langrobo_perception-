@@ -23,9 +23,12 @@ Real obstacles appear as obstacles; the floor never does.
   the 2026-08-11 slice experiment showed the floor is not what fills the map.
   Both reasons are gone. It should come down toward ~0.06.
 - Cost of leaving it: every obstacle shorter than 12 cm is invisible to nav2.
-- **The collision monitor is effectively unprotected** (`TODO.md §3`) — its
-  source publishes at ~0.5 Hz against a 2.5 s timeout, and a stale source is
-  *ignored*, not treated as danger. Resolve this before task 07 moves anything.
+- **The collision monitor's source rate has never been measured** (`TODO.md §3`).
+  The monitor is fail-safe — a source stale for more than `source_timeout` (1.5 s)
+  makes it **hold the robot at zero** — so the risk is not silent danger but a
+  rover pinned in place while nav2 plans happily. `./rover.sh l4` now gates on
+  `/perception/depth_points` ≥ 5 Hz; confirm it still holds **while driving**,
+  which is when it matters and the only time it has ever failed.
 
 ## Gate
 

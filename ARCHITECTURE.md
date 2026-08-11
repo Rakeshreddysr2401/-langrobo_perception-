@@ -134,7 +134,13 @@ The behaviour tree deliberately **omits Spin and BackUp**. The plugins are still
 loaded in `nav2.yaml`, but the BT never calls them — blind recovery moves on a
 tethered rover with a forward-only camera drive it into things it cannot see.
 
-⚠️ The collision monitor's source is effectively dead — see `TODO.md §3`.
+The monitor's obstacle source is `/perception/depth_points`, published by
+`nodes/depth_to_cloud.py` — a strided deprojection of the depth image, started at
+**L4 beside nvblox** rather than at L5 with the rest of nav2 (`TODO.md §14`: it is
+a second subscriber on the fragile depth stream, so it is attached once and never
+cycled). Its rate has never been measured on this rig; if it falls under the
+1.5 s `source_timeout` the monitor **holds the robot at zero** — fail-safe, but it
+looks exactly like nav2 being unable to plan. `TODO.md §3`.
 
 ### Visualization and monitoring
 

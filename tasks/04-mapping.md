@@ -59,6 +59,30 @@ written out there.
 The cost, which you should watch for: **the map now never forgets.** A person
 walking through leaves a permanent ghost.
 
+### This task owns map quality — and the first knob is NOT decay
+
+`TODO.md §5` is assigned here. The tempting fix for a thick map is to re-enable a
+slow TSDF decay, and it does not work on this rig: decay removes whatever is not
+re-observed, and with a forward-only camera the room *behind you* is never
+re-observed. Any decay fast enough to clear noise is fast enough to delete the
+room. That is measured, not theorised (`FACTS.md §4`).
+
+**The first knob to reach for instead is
+`projective_integrator_max_integration_distance_m`, set to about 3 m.** Stereo
+depth error grows with range², so the far field is where a thin wall becomes a
+thick one — and the far field is also the part you were going to have to drive
+closer to anyway. One parameter, an effect you can measure directly in occ/free,
+and nothing else in the stack changes.
+
+⚠️ **Not before tasks 02 and 03 pass.** `TODO.md §1` says it in bold: do not tune
+nvblox before the pose is proven. Tuning the map to compensate for a bad pose
+bakes the pose error into the config, where it will quietly survive the pose being
+fixed later. And it may not be needed at all — if an honest pose alone takes
+driven occ/free from 1.66 to under 0.3, every hour spent on nvblox was wasted.
+
+So the order inside this task is: drive the room, **measure occ/free first**, and
+only reach for a parameter if the number says you have to.
+
 ## Do this
 
 ```bash

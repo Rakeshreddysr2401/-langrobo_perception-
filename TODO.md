@@ -51,23 +51,35 @@ harder to diagnose, so fixing this first is defensible.
 
 ---
 
-## 🟠 3. The collision monitor is silently unprotected
+## 🟠 3. The collision monitor's source rate has never been measured
 
-`depth_to_cloud.py` feeds `/perception/depth_points`, which is
-`collision_monitor`'s only obstacle source. Measured 2026-08-10: it publishes at
-**~0.5 Hz with gaps up to 7.3 s**, and stalled ~10 s during a live drive. The
-monitor's `source_timeout` is **2.5 s**.
+**Rewritten 2026-08-11 — the previous version of this item was wrong**, and wrong
+in the reassuring direction. It said the monitor "does not brake, it ignores a
+stale source", making this a silent loss of protection. Both the node it accuses
+and the config it cites say the opposite:
 
-When a source is stale the monitor **does not brake — it ignores it**. So nav2's
-collision layer effectively has no obstacle input, and nothing says so out loud.
+| Previous claim | What the machine says |
+|---|---|
+| the source runs at ~0.5 Hz | that was nvblox's `back_projected_depth` **debug** topic, which `nodes/depth_to_cloud.py` was written on 2026-08-10 to replace (`depth_to_cloud.py:5-17`) |
+| `source_timeout` is 2.5 s | `config/nav2.yaml:81` says **1.5**, with the 1.0 → 2.5 → 1.5 history written out |
+| a stale source is ignored | a stale source logs `"Robot to stop due to invalid source"` and **holds the robot at zero** — observed live, `nav2.yaml:74-80` |
 
-This must be fixed or consciously accepted **before task 07 (nav2)** ever moves
-the robot. `safety_guard.py` is the remaining protection.
+So the monitor is **fail-safe**, and the real risk is the opposite one:
 
-**Upgraded to a hard blocker for task 08.** Stage 2 is the first time nothing
-human decides where the robot goes, and it is blind to its sides and back. An
-autonomously exploring rover whose collision monitor silently ignores its own
-obstacle input is genuinely dangerous, not merely degraded.
+> If `depth_to_cloud.py` cannot hold its 10 Hz against the 1.5 s timeout, the
+> rover is **pinned at zero** by its own safety layer while nav2 plans happily,
+> and every goal dies on "Failed to make progress" — which is exactly the
+> confusing failure of 2026-08-10, wearing a different mask.
+
+**Still unverified, because nothing in this repo has ever run (§7).** The node's
+claimed cost is one strided numpy deprojection per frame (~7k points at stride 8),
+but that is a design intent, not a measurement.
+
+**Still a hard blocker for task 08**, with the gate changed from "add protection"
+to **"measure the rate"**: `/perception/depth_points` must sustain ≥ 5 Hz with no
+gap over 1.5 s, measured while driving, before anything explores by itself.
+
+Related: §14, the second-subscriber problem inside the same node.
 
 ---
 
@@ -192,20 +204,77 @@ nav2 has not been launched from this repo at all. The costmaps use
 `map` jumps under the robot at every loop closure), but it means the map cannot
 persist across sessions. That trade-off is task 05's subject.
 
+**Decided on paper 2026-08-11** (`tasks/05-persistence.md`): nvblox and the
+**global** costmap move to `map`, the **local** costmap stays in `odom`. The jump
+objection applies to the local costmap — the one MPPI samples while moving — and
+that one is not moving. A map anchored to `odom` cannot persist at all, so task
+05's gate is unreachable otherwise. Precondition before touching either file:
+measure how often and how far `map → odom` actually steps on this rig.
+
 ---
 
-## ⚪ 13. This repo cannot rebuild its own container image
+## 🟠 13. The container image cannot be rebuilt by ANYONE — there is no recipe
 
-`rover.sh` runs `orin-nav:1.1`, which was built three weeks ago from
-`../langrobo_perception/orin-nav-stack/Dockerfile`. That Dockerfile did not come
-across, so **if the image is ever lost or needs changing, you must go back to the
-old repo to rebuild it.** The image is 57.8 GB, so this is not a quick recovery.
+**Upgraded from ⚪ to 🟠 on 2026-08-11.** This item used to say the Dockerfile
+lived in the old repo and copying it across would fix things. Investigating that
+turned up something worse.
 
-Deliberate for now — copying a Dockerfile you cannot test is worse than pointing
-at the one that demonstrably built the running image. But it means this repo is
-not self-contained, and that should be fixed once the layers have actually run
-and you know exactly which dependencies matter.
+`docker/Dockerfile` has now been copied in (unbuilt, labelled — see
+`docker/README.md`). It does **not** discharge this item, because it is fifteen
+lines of `COPY` on top of `FROM isaac_ros:cuvslam-unified`, and the chain above
+that has no recipe at all:
 
-Same applies to `firmware/`: the ESP32 source stays in the old repo (and per an
-earlier decision, rover firmware really belongs in the Pi 5 repo `pi5_ros2_ws`,
-not the Jetson one). This repo cites it by line number but does not carry it.
+```
+orin-nav:1.1                                 ← the only part with a Dockerfile
+  └─ isaac_ros:cuvslam-unified   57.8 GB     ← no Dockerfile exists, anywhere
+       └─ isaac_ros:langrobo-prod 54.4 GB    ← no Dockerfile exists, anywhere
+```
+
+`orin-nav:1.1` carries `com.docker.compose.project=robot` and
+`...config_files=/home/rakhi24/robot/docker-compose.yml` labels — the fingerprint
+of an image made by **`docker commit` on a running container**. It was never
+built from a file, so it cannot be reproduced from one.
+
+**Consequence:** if that image is deleted, the entire repo stops, and no amount
+of source-code archaeology brings it back. Rebuilding means redoing the original
+container work from scratch, starting from
+`orin-nav-stack/standalone/Dockerfile.cuvslam-jp72` (which *is* a complete recipe,
+but for a cuVSLAM-only image with no nvblox and no nav2).
+
+**The only real insurance is an image export, not a Dockerfile:**
+
+```bash
+docker save orin-nav:1.1 | gzip > /path/to/external/orin-nav-1.1.tgz
+```
+
+⚠️ Not done yet, and it needs somewhere to go: `/` has **45 GB free of 227 GB**
+and the export will be tens of GB, so this must target external storage, not the
+Orin's own disk. Do it before the first session that touches Docker.
+
+Also unchanged: `firmware/` stays in the old repo (and per an earlier decision,
+rover firmware really belongs in the Pi 5 repo `pi5_ros2_ws`, not the Jetson one).
+This repo cites it by line number but does not carry it.
+
+---
+
+## 🟠 14. `depth_to_cloud.py` is a second subscriber on the fragile depth stream
+
+Found 2026-08-11 while rewriting §3. `FACTS.md §1` states plainly that **nvblox
+is the only depth subscriber**, and that a new subscriber attaching to a raw
+camera topic took the D555 offline twice in one day.
+
+`depth_to_cloud.py:57` subscribes to `/camera/camera0/depth/image_rect_raw`. That
+makes two — permanently, on the exact topic FACTS §1 says not to touch. The rule
+and the code have contradicted each other since 2026-08-10 and neither file
+mentioned it.
+
+**Mitigated, not resolved.** `depth_to_cloud` moved from L5 to L4 on 2026-08-11,
+so it starts in the same step as nvblox. Per §6 the suspected killer is repeated
+connect/disconnect **transitions**, not a long-lived subscription — so this makes
+L4 a single attach event instead of two, and, the real win, lets L5 (nav2) be
+restarted as often as tuning needs without ever cycling the depth stream.
+
+Still unknown: whether a second permanent subscriber changes the D555's streaming
+behaviour at all. **The first `./rover.sh l4` after this change is the test, and
+it is a camera-risk moment** — if the camera goes offline, only a physical PoE
+power-cycle recovers it. Run it on a day when a walk to the rover is acceptable.

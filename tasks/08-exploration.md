@@ -79,11 +79,14 @@ Slow and inelegant, and it is the honest way for a forward-sensing robot.
 This is the first time the robot moves with **no human choosing the
 destination**. Before it ever runs:
 
-- `TODO.md §3` **must be resolved.** The collision monitor's obstacle source
-  publishes at ~0.5 Hz against a 2.5 s timeout, and a stale source is *ignored*,
-  not treated as danger. An autonomously exploring robot with no working
-  collision monitor is genuinely dangerous, and `safety_guard.py` would be the
-  only thing between it and the furniture.
+- `TODO.md §3` **must be resolved** — with the gate as rewritten on 2026-08-11:
+  `/perception/depth_points` proven to hold ≥ 5 Hz **while driving**, against the
+  monitor's 1.5 s `source_timeout`. The monitor is fail-safe (a stale source
+  holds the robot at zero, it is not ignored), so the failure here is a run that
+  freezes at some frontier rather than one that crashes — but with nobody
+  watching where it was going, that is still a run you cannot interpret.
+- `TODO.md §14`: `depth_to_cloud.py` is a second subscriber on the camera's
+  fragile depth stream. It starts at L4 and must not be restarted independently.
 - The rover is blind to its sides and back. It can turn into something it has
   never seen.
 - Tether length, clear floor, hand on the power, `./rover.sh stop` ready.

@@ -303,5 +303,32 @@ The whole stack runs in **one Docker container** built from the old repo's
 Dockerfile. The code directory is bind-mounted **read-only** over the baked copy,
 so editing a config or node and restarting takes effect with **no rebuild**.
 
+### The image has no build recipe and cannot be reproduced — established 2026-08-11
+
+`rover.sh` runs `orin-nav:1.1`, image ID
+**`sha256:2a3d7f1d30dde60397899073ff8d291dbb75b57a0a042621aee5e84640e3741d`**,
+built 2026-07-19 16:35 (+05:30). Pin the ID, not the tag: `orin-nav:0.0.2` also
+exists, is also 57.8 GB, and is a **different image** (`e1c32d08f6c6`).
+
+The old repo's `orin-nav-stack/Dockerfile` — now copied to `docker/Dockerfile` —
+is fifteen lines of `COPY` on top of `FROM isaac_ros:cuvslam-unified`. Tracing
+that base with `docker history` and the image labels:
+
+```
+orin-nav:1.1                                 ← the only layer with a Dockerfile
+  └─ isaac_ros:cuvslam-unified   57.8 GB     ← no Dockerfile exists, anywhere
+       └─ isaac_ros:langrobo-prod 54.4 GB    ← no Dockerfile exists, anywhere
+```
+
+`orin-nav:1.1` carries `com.docker.compose.project=robot` and
+`...config_files=/home/rakhi24/robot/docker-compose.yml` labels. Those are the
+fingerprint of an image made by **`docker commit` on a running container**, not
+by a build — so the 57.8 GB base was never described by a recipe and cannot be
+reproduced from one.
+
+**Consequence:** the only real backup is `docker save`, to external storage —
+`/` has 45 GB free of 227 GB, which is not enough room to be casual about it. See
+`TODO.md §13`.
+
 `$HOME/orin-nav-stack` is a **symlink** to `langrobo_perception/orin-nav-stack`,
 and that symlink is what the container actually mounts. Do not delete it.

@@ -35,6 +35,39 @@ Whether to move nvblox to the `map` frame. That trades "the costmap never jumps"
 for "the map persists and gets corrected". Both are defensible; make the choice
 with a driven map in front of you, not on paper.
 
+### The decision, made on paper 2026-08-11 — verify it, do not re-derive it
+
+**Plan of record: move nvblox and the GLOBAL costmap to `map`; leave the LOCAL
+costmap in `odom`.**
+
+The reasoning, so the day this is done nobody starts from scratch:
+
+- A map reconstructed in `odom` **cannot persist, by construction**. `odom`'s
+  origin is wherever the robot happened to boot, so a saved map is anchored to an
+  arbitrary frame that will never exist again. There is no save/load trick that
+  works around this — the gate at the top of this file is unreachable while
+  nvblox stays in `odom`.
+- The standing objection — "a costmap in `map` teleports under the controller at
+  every loop closure" — is true, and it applies to the **local** costmap, the one
+  MPPI samples against while the robot is moving. That one stays in `odom`, which
+  is what `nav2.yaml:239-241` already does (4×4 m, rolling).
+- The global costmap is consulted by the planner between goals, not by the
+  controller mid-manoeuvre. A jump there costs one replan, which is exactly what
+  loop closure *should* cost.
+- This is also the standard ROS layout, which matters here only because it means
+  the failure modes are documented by someone other than us.
+
+**Precondition, and it is the actual work of this task:** measure the loop
+closures before moving anything. Watch the `map → odom` transform while driving a
+loop and record how often it steps and by how much. If corrections are frequent
+and large — tens of centimetres — the global plan will thrash and this decision
+needs revisiting with that number in hand. If they are rare and small, the move
+costs nothing and buys persistence.
+
+Files that change if it goes ahead: `config/nvblox.yaml:9` (`global_frame`) and
+`config/nav2.yaml:276` (global costmap `global_frame`). `bt_navigator` is already
+in `map`. See `TODO.md §12`.
+
 ## Gate
 
 *To be written from real measurements.* Roughly: save a map, restart the stack,

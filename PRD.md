@@ -24,6 +24,28 @@ looks, and repeats until nothing is left. That is the literal meaning of "moves
 autonomously", and it is the honest test of stage 1: exploration only works if
 the pose and the map are genuinely good.
 
+### Stage 3 — commanded (NOT SCHEDULED, and deliberately so)
+
+**Tell it where to go in words, and it goes.**
+
+This stage exists in this document for one reason: the headline says
+"autonomously **and intelligently**", and stages 1 and 2 only deliver the first
+word. Stage 2 is a rover that maps a room by itself — that is autonomy, not
+language. Without this section written down, "intelligently" would be a word in
+the goal that no task owns, which is exactly the kind of quiet gap this repo
+exists to prevent.
+
+It is a **waypoint marker, not a plan**. It has no tasks, no gates and no
+schedule, and everything listed under "Explicitly NOT in scope" below stays out
+of scope. Roughly, it is the Pi 5 brain, voice/Telegram, place memory and object
+approach — reattached to a nav stack that has been *proven*, which is the whole
+point of doing it last.
+
+The one thing stage 3 forces on the earlier stages: **place memory only means
+something if a map survives being switched off**, so task 05 must produce real
+persistence rather than being quietly downgraded to "the map survives within a
+session".
+
 ### Why this order
 
 Every stage-2 behaviour is stage 1 plus a decision layer. If the pose is wrong,

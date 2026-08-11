@@ -3,3 +3,7 @@ __pycache__/
 maps/
 *.log
 .idea/
+# Machine-local Claude Code state. The .tmp.* files are atomic-write scratch —
+# they appear and vanish, and one got swept into a commit by `git add -A`.
+.claude/settings.local.json
+.claude/settings.local.json.tmp.*

@@ -264,6 +264,20 @@ l4)
   sleep 2
   launch_nvblox
   sleep 8
+  # depth_to_cloud lives HERE, not in L5 where it belongs by function, and the
+  # reason is the camera (TODO §14). It is a SECOND subscriber on the raw depth
+  # topic that FACTS §1 says not to touch, and the suspected killer is repeated
+  # connect/disconnect TRANSITIONS on the DDS control channel. Starting it beside
+  # nvblox means:
+  #   * L4 is ONE attach event on the depth stream, not two
+  #   * L5 (nav2) can be restarted as often as tuning needs — and it will be —
+  #     without ever cycling the depth stream
+  # It publishes nothing anyone consumes until collision_monitor starts at L5, so
+  # running it early is free.
+  echo "[L4] depth_to_cloud  (collision_monitor's obstacle source, started early)"
+  kill_match "[d]epth_to_cloud.py"
+  dexec "exec python3 $SRC/nodes/depth_to_cloud.py > /tmp/depth_to_cloud.log 2>&1"
+  sleep 3
   echo
   echo "  GATE L4:"
   # Two different consumers, so check both: the occupancy grid is what RViz
@@ -273,6 +287,11 @@ l4)
   n=$(docker exec "$NAME" bash -lc 'pgrep -x nvblox_node | while read p; do case "$(ps -o stat= -p $p)" in Z*) ;; *) echo x;; esac; done | wc -l')
   echo "      live nvblox nodes: $n   (MUST be 1 — two of them fight, FACTS §4)"
   [ "$n" = "1" ] || die "wrong number of nvblox nodes ($n). Run ./rover.sh l4 again."
+  # TODO §3's gate. collision_monitor's source_timeout is 1.5 s and a stale source
+  # makes it HOLD THE ROBOT AT ZERO, so an under-rate source does not lose you
+  # protection — it pins the rover while nav2 plans happily. Catch it here, one
+  # layer before anything can move.
+  assert_rate /perception/depth_points 5 "depth_to_cloud (collision source, timeout 1.5 s)"
   echo
   echo "  The REAL gate is visual: drive the room and check walls are LINES,"
   echo "  not blobs. ./rover.sh view start"
@@ -283,16 +302,15 @@ l5)
   need_container
   echo "  checking L4 is still healthy before building on it..."
   assert_rate /nvblox_node/static_occupancy_grid 5 "nvblox slice"
+  # depth_to_cloud is started by L4, deliberately (TODO §14) — it must NOT be
+  # restarted here, because that would cycle the raw depth stream on every nav2
+  # restart. Check it is alive and fast instead: below 5 Hz against the 1.5 s
+  # source_timeout, collision_monitor holds the robot at zero and every goal dies
+  # on "Failed to make progress".
+  assert_rate /perception/depth_points 5 "depth_to_cloud (from L4 — do NOT restart it)"
   echo
   echo "  ⚠  L5 MOVES THE ROBOT. RViz's '2D Goal Pose' button sends a real goal."
   echo
-  # collision_monitor's obstacle source. NOTE: measured at ~0.5 Hz with 7 s gaps
-  # against a 2.5 s source_timeout, so the monitor spends most of its time
-  # ignoring it — a SILENT loss of protection. See TODO.md.
-  echo "[L5] depth_to_cloud  (collision_monitor obstacle source)"
-  kill_match "[d]epth_to_cloud.py"
-  dexec "exec python3 $SRC/nodes/depth_to_cloud.py > /tmp/depth_to_cloud.log 2>&1"
-  sleep 2
   echo "[L5] safety_guard  (last gate before the wheels)"
   kill_match "[s]afety_guard.py"
   dexec "exec python3 $SRC/nodes/safety_guard.py > /tmp/safety_guard.log 2>&1"

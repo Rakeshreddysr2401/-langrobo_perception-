@@ -1,8 +1,33 @@
 # Task 03 — fusion: surviving the moments cuVSLAM cannot see
 
-**Needs:** task 02 passed (the pose is metrically honest).
+**Needs:** task 02 passed (the pose is metrically honest), **and the Pi 5's
+micro-ROS agent running** — see the prerequisite below.
 **Moves the robot:** no — hand push, plus a pivot on the spot.
 **Command:** `./rover.sh l3`
+
+---
+
+## Prerequisite: fix the wheels FIRST — and it is not in this repo
+
+`/wheel_state` reads a rock-steady 1.00 Hz, which per `TODO.md §2` means the
+ESP32 is **not connected at all** (the firmware publishes unconditionally at
+20 Hz once connected; 1.00 Hz is the `WAITING_AGENT` ping). The likely cause is
+`TODO.md §11`: neither the micro-ROS agent nor the wheel-odom relay has a systemd
+unit on the Pi 5, so a reboot leaves the ESP32 with nothing to connect to.
+
+**Do that check before starting this task**, on the Pi 5, in `pi5_ros2_ws` — not
+here. **Do not reflash the ESP32**; that was the 2026-08-08 fix and it is done.
+
+Why it is worth crossing a machine boundary for: wheel `vx` is the **only
+independent contradiction of cuVSLAM in the whole stack**. The gyro cannot
+contradict it — it measures rotation, not travel. So without wheels, nothing in
+the system can tell you cuVSLAM has frozen while still reporting
+`slam_pose_ok: true` (`FACTS.md §3`), which is precisely the failure mode task 04
+is about to walk into.
+
+If it genuinely cannot be fixed today, the task still runs on two sensors and the
+gate below still means something — but write down that you ran it degraded, and
+expect task 04 to be harder to diagnose.
 
 ---
 
@@ -67,8 +92,10 @@ between two answers.
 [ ] /odometry/filtered z is EXACTLY 0.0
 [ ] pivot the rover 90 deg on the spot by hand -> heading follows, does not jump
 [ ] cover the lens for ~2 s -> the pose does not explode; it recovers
-[ ] rotate a FULL 360 deg slowly by hand -> heading returns to its start
-    within ~5 deg, and x,y have not wandered more than ~0.10 m
+[ ] rotate a FULL 360 deg slowly by hand, CLOCKWISE -> heading returns to its
+    start within 5 deg, and x,y have not wandered more than ~0.10 m
+[ ] repeat the full 360 deg ANTICLOCKWISE -> same bounds
+[ ] write down the SIGN of both residuals — see below, this is the real result
 ```
 
 The z check is the one people skip. **If z is not 0.000, the EKF is not running**
@@ -96,6 +123,28 @@ whole scan into the map at the wrong angle.
 
 Find that out here, by hand, at zero speed. Not in task 08 with the robot
 driving itself.
+
+### Where 5° comes from, and why you spin BOTH ways
+
+**The 5°** is derived from the map, not from the sensor. nvblox voxels are 5 cm,
+so at 3 m range one degree of heading error displaces a wall by about 5 cm —
+roughly one voxel. 5° is therefore ~26 cm of smear at typical room range, which is
+already at the edge of task 04's "lines, not blobs". Anything looser and the spin
+in task 08 would write its scan into the map crooked enough to make the map worse
+the more the rover explores.
+
+**Both directions** is the part that turns a number into a diagnosis. Two turns,
+two residuals, and it is the *sign* that tells you which problem you have:
+
+| Clockwise | Anticlockwise | What it means |
+|---|---|---|
+| +4° | −4° | **Scale bias** — the gyro or the yaw scaling is off by a constant. Correctable in one number, and task 08 is still viable. |
+| +4° | +4° | **True drift** — error accumulates regardless of direction. This does not cancel; ten spins in one exploration run is 40°, and task 08 as designed is in trouble (`TODO.md §9`). |
+| ±1° | ±1° | Fine. Record it in `FACTS.md` and move on. |
+
+Run each turn slowly and record both numbers even when they pass. This is the
+first measurement of rotation this rig has ever had, so the numbers are worth more
+than the pass/fail.
 
 ## If it fails
 

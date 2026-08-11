@@ -115,11 +115,33 @@ controller -> /cmd_vel_nav -> smoother -> /cmd_vel_smoothed
 It watches `/perception/depth_points` and can slow or stop the robot regardless
 of what the plan says.
 
-⚠️ **Ours is effectively unprotected.** That source publishes at ~0.5 Hz with
-gaps to 7.3 s, against a `source_timeout` of 2.5 s. And when a source is stale
-the monitor **ignores it** rather than treating it as danger — so the protection
-silently disappears rather than failing loudly. `TODO.md §3`, and a hard blocker
-for task 08.
+### What a stale source does — the thing worth understanding here
+
+A safety layer has to decide what "I have no data" means, and `collision_monitor`
+answers it the right way round: if a source has produced nothing for
+`source_timeout` (ours: **1.5 s**, `nav2.yaml:81`), it logs
+
+```
+Robot to stop due to invalid source
+```
+
+and **holds the robot at zero**. Missing data is treated as danger, not as "no
+obstacles seen". That is the correct default for a veto layer, and it is worth
+noticing that the *opposite* choice — ignore a dead source and keep driving — is
+what most people assume happens.
+
+The practical consequence is inverted from what you would expect. The failure
+mode of a slow obstacle source here is not a robot that crashes; it is a robot
+that **will not move at all**, while nav2 plans perfectly happily and every goal
+dies on "Failed to make progress". That exact confusion cost a day on 2026-08-10,
+when the source was nvblox's `back_projected_depth` debug topic running at 0.5 Hz
+with 7.3 s gaps. `nodes/depth_to_cloud.py` was written to replace it with a real
+10 Hz source.
+
+⚠️ **Unverified on this rig:** `depth_to_cloud.py`'s rate has never been measured
+here (nothing in this repo has run yet). `./rover.sh l4` now gates on it. See
+`TODO.md §3`, and `TODO.md §14` for the separate problem that this node is a
+second subscriber on the camera's fragile depth stream.
 
 ---
 

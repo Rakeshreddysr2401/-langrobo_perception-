@@ -8,9 +8,13 @@ Two stages, with a hard line between them:
 |---|---|---|
 | **1 — reliable** | click a goal in RViz, it drives there, on a map it built | 01–07 |
 | **2 — autonomous** | switch it on in an unmapped room, it maps the room **by itself** | 08 |
+| *3 — commanded* | *tell it where to go in words* | *none — a marker, not a plan* |
 
 Stage 1 does not produce an autonomous robot — at that point *you* are still the
 intelligence. It is the foundation, and stage 2 does not start until it passes.
+
+Stage 3 is in `PRD.md` only so that "intelligently" in the goal above belongs to
+somebody. It has no tasks and no schedule, and nothing in it is in scope.
 
 ---
 
@@ -44,6 +48,12 @@ below it is unhealthy.
 ./rover.sh l4      # + nvblox mapping   (needs l3 healthy)
 ./rover.sh l5      # + nav2             (needs l4 healthy)  MOVES THE ROBOT
 ```
+
+One exception to "each layer starts only what it adds": `depth_to_cloud.py` is
+nav2's obstacle source but starts at **L4**, beside nvblox. It is a second
+subscriber on the fragile depth stream, so it is started once with the other
+depth consumer and never restarted — which lets you restart L5 as often as tuning
+needs without cycling the camera. See `TODO.md §14`.
 
 Support commands:
 
@@ -118,8 +128,13 @@ it, never edit it, and it still runs as your fallback. But two things there are
 
 | Still needed | Why |
 |---|---|
-| `orin-nav-stack/Dockerfile` | builds `orin-nav:1.1`, the image `rover.sh` runs. There is no other source for it. |
 | `orin-nav-stack/firmware/` | the ESP32 source. This repo cites `rover_firmware_v2.ino` by line number. |
+| `orin-nav-stack/standalone/Dockerfile.cuvslam-jp72` | the only complete from-scratch build recipe that exists for any part of this stack. |
+
+`orin-nav-stack/Dockerfile` has been copied to [`docker/`](docker/) — but it does
+**not** make this repo self-contained. It is fifteen `COPY` lines on top of a
+57.8 GB base image that was made by `docker commit` and has no Dockerfile at all.
+Read `docker/README.md` before assuming the image is recoverable; it is not.
 
 Also `$HOME/orin-nav-stack` is a **symlink** into that repo and is what the old
 container mounts. Do not delete it.
