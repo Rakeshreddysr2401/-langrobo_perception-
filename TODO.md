@@ -83,17 +83,27 @@ Related: §14, the second-subscriber problem inside the same node.
 
 ---
 
-## 🟠 4. `esdf_slice_min_height` is still at a stale workaround value
+## 🟡 4. `esdf_slice_min_height` lowered to 0.06 — CHANGED, NOT YET VALIDATED
 
-`config/nvblox.yaml` uses `0.12`. It was raised from 0.05 to dodge a 3.7 cm
-camera-height error **which is now fixed** (floor reads 0.000). The 2026-08-11
-slice experiment further showed the floor is not what fills the map.
+**Changed 2026-08-11: `0.12` → `0.06`** in `config/nvblox.yaml`.
 
-So the last two reasons for keeping it are gone, and it costs every obstacle
-shorter than 12 cm. It should come down toward ~0.06.
+Both reasons for 0.12 were gone — the 3.7 cm camera-height error is fixed (floor
+probes 0.000), and the band experiment showed the floor is not what fills the
+map. At 0.12 every obstacle shorter than 12 cm — a shoe, a cable, a door
+threshold — was invisible to nav2. 0.06 still clears the measured floor by ~6 cm
+and the residual +1.07° nose-up pitch (~+0.009 m at 1.25 m range).
 
-**Not changed yet on purpose:** it alters what nav2 calls an obstacle, so it must
-be validated while driving. Belongs to task 06.
+**nvblox has never been started with this value.** Slice heights are read at
+init, so the first `./rover.sh l4` is the test.
+
+**Validation, while driving:** if a wide band of nonzero cost appears with **no
+lethal cells anywhere**, that pattern *is* the floor and this goes back up.
+
+**Coupled parameter, deliberately not changed:** `config/nav2.yaml:93` sets the
+collision monitor's `depth_points min_height: 0.12`, justified by a comment
+claiming open floor deprojects to z=+0.04 in base_link. That comment predates
+the camera-height fix and is probably stale. It only matters once nav2 runs, so
+it belongs to the same driving validation — do not touch it blind.
 
 ---
 
@@ -132,15 +142,18 @@ deliberate experiment on a day when losing the camera does not matter.
 
 ---
 
-## 🟡 7. Layer gates are written but never executed
+## 🟡 7. Layer gates: L1 now executed and passing, L2–L5 still never run
 
-`rover.sh l1`–`l5` and every gate in `tasks/` were **written, not run**. The
-promoted code was working in the old repo, but this repo's wiring — the new
-mount path, the new container name, the layer sequencing, the `assert_rate`
-helper — has not been executed once.
+**Updated 2026-08-11.** `./rover.sh l1` has now been run for the first time and
+**passed on the first attempt** — 30.0 Hz IR, 30.1 Hz depth (`FACTS §1`). So the
+container run, the read-only `src` mount, the `dexec`/`rexec` plumbing, `cam_wait`
+and `assert_rate` are all proven to work.
 
-Expect the first run to fail on something small. That is the plan: the whole
-point of layering is that the failure will name its own layer.
+Still never executed: **l2, l3, l4, l5**, `measure`, `floor`, `status`, `view`,
+and every gate in `tasks/02`–`08`.
+
+Still expect a failure somewhere in those. That is the plan: the whole point of
+layering is that the failure will name its own layer.
 
 ---
 
@@ -278,3 +291,40 @@ Still unknown: whether a second permanent subscriber changes the D555's streamin
 behaviour at all. **The first `./rover.sh l4` after this change is the test, and
 it is a camera-risk moment** — if the camera goes offline, only a physical PoE
 power-cycle recovers it. Run it on a day when a walk to the rover is acceptable.
+
+---
+
+## 🟡 15. The health tooling breaks the repo's own camera rule
+
+Found 2026-08-11. `FACTS §1` states the hard rule: **never attach an ad-hoc
+subscriber to a raw camera topic.** Two of this repo's own tools do exactly that,
+transiently — which is the connect/disconnect pattern §6 suspects is the actual
+killer:
+
+| Tool | What it does |
+|---|---|
+| `nodes/stack_status.py:123` | creates real subscriptions to `infra1/image_rect_raw` **and** `depth/image_rect_raw`, then exits — so every `./rover.sh status` is an attach **and** a detach on both |
+| `rover.sh:71` `rate_of` | measures with `ros2 topic hz`, which also subscribes and detaches |
+
+And `tasks/01-camera.md` instructs you to run `./rover.sh status` to check the
+five-minute soak. **The rule and the tooling contradict each other**, and neither
+file mentioned it.
+
+**Evidence so far is reassuring but thin:** `assert_rate` ran twice during the
+first L1 gate, at the worst moment (nothing else holding either stream open, so
+each attach/detach is a real start/stop), and the camera was unaffected — it
+measured 30 Hz. That is **n=1**.
+
+**Working theory:** the transitions that matter are the ones that stop a stream
+*other consumers depend on*, not any subscription at all. If so, `status` is
+riskiest at L1 (where it causes real start/stops) and harmless from L2 onward
+(cuVSLAM holds IR, nvblox holds depth, so an extra subscriber changes nothing).
+
+**Cheap mitigation available:** measure camera health through a **downstream**
+topic instead. `/odom` is not a camera topic and is free to subscribe to, and
+`FACTS §3` says cuVSLAM freezes if the camera drops below ~10 Hz — so a flat
+`/odom` rate *is* a healthy camera. This makes the five-minute soak zero-risk
+from L2 onward.
+
+**Decide before rewording `stack_status.py` (§8)** — the two items should be
+fixed in one pass.

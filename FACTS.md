@@ -92,6 +92,37 @@ nvblox logs `Last view not set for sensor type. Decaying all voxels`.
 published yet" even while the stack is measuring 20 Hz through it. That is
 Isaac's GPU-side type negotiation, **not** a fault. Do not chase it.
 
+### L1 runs, and the camera is at its profile cap — measured 2026-08-11
+
+**The first execution of anything in this repo.** `./rover.sh l1` passed on the
+first attempt, against `TODO §7`'s prediction that it would fail on something
+small:
+
+| gate | want | measured |
+|---|---|---|
+| camera IR left | ≥ 15 Hz | **30.0 Hz** |
+| camera depth | ≥ 10 Hz | **30.1 Hz** |
+
+Higher than every previously recorded number (26 Hz IR / 20 Hz depth). The
+launch requests `depth_module.infra_profile:=896x504x30`, so **30 Hz is the
+configured cap** — the camera is not merely healthy, it is saturating its
+profile with nothing else running.
+
+⚠️ **The five-minute soak was NOT done.** These are ~40 s numbers. The failure
+that cost a day on 2026-08-11 looked perfect for the first thirty seconds, so
+task 01's gate is *not* discharged by this.
+
+### A transient `ros2 topic hz` did not hurt the camera — 2026-08-11
+
+`assert_rate` measures with `ros2 topic hz`, which subscribes and detaches. It
+ran twice during the L1 gate — once on `infra1`, once on `depth`, at the worst
+possible moment (nothing else holding either stream open, so each attach/detach
+is a real start/stop) — and the camera was unaffected.
+
+That is **n=1 against the strong form** of the "never subscribe to a raw camera
+topic" rule. It does not overturn it; it does mean the rule as written forbids
+the repo's own health tooling. See `TODO §15`.
+
 ---
 
 ## 2. Geometry

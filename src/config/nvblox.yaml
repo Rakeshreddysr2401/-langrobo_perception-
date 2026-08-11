@@ -101,8 +101,16 @@
     # workaround for a camera-height error that is now fixed, and the floor is
     # demonstrably not what is filling the map. Lowering it toward ~0.06 should be
     # safe — but it changes what nav2 calls an obstacle, so validate it DRIVING.
+    # LOWERED 0.12 -> 0.06 on 2026-08-11 (TODO §4 closed). Both reasons for 0.12
+    # were gone: the 3.7 cm camera-height error is fixed (floor probes 0.000) and
+    # the band experiment above proved the floor is not what fills the map. At
+    # 0.12 every obstacle shorter than 12 cm — a shoe, a cable, a door threshold —
+    # was invisible. 0.06 still clears the measured floor by ~6 cm and the residual
+    # +1.07 deg nose-up pitch (~+0.009 m at 1.25 m range).
+    # VALIDATE WHILE DRIVING: if a wide nonzero-cost band appears with NO lethal
+    # cells anywhere, that pattern IS the floor and this goes back up.
     static_mapper:
-      esdf_slice_min_height: 0.12
+      esdf_slice_min_height: 0.06
       esdf_slice_max_height: 0.40
       esdf_slice_height: 0.20
 
