@@ -191,3 +191,21 @@ nav2 has not been launched from this repo at all. The costmaps use
 `global_frame: odom` while `bt_navigator` uses `map` — deliberate (a costmap in
 `map` jumps under the robot at every loop closure), but it means the map cannot
 persist across sessions. That trade-off is task 05's subject.
+
+---
+
+## ⚪ 13. This repo cannot rebuild its own container image
+
+`rover.sh` runs `orin-nav:1.1`, which was built three weeks ago from
+`../langrobo_perception/orin-nav-stack/Dockerfile`. That Dockerfile did not come
+across, so **if the image is ever lost or needs changing, you must go back to the
+old repo to rebuild it.** The image is 57.8 GB, so this is not a quick recovery.
+
+Deliberate for now — copying a Dockerfile you cannot test is worse than pointing
+at the one that demonstrably built the running image. But it means this repo is
+not self-contained, and that should be fixed once the layers have actually run
+and you know exactly which dependencies matter.
+
+Same applies to `firmware/`: the ESP32 source stays in the old repo (and per an
+earlier decision, rover firmware really belongs in the Pi 5 repo `pi5_ros2_ws`,
+not the Jetson one). This repo cites it by line number but does not carry it.

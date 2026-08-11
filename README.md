@@ -110,8 +110,19 @@ Nothing here has been run yet. The code was promoted from a working stack and
 the wiring was corrected, but **this repo's layers have never been executed** —
 see `TODO.md §7`. Start at [`tasks/01-camera.md`](tasks/01-camera.md).
 
-The old stack at `../langrobo_perception/` is the **parts bin**: read it, never
-edit it. It still runs, so it is your fallback.
+### What the old repo still provides
+
+`../langrobo_perception/` (branch `dev-0.0.6`) is mostly a **parts bin** — read
+it, never edit it, and it still runs as your fallback. But two things there are
+**load-bearing**, not reference:
+
+| Still needed | Why |
+|---|---|
+| `orin-nav-stack/Dockerfile` | builds `orin-nav:1.1`, the image `rover.sh` runs. There is no other source for it. |
+| `orin-nav-stack/firmware/` | the ESP32 source. This repo cites `rover_firmware_v2.ino` by line number. |
+
+Also `$HOME/orin-nav-stack` is a **symlink** into that repo and is what the old
+container mounts. Do not delete it.
 
 ---
 
