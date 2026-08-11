@@ -42,6 +42,38 @@ CAM_NS=/camera/camera0
 CU12='/usr/local/lib/python3.12/dist-packages/cuvslam:/usr/local/lib/python3.12/dist-packages/nvidia/cuda_runtime/lib:/usr/local/lib/python3.12/dist-packages/nvidia/cublas/lib:/usr/local/lib/python3.12/dist-packages/nvidia/cusolver/lib:/usr/local/lib/python3.12/dist-packages/nvidia/cusparse/lib:/usr/local/lib/python3.12/dist-packages/nvidia/nvjitlink/lib:/usr/local/lib/python3.12/dist-packages/nvidia/nvtx/lib'
 
 dexec(){ docker exec -d "$NAME" bash -lc "unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE; export ROS_DOMAIN_ID=0; source /opt/ros/jazzy/setup.bash; $1"; }
+
+# Kill nvblox and WAIT until it is really gone.
+#
+# BUG FOUND 2026-08-11: `up` then `fuse` back-to-back left TWO nvblox_node
+# processes alive, 13 s apart, each building its own map and both publishing to
+# /nvblox_node/static_occupancy_grid. RViz then shows whichever frame landed
+# last, the GPU does double the work, and the D555 gets two depth subscribers.
+#
+# Why the old kill missed it: nvblox is started as `ros2 run nvblox_ros
+# nvblox_node`, and that wrapper takes a second or two to exec the real binary.
+# `pgrep -x nvblox_node` matches only the FINAL process, so a kill issued in
+# that window matches nothing and the next launch adds a second instance.
+#
+# So: kill the wrapper by its full command line AS WELL as the exec'd binary,
+# then poll until neither is present. Never assume one kill was enough.
+# Zombies (<defunct>) still match pgrep but hold no CPU, no GPU and no topic
+# subscriptions — the container's PID 1 just has not reaped them. Counting them
+# as "still alive" would make this spin and warn every single time, so filter on
+# process state: skip anything whose STAT starts with Z.
+kill_nvblox(){
+  docker exec "$NAME" bash -lc '
+    live(){ for p in $(pgrep -x nvblox_node; pgrep -f "[r]os2 run nvblox_ros"); do
+              case "$(ps -o stat= -p $p 2>/dev/null)" in Z*|"") ;; *) echo $p ;; esac
+            done; }
+    for i in $(seq 1 20); do
+      pids="$(live)"
+      [ -z "$pids" ] && exit 0
+      for p in $pids; do kill -9 $p 2>/dev/null; done
+      sleep 0.3
+    done
+    exit 1' 2>/dev/null || echo "  ⚠ nvblox would not die — check: docker exec $NAME pgrep -a nvblox_node"
+}
 rexec(){ docker exec "$NAME" bash -lc "unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE; export ROS_DOMAIN_ID=0; source /opt/ros/jazzy/setup.bash; $1"; }
 
 # Launch the D555 over DDS/ethernet. Shared by `up` and `cam` so the exact
@@ -209,7 +241,8 @@ fuse)
   # publish_odom_tf:=false (no TF fight), then imu_to_base + ekf come up.
   # Run after 'up'. Fresh fusion reset = this command (the fusion-mode 'remap').
   # See config/ekf.yaml: two_d_mode + gyro-yaw-only (accel NOT fused — diverges).
-  docker exec "$NAME" bash -lc 'for pid in $(pgrep -f "[c]uvslam_ros_node.py"); do kill -9 $pid 2>/dev/null; done; for pid in $(pgrep -f "[i]mu_to_base.py"); do kill -9 $pid 2>/dev/null; done; for pid in $(pgrep -f "[e]kf_node"); do kill -9 $pid 2>/dev/null; done; for pid in $(pgrep -x nvblox_node); do kill -9 $pid 2>/dev/null; done; true' || true
+  docker exec "$NAME" bash -lc 'for pid in $(pgrep -f "[c]uvslam_ros_node.py"); do kill -9 $pid 2>/dev/null; done; for pid in $(pgrep -f "[i]mu_to_base.py"); do kill -9 $pid 2>/dev/null; done; for pid in $(pgrep -f "[e]kf_node"); do kill -9 $pid 2>/dev/null; done; true' || true
+  kill_nvblox
   sleep 3
   echo "[1/4] cuVSLAM (odom->base_link TF OFF — EKF owns it)"
   dexec "export LD_LIBRARY_PATH=$CU12:\$LD_LIBRARY_PATH; exec python3 $NAV/cuvslam_ros_node.py --ros-args -p publish_odom_tf:=false > /tmp/cuvslam.log 2>&1"
@@ -256,7 +289,8 @@ remap)
   # Was fusion running before we tore it down? If so the user is about to be
   # silently DOWNGRADED to visual-only, and that has a real cost (see below).
   WAS_FUSED=$(docker exec "$NAME" bash -lc 'pgrep -f "[e]kf_node" >/dev/null && echo yes || echo no' 2>/dev/null || echo no)
-  docker exec "$NAME" bash -lc 'for pid in $(pgrep -f "[c]uvslam_ros_node.py"); do kill -9 $pid 2>/dev/null; done; for pid in $(pgrep -f "[e]kf_node"); do kill -9 $pid 2>/dev/null; done; for pid in $(pgrep -f "[i]mu_to_base.py"); do kill -9 $pid 2>/dev/null; done; for pid in $(pgrep -x nvblox_node); do kill -9 $pid 2>/dev/null; done; true' || true
+  docker exec "$NAME" bash -lc 'for pid in $(pgrep -f "[c]uvslam_ros_node.py"); do kill -9 $pid 2>/dev/null; done; for pid in $(pgrep -f "[e]kf_node"); do kill -9 $pid 2>/dev/null; done; for pid in $(pgrep -f "[i]mu_to_base.py"); do kill -9 $pid 2>/dev/null; done; true' || true
+  kill_nvblox
   sleep 3
   dexec "export LD_LIBRARY_PATH=$CU12:\$LD_LIBRARY_PATH; exec python3 $NAV/cuvslam_ros_node.py > /tmp/cuvslam.log 2>&1"
   sleep 5
@@ -286,6 +320,25 @@ rviz)
   DISPLAY=:1 XAUTHORITY=/run/user/1000/gdm/Xauthority xhost +local:root >/dev/null 2>&1 || true
   dexec "export DISPLAY=:1 XAUTHORITY=/root/.Xauthority; exec rviz2 -d /opt/ros/jazzy/share/nav2_bringup/rviz/nav2_default_view.rviz > /tmp/rviz.log 2>&1"
   echo "RViz nav2 view on the Jetson monitor (:1)"
+  ;;
+measure)
+  # Tape-measure check: push the rover a KNOWN distance and see if it agrees.
+  # Wraps nodes/odom_ruler.py, which compares EKF vs cuVSLAM vs wheel encoders
+  # side by side — where they disagree is exactly where the trouble is.
+  #
+  # This is issue 02's gate, and it is also the open question behind the
+  # over-thick map (learn/04-nvblox.md): a PARKED rover maps cleanly (occ/free
+  # 0.46) while a DRIVEN one smeared (1.66), so the suspect is pose error in
+  # motion. Only subscribes to odometry, so it is safe to run at any time —
+  # unlike anything that touches the raw camera topics.
+  #
+  #   ./run_stack.sh measure              live readout, Ctrl-C for the summary
+  #   ./run_stack.sh measure 2.00         grade it against a 2.00 m tape push
+  if [ -n "${2:-}" ]; then
+    rexec "exec python3 $NAV/nodes/odom_ruler.py --expect $2"
+  else
+    rexec "exec python3 $NAV/nodes/odom_ruler.py"
+  fi
   ;;
 status)
   # One-shot health of every layer.
@@ -423,5 +476,5 @@ view)
   ;;
 logs) docker exec "$NAME" tail -n 40 "/tmp/${2:-cuvslam}.log";;
 down) docker rm -f "$NAME" >/dev/null 2>&1 && echo "removed $NAME (hard stop)";;
-*) echo "usage: $0 {up|cam|nav2|vision|fuse|status [secs]|view [start]|stop|remap|rviz|logs <name>|down}";;
+*) echo "usage: $0 {up|cam|nav2|vision|fuse|status [secs]|measure [metres]|view [start]|stop|remap|rviz|logs <name>|down}";;
 esac
