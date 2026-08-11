@@ -68,25 +68,78 @@ Do the arithmetic, because it is the whole point. A far wall at 4 m across an
 cells. **We measured 2850** — over 20x too many, i.e. the "wall" averages about
 a metre thick. That is not a wall, it is a volume being filled in.
 
-Candidate causes, none yet confirmed:
+### What was tested on 2026-08-11, and what it ruled out
 
-1. **The floor entering the slice band.** The band is 0.12–0.40 m in odom z. A
-   small pitch error, or depth noise that grows with range, lifts far floor into
-   the band — and the black region starting only at ~1.5 m fits that shape well.
-2. **Depth noise accumulating.** Stereo depth error grows roughly with range²,
-   and the map now **never forgets** (decay disabled, see below). A stationary
-   rover re-integrates the same noisy surface indefinitely and it thickens.
-3. **Unobserved space behind the surface being read as occupied** by the ESDF
-   slice rather than left unknown.
+Three candidates. Two are now **eliminated by measurement**, which is the useful
+part — it leaves exactly one place to look.
 
-**How to test (1):** raise `esdf_slice_min_height` to ~0.35 in
-`config/nvblox.yaml` and restart. If the wedge collapses to thin walls, it is
-the floor. Note that `ros2 param set` does **not** work for this — nvblox reads
-the slice heights at init, verified 2026-08-11 (the map came back byte-identical).
+**❌ 1. The floor entering the slice band.** *Ruled out.* Same stationary
+viewpoint, two slice bands, freshly restarted each time:
 
-> ⚠️ Restart with `./run_stack.sh fuse`, never by killing `nvblox_node` alone.
-> And do **not** attach ad-hoc subscribers to the raw camera topics while
-> investigating — that is what took the D555 offline mid-experiment.
+```
+band 0.12-0.40 : free 1112, occupied 520, occ/free 0.47, covers 5.0 x 6.9 m
+band 0.35-0.60 : free  653, occupied 315, occ/free 0.48, covers 2.5 x 4.4 m
+```
+
+The thickness **ratio is unchanged**. Lifting the band 23 cm clear of the floor
+changed nothing except how much of the room is visible at all. If the floor were
+filling the map, that ratio would have collapsed.
+
+> Note: `ros2 param set` does **not** change the slice heights — nvblox reads
+> them at init. Verified by getting a byte-identical map back afterwards. You
+> must edit `config/nvblox.yaml` and restart with `./run_stack.sh fuse`.
+
+**❌ 2. Noise accumulating because decay is disabled.** *Real, but far too small.*
+Parked for 5.5 minutes with nothing in the room moving:
+
+```
+ t(s)     free  occupied  occ/free
+    1     1122       520      0.46
+  332     1116       549      0.49      +29 occupied cells, free flat
+```
+
+About **5 cells per minute**. Getting from 520 to the 2850 of the bad map would
+take over seven hours at that rate. It is a slow leak worth knowing about, not
+the cause.
+
+**❌ 2b. Pose wandering while parked.** *Ruled out completely.* The rover is not
+moving, so every reported change is error:
+
+```
+ t(s)         x         y         z   yaw_deg   drift_m
+     0    0.0000    0.0000    0.0000     0.025    0.0000
+   160    0.0000    0.0000    0.0000     0.014    0.0000
+```
+
+Zero translation drift over 160 s; yaw wobbles ±0.03°. The fused pose is rock
+solid **standing still**.
+
+**✅ 3. Pose error while DRIVING — the one candidate left.** Everything above was
+measured from a stationary rover, and a stationary rover produces a *healthy*
+map: `occ/free ≈ 0.46`, stable, thin edges. The 1.66 blob only ever appeared
+after the room had been driven.
+
+That points at the pose being wrong **while moving**, which smears each wall
+across several cells as the rover travels. There is already strong prior
+evidence for exactly this failure on this rig:
+
+- cuVSLAM **under-reads translation ~4x** on low-texture floors with the IR
+  emitter on (which is why the emitter is off — `run_stack.sh`).
+- cuVSLAM can **freeze silently** if the camera is starved, and keep reporting
+  `slam_pose_ok: true` while doing it.
+
+**This is why the learn plan puts cuVSLAM (01) and odometry (02) BEFORE nvblox
+(04) and mapping (05).** The map cannot be better than the pose it is built on.
+Do not tune nvblox to compensate for a pose error — verify the pose first.
+
+**The test to run next (it belongs to issue 02):** put the rover on the floor,
+mark the start, push it a **measured 2.00 m** in a straight line, and compare
+against `/odometry/filtered`. If it reports 1.5 m or 2.6 m, that is your blob.
+
+> ⚠️ Restart with `./run_stack.sh fuse`, never by killing `nvblox_node` alone —
+> it comes back with no depth input and logs "Last view not set for sensor type".
+> And never attach ad-hoc subscribers to the raw camera topics while
+> investigating: that took the D555 offline twice in one day.
 
 ## Likely work
 

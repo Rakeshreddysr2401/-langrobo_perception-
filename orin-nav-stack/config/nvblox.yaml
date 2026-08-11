@@ -89,6 +89,18 @@
     # validated while driving (ThingsTodo.md Phase 2). After lowering, confirm the costmap
     # has no wide nonzero-cost band with zero lethal cells -- that pattern IS the floor.
     # Re-run nodes/floor_probe.py after ANY camera remount before touching this.
+    # TESTED 2026-08-11 — raising this band does NOT thin the map. Ran the same
+    # stationary viewpoint at 0.12-0.40 and at 0.35-0.60:
+    #     0.12-0.40 : free 1112, occupied 520, occ/free 0.47, covers 5.0 x 6.9 m
+    #     0.35-0.60 : free  653, occupied 315, occ/free 0.48, covers 2.5 x 4.4 m
+    # The occupied/free RATIO is unchanged; the higher band just sees half as much
+    # of the room. So the over-thick obstacles are NOT the floor leaking into the
+    # slice, and raising the band buys nothing while costing coverage.
+    #
+    # Corollary for issue 06: this removes the last reason to keep 0.12. It was a
+    # workaround for a camera-height error that is now fixed, and the floor is
+    # demonstrably not what is filling the map. Lowering it toward ~0.06 should be
+    # safe — but it changes what nav2 calls an obstacle, so validate it DRIVING.
     static_mapper:
       esdf_slice_min_height: 0.12
       esdf_slice_max_height: 0.40
