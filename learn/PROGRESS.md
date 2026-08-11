@@ -97,3 +97,27 @@ head, so a later issue can pick them up.
 | 2026-08-10 | 06 | `esdf_slice_min_height` still at the 0.12 workaround value; the 4 cm camera-height error it was dodging is now fixed, so it can come down. | open |
 | 2026-08-10 | later | Pi 5 wheel-odom relay has no systemd unit — it dies on every reboot and must be restarted by hand. | open |
 | 2026-08-10 | — | Camera sees forward only (~87°). No pan/tilt head, so the map has no sides or back. Hardware gap, not a bug. | accepted |
+
+---
+
+## SUPERSEDED — 2026-08-11
+
+Work moved to the **`rover-v1`** branch (`~/rover/`). This `learn/` folder is
+kept for its history and measurements; the live equivalents are:
+
+| here | there |
+|---|---|
+| `learn/PRD.md` | `PRD.md` — now two stages, and stage 2 is autonomous exploration |
+| `learn/ARCHITECTURE.md` §5 measurements | `FACTS.md` — every measured number, expanded |
+| `learn/PROGRESS.md` blockers | `TODO.md` — 12 items, none hidden in code comments |
+| `learn/00..08` | `tasks/01..08` + `knowledge/01..08` |
+
+Issue 00 never formally passed. Three of its four gate items were met; the
+fourth needed the rover driven by hand, and the session ended with the camera
+offline. That work carries over to `tasks/01-camera.md` and `tasks/02-cuvslam.md`.
+
+The single most valuable thing learned here and NOT yet acted on: a **parked**
+rover builds a clean map (occ/free 0.46) while a **driven** one smeared
+(1.66) — and the floor, noise accumulation and parked pose drift were each ruled
+out by measurement. The remaining suspect is pose error in motion, and the test
+for it has never been run. It is `tasks/02-cuvslam.md`'s gate.

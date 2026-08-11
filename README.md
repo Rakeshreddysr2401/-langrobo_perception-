@@ -3,7 +3,39 @@
 An indoor rover that maps a room and navigates it on its own: a Jetson Orin Nano
 running cuVSLAM + nvblox + nav2, a Pi 5 brain, and an ESP32 driving the wheels.
 
-## 👉 Start here: [`learn/`](learn/)
+---
+
+## ⚠️ Active development moved to the `rover-v1` branch (2026-08-11)
+
+The rebuild lives in **`~/rover/`**, pushed to this same GitHub repo on the
+orphan branch **`rover-v1`**. New work happens there, not here.
+
+**Why.** This stack works, but it starts camera + TF + cuVSLAM + nvblox all at
+once, so when something breaks any of four layers could be responsible. It ran
+for an hour with two nvblox nodes competing before anyone noticed. `rover-v1`
+brings the same stack up in **layers that each refuse to start on a broken one**.
+
+**This branch is not dead, and it is not only a reference.** Two things here are
+still load-bearing:
+
+| Still needed | Why |
+|---|---|
+| `orin-nav-stack/Dockerfile` | builds `orin-nav:1.1`, which is the image `rover.sh` runs. There is no other source for it. |
+| `orin-nav-stack/firmware/` | the ESP32 source. `rover-v1`'s docs cite `rover_firmware_v2.ino` by line number. |
+
+Also: `$HOME/orin-nav-stack` is a **symlink** into this repo and is what the
+container mounts. Do not delete it.
+
+**Treat this branch as read-only otherwise.** It still runs, so it is the
+fallback if `rover-v1` breaks — that is exactly why it should not be edited.
+
+Left behind on purpose: YOLO object-approach (`detections_3d`,
+`approach_object`, `pixel_to_goal`, `visual_approach`), the `models/` weights,
+`standalone/`, and `learn/` — superseded by `rover-v1`'s `tasks/` + `knowledge/`.
+
+---
+
+## 👉 Historical plan: [`learn/`](learn/)
 
 `learn/` is the working plan and the documentation. It takes you from "can I see
 anything?" to "click a goal in RViz and the rover drives there", in nine steps
