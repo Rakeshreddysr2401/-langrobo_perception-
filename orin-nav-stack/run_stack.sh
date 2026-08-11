@@ -137,6 +137,11 @@ up)
   echo "[2/4] base_link -> camera0_link static TF (x0.10 z0.163 — floor_probe measured)"
   dexec 'exec ros2 run tf2_ros static_transform_publisher --x 0.10 --y 0.0 --z 0.163 \
             --frame-id base_link --child-frame-id camera0_link > /tmp/basetf.log 2>&1'
+  # Rover body for RViz. There is no URDF in this repo, so without this the rover
+  # is drawn as bare TF axes and "I cannot see the rover" is the first thing you
+  # hit in learn/00-setup.md. Also draws the ~87 deg FOV wedge, which is the
+  # honest picture of how much it is blind to.
+  dexec "exec python3 $NAV/nodes/rover_marker.py > /tmp/rover_marker.log 2>&1"
   sleep 2
   echo "[3/4] cuVSLAM wrapper node (pyCuVSLAM cu12; publishes /odom too)"
   dexec "export LD_LIBRARY_PATH=$CU12:\$LD_LIBRARY_PATH; exec python3 $NAV/cuvslam_ros_node.py > /tmp/cuvslam.log 2>&1"

@@ -13,6 +13,15 @@ Visualization Manager:
       Plane Cell Count: 20
       Enabled: true
       Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Name: ROVER body + camera FOV wedge
+      Enabled: true
+      Value: true
+      Topic:
+        Value: /rover/model
+        Depth: 1
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
     - Class: rviz_default_plugins/TF
       Name: TF (robot + camera frames)
       Enabled: true
@@ -82,7 +91,7 @@ Visualization Manager:
         Durability Policy: Volatile
         Reliability Policy: Reliable
     - Class: rviz_default_plugins/Image
-      Name: camera (optional, laggy on wifi)
+      Name: camera RAW - LEAVE OFF, it kills the map over wifi
       Enabled: false
       Value: false
       Topic:

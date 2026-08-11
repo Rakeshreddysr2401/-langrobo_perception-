@@ -29,6 +29,15 @@ Visualization Manager:
       Plane Cell Count: 20
       Enabled: true
       Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Name: ROVER body + camera FOV wedge
+      Enabled: true
+      Value: true
+      Topic:
+        Value: /rover/model
+        Depth: 1
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
     - Class: rviz_default_plugins/TF
       Name: TF (map / odom / base_link / camera)
       Enabled: true

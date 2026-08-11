@@ -137,7 +137,33 @@ remotely, but running it on the laptop is easier to debug the first time.)
 
 ## See it in RViz
 
-You should get a window with the TF tree, a camera image, and an empty grid.
+### What is on screen, and what is NOT yet
+
+This matters, because "the map looks empty" is usually correct rather than broken.
+
+| Display | Now (issue 00) | Appears fully in |
+|---|---|---|
+| **Rover body** — grey box, green forward arrow, blue camera | ✅ visible | — |
+| **Camera FOV wedge** — translucent blue cone | ✅ visible | — |
+| **TF axes** — `map`, `odom`, `base_link`, `camera0_link` | ✅ visible | — |
+| **nvblox walls** | ⚠️ only a small patch *in front of you* | issue 05 (drive it) |
+| **Odometry trail** | ⚠️ one arrow — **a trail needs motion** | as soon as you push it |
+| **Planned path** (green line) | ❌ nothing | issue 07 (nav2) |
+| **Safety bumper** marker | ❌ nothing | `./run_stack.sh vision` |
+| **Camera image** | ❌ **deliberately off** — see below | keep it off |
+
+The rover has never moved and has only ever looked forward from one spot, so a
+small arc of occupancy in front of it **is** the correct picture. A room with
+walls is issue 05.
+
+> ⚠️ **Do not enable the camera image display over wifi.** Measured 2026-08-11:
+> turning on `/camera/camera0/color/image_raw` (uncompressed, ~30 Hz) dropped the
+> nvblox map arriving at the laptop from **9.4 Hz to zero**, and stretched `/odom`
+> gaps to 0.47 s. Turning it back off restored 9.3 Hz immediately. The display is
+> named `camera RAW - LEAVE OFF, it kills the map over wifi` for that reason. A
+> 2 Hz compressed feed exists but only once `./run_stack.sh vision` is running.
+
+You should get a window with the TF tree, the rover body, and a grid.
 
 **Set `Fixed Frame` to `odom`** in the top-left panel. Then look at the TF
 display and find these four frames:
