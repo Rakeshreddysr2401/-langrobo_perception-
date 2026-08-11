@@ -35,6 +35,15 @@ without driving yet.
   obstacle and must be validated while actually driving.
 - `global_frame: "odom"` (`config/nvblox.yaml:9`) — which is why saved maps don't
   line up across sessions. That's issue 05.
+- **Map accumulation was broken until 2026-08-11 and is now fixed.** nvblox's
+  defaults deleted the map behind the rover — TSDF decay freed any block unseen
+  for ~33 s, and `map_clearing_radius_m: 7.0` deleted everything beyond 7 m. The
+  result was a torch beam that never became a room. Both are now disabled in
+  `config/nvblox.yaml`, with the arithmetic written out there.
+  - **Understand the trade-off in this issue:** the map now *never forgets*. A
+    person who walks through leaves a permanent ghost, and pose drift smears
+    walls instead of letting them fade. If ghosts become a problem, the fix is a
+    slow decay (a factor like 0.9999), not the aggressive default.
 
 ## Likely work
 

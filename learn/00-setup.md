@@ -146,7 +146,7 @@ This matters, because "the map looks empty" is usually correct rather than broke
 | **Rover body** — grey box, green forward arrow, blue camera | ✅ visible | — |
 | **Camera FOV wedge** — translucent blue cone | ✅ visible | — |
 | **TF axes** — `map`, `odom`, `base_link`, `camera0_link` | ✅ visible | — |
-| **nvblox walls** | ⚠️ only a small patch *in front of you* | issue 05 (drive it) |
+| **nvblox walls** | ⚠️ a patch in front of you, which now **stays** as you drive | issue 05 (drive the room) |
 | **Odometry trail** | ⚠️ one arrow — **a trail needs motion** | as soon as you push it |
 | **Planned path** (green line) | ❌ nothing | issue 07 (nav2) |
 | **Safety bumper** marker | ❌ nothing | `./run_stack.sh vision` |
@@ -155,6 +155,14 @@ This matters, because "the map looks empty" is usually correct rather than broke
 The rover has never moved and has only ever looked forward from one spot, so a
 small arc of occupancy in front of it **is** the correct picture. A room with
 walls is issue 05.
+
+> **"I only see a torch beam and the room never builds up."** That was a real
+> bug, found 2026-08-11, and it is now fixed. nvblox's default config was
+> *deleting* the map behind the rover: TSDF decay freed any block the camera had
+> not looked at for ~33 s, and a 7 m clearing radius deleted everything further
+> out. With a forward-only 87° camera, that guarantees a torch and nothing more.
+> `config/nvblox.yaml` now disables both, so what you map **stays** mapped.
+> Details in [`ARCHITECTURE.md` §5](ARCHITECTURE.md).
 
 > ⚠️ **Do not enable the camera image display over wifi.** Measured 2026-08-11:
 > turning on `/camera/camera0/color/image_raw` (uncompressed, ~30 Hz) dropped the

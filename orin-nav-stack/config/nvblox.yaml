@@ -17,6 +17,49 @@
     map_clearing_frame_id: "base_link"
     # Live driver publishes best-effort sensor QoS (sim used reliable).
     input_qos: "SENSOR_DATA"
+
+    # ── THE MAP MUST ACCUMULATE ─────────────────────────────────────────────
+    # Diagnosed live 2026-08-11: "I only see a torch in front of the rover, the
+    # room never builds up." That was correct, and it was TWO deletion mechanisms
+    # in nvblox_base.yaml, not a misunderstanding:
+    #
+    #   1. TSDF DECAY. decay_tsdf_rate_hz 5.0 with tsdf_decay_factor 0.95 and
+    #      decay_integrator_deallocate_decayed_blocks TRUE. Every voxel's weight
+    #      is multiplied by 0.95 five times a second; when it falls under
+    #      tsdf_decayed_weight_threshold (0.001) the block is DEALLOCATED.
+    #      From projective_integrator_max_weight 5.0 that is
+    #      ln(0.001/5)/ln(0.95) = 166 steps = ~33 SECONDS.
+    #      So anything the camera looked away from vanished after half a minute.
+    #      With a ~87 deg forward-only FOV, the observed map can never be more
+    #      than "wherever I pointed in the last 33 s" — exactly a torch beam.
+    #
+    #   2. map_clearing_radius_m 7.0, applied at 1 Hz: everything further than
+    #      7 m from base_link is deleted outright.
+    #
+    # Those defaults are tuned for NVIDIA's dynamic-scene demos, where stale
+    # geometry (people who walked away) SHOULD be forgotten. Our goal is the
+    # opposite: drive a room, keep the walls, save them (learn/05-map-on-the-fly).
+    #
+    # Rather than set the rates to a "disable" sentinel the headers do not
+    # actually document, we neutralise the mechanisms unambiguously:
+    #   * decay factor ~1   -> the decay pass still runs but removes no weight
+    #   * deallocate false  -> a block is never freed even if it did decay
+    #   * clearing radius <0 -> documented in nvblox_base.yaml as "no map clearing"
+    #
+    # NOTE: the factor must be STRICTLY < 1.0. tsdf_decay_integrator.cu:27 asserts
+    # `value < 1.0` and hard-aborts the whole node on exactly 1.0 (tried it,
+    # 2026-08-11: "Check failed: value < 1.0 (1 vs. 1)" and nvblox never came up).
+    # 0.999999 at 5 Hz would take ~20 DAYS to decay a voxel from weight 5 to the
+    # 0.001 threshold, so it is "never" in any practical sense.
+    #
+    # COST, be aware: the map now grows without bound and never forgets. Moving
+    # objects leave permanent ghosts, and pose drift smears walls instead of
+    # letting them fade. At voxel_size 0.05 a room is cheap, but watch memory on
+    # a long session, and use ./run_stack.sh remap for a clean origin.
+    map_clearing_radius_m: -1.0
+    # Visualization was ALSO truncated at 7 m, which would hide the far half of a
+    # room even once it is mapped.
+    layer_visualization_exclusion_radius_m: 100.0
     # Obstacle band, in ODOM z (base_link origin sits at z=0).
     #
     # min was 0.05 and that mapped THE FLOOR AS AN OBSTACLE (diagnosed live
@@ -50,6 +93,13 @@
       esdf_slice_min_height: 0.12
       esdf_slice_max_height: 0.40
       esdf_slice_height: 0.20
+
+      # See the "THE MAP MUST ACCUMULATE" block above — these are the two halves
+      # of the TSDF decay that was erasing the room after ~33 s.
+      tsdf_decay_factor: 0.999999
+      decay_integrator_deallocate_decayed_blocks: false
+      # The mesh/layer streamer dropped anything beyond 7 m of base_link too.
+      layer_streamer_exclusion_radius_m: 100.0
 
     # MEASURED 2026-08-10 — do NOT trust back_projected_depth as a safety source.
     # It is nav2's collision_monitor source (config/nav2.yaml), but on this rig it
