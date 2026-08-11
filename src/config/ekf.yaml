@@ -1,0 +1,77 @@
+# robot_localization EKF — fuse cuVSLAM visual odometry + D555 gyro.
+#
+# Chain:  cuVSLAM /odom (x,y,yaw)  ─┐
+#         imu_to_base /imu/base     ├─► ekf_filter_node ─► odom->base_link TF
+#         (future) wheel /wheel_odom┘                       + /odometry/filtered
+#
+# DESIGN (see FACTS.md + the "IMU fusion is OFF" note):
+#   * two_d_mode: floor rover — zero z/roll/pitch and their velocities. Fixes the
+#     vertical drift that trips safety_guard (odom z ran to ~0.45 m visual-only).
+#   * Fuse the GYRO YAW-RATE ONLY from the IMU. The D555 MEMS accelerometer,
+#     fused naively, diverges hundreds of metres (gravity + bias). A slow ground
+#     robot gains nothing from accel and all of its drift, so it is NOT fused.
+#     Yaw-rate only also avoids the parked camera-IMU *translation* (Kalibr)
+#     calibration — imu_to_base already rotates the gyro into base_link.
+#   * cuVSLAM must run with publish_odom_tf:=false so this node owns odom->base.
+#
+# ADD ENCODERS LATER: set odom1: /wheel_odom and odom1_config to fuse vx (and
+# optionally vyaw); keep odom0 (visual) for x,y,yaw. No other change needed.
+ekf_filter_node:
+  ros__parameters:
+    # 20 Hz not 30: on the loaded Orin Nano (cuVSLAM+nvblox+nav2+YOLO all live)
+    # the 30 Hz filter missed its 33 ms budget (updates took 40-90 ms), so the
+    # odom->base_link TF came out laggy/intermittent -> nav2 TF-extrapolation
+    # errors + detections_3d "TF not available -> publish nothing". 20 Hz (50 ms
+    # budget) meets the rate and still oversamples the wheel/imu inputs. (2026-08-09)
+    frequency: 20.0
+    sensor_timeout: 0.2
+    two_d_mode: true
+    publish_tf: true
+    print_diagnostics: false
+
+    map_frame: map
+    odom_frame: odom
+    base_link_frame: base_link
+    world_frame: odom            # EKF fuses in the continuous odom frame
+
+    # --- cuVSLAM visual odometry: absolute x, y, yaw ---------------------------
+    # (its twist is not populated, so fuse pose only — never the fake-zero
+    #  velocities.)
+    odom0: /odom
+    odom0_config: [true,  true,  false,
+                   false, false, true,
+                   false, false, false,
+                   false, false, false,
+                   false, false, false]
+    odom0_differential: false
+    odom0_relative: false
+    odom0_queue_size: 10
+
+    # --- wheel encoders: forward velocity vx (index 6) ------------------------
+    # Pi5 wheel_odom_relay turns the ESP32 /wheel_state (velL, velR) into this
+    # nav_msgs/Odometry. Fuse vx ONLY: it is the low-latency dead-reckoning that
+    # bridges the brief cuVSLAM dropout on fast pivots (README §10). The gyro
+    # (imu0) still owns yaw-rate — wheels slip in pivots, so vyaw stays false
+    # here (flip index 11 to true only if wheel vyaw proves reliable on-robot).
+    # Twist-only source: pose covariance is huge in the relay, never fused.
+    odom1: /wheel_odom
+    odom1_config: [false, false, false,
+                   false, false, false,
+                   true,  false, false,
+                   false, false, false,
+                   false, false, false]
+    odom1_differential: false
+    odom1_relative: false
+    odom1_queue_size: 10
+
+    # --- D555 gyro: yaw-rate only (index 11 = vyaw) ---------------------------
+    imu0: /imu/base
+    imu0_config: [false, false, false,
+                  false, false, false,
+                  false, false, false,
+                  false, false, true,
+                  false, false, false]
+    imu0_differential: false
+    imu0_relative: false
+    imu0_queue_size: 20
+    imu0_remove_gravitational_acceleration: true

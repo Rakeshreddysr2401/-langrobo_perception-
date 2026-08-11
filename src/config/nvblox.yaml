@@ -1,0 +1,131 @@
+# nvblox overrides for the REAL robot profile (RealSense D555 + cuVSLAM).
+# Loaded on top of nvblox_examples_bringup/config/nvblox/nvblox_base.yaml.
+#
+# Reconstruction is anchored to cuVSLAM's odom frame (NVIDIA reference wiring:
+# smooth, no relocalization jumps in the costmaps). Goals arrive in `map`
+# (Pi5 contract); bt_navigator transforms them through cuVSLAM's map->odom.
+/**:
+  ros__parameters:
+    global_frame: "odom"
+    num_cameras: 1
+    use_depth: true
+    # RGB adds mesh color only — skip it; the Orin budget goes to depth + YOLO.
+    use_color: false
+    use_lidar: false
+    esdf_mode: "2d"
+    publish_esdf_distance_slice: true
+    map_clearing_frame_id: "base_link"
+    # Live driver publishes best-effort sensor QoS (sim used reliable).
+    input_qos: "SENSOR_DATA"
+
+    # ── THE MAP MUST ACCUMULATE ─────────────────────────────────────────────
+    # Diagnosed live 2026-08-11: "I only see a torch in front of the rover, the
+    # room never builds up." That was correct, and it was TWO deletion mechanisms
+    # in nvblox_base.yaml, not a misunderstanding:
+    #
+    #   1. TSDF DECAY. decay_tsdf_rate_hz 5.0 with tsdf_decay_factor 0.95 and
+    #      decay_integrator_deallocate_decayed_blocks TRUE. Every voxel's weight
+    #      is multiplied by 0.95 five times a second; when it falls under
+    #      tsdf_decayed_weight_threshold (0.001) the block is DEALLOCATED.
+    #      From projective_integrator_max_weight 5.0 that is
+    #      ln(0.001/5)/ln(0.95) = 166 steps = ~33 SECONDS.
+    #      So anything the camera looked away from vanished after half a minute.
+    #      With a ~87 deg forward-only FOV, the observed map can never be more
+    #      than "wherever I pointed in the last 33 s" — exactly a torch beam.
+    #
+    #   2. map_clearing_radius_m 7.0, applied at 1 Hz: everything further than
+    #      7 m from base_link is deleted outright.
+    #
+    # Those defaults are tuned for NVIDIA's dynamic-scene demos, where stale
+    # geometry (people who walked away) SHOULD be forgotten. Our goal is the
+    # opposite: drive a room, keep the walls, save them (tasks/05-persistence).
+    #
+    # Rather than set the rates to a "disable" sentinel the headers do not
+    # actually document, we neutralise the mechanisms unambiguously:
+    #   * decay factor ~1   -> the decay pass still runs but removes no weight
+    #   * deallocate false  -> a block is never freed even if it did decay
+    #   * clearing radius <0 -> documented in nvblox_base.yaml as "no map clearing"
+    #
+    # NOTE: the factor must be STRICTLY < 1.0. tsdf_decay_integrator.cu:27 asserts
+    # `value < 1.0` and hard-aborts the whole node on exactly 1.0 (tried it,
+    # 2026-08-11: "Check failed: value < 1.0 (1 vs. 1)" and nvblox never came up).
+    # 0.999999 at 5 Hz would take ~20 DAYS to decay a voxel from weight 5 to the
+    # 0.001 threshold, so it is "never" in any practical sense.
+    #
+    # COST, be aware: the map now grows without bound and never forgets. Moving
+    # objects leave permanent ghosts, and pose drift smears walls instead of
+    # letting them fade. At voxel_size 0.05 a room is cheap, but watch memory on
+    # a long session, and use ./run_stack.sh remap for a clean origin.
+    map_clearing_radius_m: -1.0
+    # Visualization was ALSO truncated at 7 m, which would hide the far half of a
+    # room even once it is mapped.
+    layer_visualization_exclusion_radius_m: 100.0
+    # Obstacle band, in ODOM z (base_link origin sits at z=0).
+    #
+    # min was 0.05 and that mapped THE FLOOR AS AN OBSTACLE (diagnosed live
+    # 2026-08-10). Deprojecting the depth centre column showed open floor landing
+    # at z = +0.04 m (0.58 m and 0.75 m ahead) — just 1 cm under the old 0.05
+    # threshold, i.e. well inside the depth noise, which is extra-sparse because
+    # the IR emitter is OFF for cuVSLAM scale. Result: a solid inflation plateau
+    # across the full +-1 m width starting ~0.25 m ahead of the robot, with no
+    # lethal cells anywhere — pure floor. MPPI then crawled at 0.082 m/s (vx_max
+    # is 0.30) and the collision monitor's SlowZone cut that to 0.033 m/s, so the
+    # rover covered 0.9 cm in 30 s and nav2 aborted on "Failed to make progress".
+    #
+    # 0.12 puts ~8 cm of margin above the observed floor plane. Cost: obstacles
+    # shorter than ~12 cm are no longer mapped. The 85 mm wheels make most of
+    # those non-issues, and safety_guard's depth bumper still sees them.
+    #
+    # UPDATE 2026-08-10 (Phase 1): the camera-height TF IS NOW FIXED. nodes/floor_probe.py
+    # measured open floor at +0.037 m with the old z=0.20 TF; after correcting the static
+    # TF to z=0.163 the floor deprojects to +0.000 m (16-84%: -0.002..+0.004, 19.5k points).
+    #
+    # So the 0.12 below is now OVER-CONSERVATIVE — it exists only to dodge an error that no
+    # longer exists, and it costs us every obstacle shorter than 12 cm. It can come down
+    # toward ~0.06 (still ~6 cm above the measured floor, and above the residual +1.07 deg
+    # nose-up pitch which lifts floor to ~+0.009 m at 1.25 m range).
+    #
+    # NOT changed yet ON PURPOSE: this alters what nav2 treats as an obstacle, so it must be
+    # validated while driving (ThingsTodo.md Phase 2). After lowering, confirm the costmap
+    # has no wide nonzero-cost band with zero lethal cells -- that pattern IS the floor.
+    # Re-run nodes/floor_probe.py after ANY camera remount before touching this.
+    # TESTED 2026-08-11 — raising this band does NOT thin the map. Ran the same
+    # stationary viewpoint at 0.12-0.40 and at 0.35-0.60:
+    #     0.12-0.40 : free 1112, occupied 520, occ/free 0.47, covers 5.0 x 6.9 m
+    #     0.35-0.60 : free  653, occupied 315, occ/free 0.48, covers 2.5 x 4.4 m
+    # The occupied/free RATIO is unchanged; the higher band just sees half as much
+    # of the room. So the over-thick obstacles are NOT the floor leaking into the
+    # slice, and raising the band buys nothing while costing coverage.
+    #
+    # Corollary for issue 06: this removes the last reason to keep 0.12. It was a
+    # workaround for a camera-height error that is now fixed, and the floor is
+    # demonstrably not what is filling the map. Lowering it toward ~0.06 should be
+    # safe — but it changes what nav2 calls an obstacle, so validate it DRIVING.
+    static_mapper:
+      esdf_slice_min_height: 0.12
+      esdf_slice_max_height: 0.40
+      esdf_slice_height: 0.20
+
+      # See the "THE MAP MUST ACCUMULATE" block above — these are the two halves
+      # of the TSDF decay that was erasing the room after ~33 s.
+      tsdf_decay_factor: 0.999999
+      decay_integrator_deallocate_decayed_blocks: false
+      # The mesh/layer streamer dropped anything beyond 7 m of base_link too.
+      layer_streamer_exclusion_radius_m: 100.0
+
+    # MEASURED 2026-08-10 — do NOT trust back_projected_depth as a safety source.
+    # It is nav2's collision_monitor source (config/nav2.yaml), but on this rig it
+    # publishes at ~0.5 Hz with gaps up to 7.3 s, and stalled ~10 s during a live
+    # drive. The monitor's source_timeout is 2.5 s, so it spends most of its time
+    # logging "Ignoring the source" — nav2's collision layer effectively has NO
+    # obstacle input. (When a source is stale the monitor does not brake; it just
+    # ignores it, so this is a silent loss of protection, not a false stop.)
+    # Raising publish_debug_vis_rate_hz to 10.0 and back_projection_subsampling to
+    # 4 was TRIED and did NOT change the rate — that parameter does not gate this
+    # topic, so both were reverted rather than left as a misleading no-op.
+    # Effective obstacle protection today is therefore:
+    #   * MPPI ObstaclesCritic on the nvblox costmap  (static_map_slice, 9.4 Hz — healthy)
+    #   * safety_guard depth bumper                   (direct off 21 Hz depth, ~6 Hz checks)
+    #   * safety_guard nvblox occupancy bumper        (remembers walls in the blind zone)
+    # TODO: to give nav2's collision_monitor a real source, publish a strided
+    # depth->PointCloud2 at ~10 Hz (same numpy trick safety_guard already uses).
