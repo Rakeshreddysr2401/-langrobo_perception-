@@ -325,7 +325,11 @@ view)
   echo "  laptop RViz view — $LAPTOP_USER@$LAPTOP_IP"
   echo "  (override with: LAPTOP_IP=x.x.x.x ./run_stack.sh view)"
   echo
-  if ! ping -c1 -W2 "$LAPTOP_IP" >/dev/null 2>&1; then
+  # Retry the ping. Measured 2026-08-11: the laptop's wifi power-saves, so RTT swings
+  # 21 -> 128 ms and the FIRST icmp packet is often dropped while the radio wakes up.
+  # A single `ping -c1` therefore reports a healthy, logged-in laptop as "off" — which
+  # then aborts the whole view command. 3 tries costs nothing and removes the false alarm.
+  if ! ping -c3 -W2 "$LAPTOP_IP" >/dev/null 2>&1; then
     echo "  ✗ $LAPTOP_IP does not respond to ping — laptop off, asleep, or on another network."
     echo "    Find it:  getent hosts rover-esp32.local   # make sure you are not looking at the ESP32"
     exit 1
@@ -356,6 +360,11 @@ view)
       if [ -n "$xw" ]; then
         d=$(echo "$xw" | grep -oE " :[0-9]+" | head -1 | tr -d " ")
         a=$(echo "$xw" | sed -nE "s/.* -auth ([^ ]+).*/\1/p")
+      elif [ "$t" = "wayland" ]; then
+        # Wayland session but Xwayland is NOT up yet (GNOME starts it on demand).
+        # Do NOT guess — guessing ":0 + ~/.Xauthority" is exactly what produced the
+        # silent "could not connect to display :0" failure on 2026-08-11. Say so.
+        echo "$n NO_XWAYLAND NO_XWAYLAND"; break
       else
         d=$(loginctl show-session "$s" -p Display --value 2>/dev/null)
         a=$HOME/.Xauthority
@@ -370,6 +379,16 @@ view)
     echo
     echo "    FIX: physically log into the laptop, then on the laptop run:"
     echo "         bash ~/rover_view.sh"
+    exit 1
+  fi
+  if [ "$(echo "$desk" | awk '{print $2}')" = "NO_XWAYLAND" ]; then
+    echo "  ✗ Laptop is on a WAYLAND session but Xwayland is not running yet."
+    echo "    rviz2 is an X11 app — it has nothing to draw into, and would die with"
+    echo "    'could not connect to display :0' in /tmp/rviz.log ON THE LAPTOP."
+    echo
+    echo "    FIX: open any window on the laptop desktop (a terminal is enough), then"
+    echo "         re-run this. GNOME starts Xwayland on demand, so it appears once"
+    echo "         something asks for X. Confirm with:  pgrep -a Xwayland"
     exit 1
   fi
   echo "  ok  desktop session: $desk"

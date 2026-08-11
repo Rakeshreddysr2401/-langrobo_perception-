@@ -62,8 +62,11 @@ WATCH = [
     ("/perception/depth_points",              "collision src",    5.0, "vision",
      "nav2 collision_monitor source. Stale => monitor HOLDS THE ROBOT AT ZERO"),
     ("/wheel_state",                          "ESP32 encoders",  15.0, "esp32",
-     "MUST be ~20 Hz. Measured 10 Hz 2026-08-11 = half rate, cause unknown (learn/03-imu.md). "
-     "1 Hz = ESP32 on pre-f4be55a firmware, reflash it"),
+     "MUST be ~20 Hz — firmware publishes unconditionally every 50 ms once the agent "
+     "is CONNECTED (rover_firmware_v2.ino:391), with no motion gating. So a LOW rate "
+     "is never 'idle'. ~10 Hz = half rate, cause unknown. ~1.0 Hz = the only other "
+     "timer in that file, the WAITING_AGENT ping (:374) — i.e. the ESP32 is not in "
+     "the connected loop at all. Diagnose before reflashing (learn/03-imu.md)"),
     ("/cmd_vel",                              "cmd_vel out",      0.0, "-",
      "final motor command (0 Hz when parked is correct)"),
 ]

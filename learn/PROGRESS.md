@@ -40,33 +40,43 @@ next issue may need them, and six weeks from now "worked" tells you nothing.
 
 ## PICK UP HERE — next session
 
-The D555 stopped streaming at 01:21 on 2026-08-11 and everything downstream is
-waiting on it. Do this first, in order:
+The stack is **healthy and running as of 2026-08-11**, with RViz live on the
+laptop. Verified this session:
+
+```
+  camera IR 26.5 Hz · depth 20.2 Hz · cuVSLAM 23.0 Hz · nvblox 9.5 Hz
+  EKF 20.0 Hz · IMU 74.5 Hz · trust=True · load1 4.0
+  /odometry/filtered z = 0.0   ← exactly, this is the smearing fix
+  at the laptop: map 9.5 Hz, odom 20 Hz, /rover/model subscribed
+```
+
+The **remaining issue 00 gate work is yours to do by eye**, not something a
+command can prove:
+
+1. Look at the laptop screen. Confirm you can see the **rover body** (grey box,
+   green forward arrow, blue camera, translucent FOV wedge) and the **TF tree**.
+2. **Push the rover by hand around the room.** Watch two things:
+   - does `base_link` slide across the grid, leaving the map behind it *intact*?
+   - do walls come out as **lines**, not the thick smeared blobs you saw
+     yesterday? That is the whole point of pinning z.
+3. Say out loud what `map`, `odom` and `base_link` each mean.
+
+Bring-up order from cold, every time:
 
 ```bash
 cd ~/langrobo_perception/orin-nav-stack
-./run_stack.sh status          # expect camera IR / depth / cuVSLAM at 0.0 Hz
-./run_stack.sh cam             # cheap software relaunch — try this first
-./run_stack.sh status          # if camera is back, carry on below
-```
-
-If it is still 0 Hz: **physically power-cycle the camera** — unplug the PoE
-cable for ~5 s and replug. No software restart recovers a dead D555 DDS server,
-and it keeps answering ping the whole time it is dead.
-
-Once the camera is streaming:
-
-```bash
+./run_stack.sh up              # camera + TF + cuVSLAM + nvblox
 ./run_stack.sh fuse            # ALWAYS before mapping — pins odom z to 0
 ./run_stack.sh status          # want: camera >=15, cuVSLAM >=10, trust=True
 ./run_stack.sh view start      # RViz on the laptop (must be logged in at it)
 ```
 
-Then re-drive the room by hand and see whether the map comes out clean now that
-z is pinned. That is the remaining issue 00 gate work.
-
 **Do not run `remap` and then drive** — it drops fusion and z drifts. It now
 warns you, but the habit is: `remap` ➜ `fuse` ➜ drive.
+
+Ignore the ESP32 encoder complaint for now. Nothing in issue 00 uses the wheels,
+and it is issue 03's job — but read the blocker note below, because the number
+changed and it now says something different from what it said yesterday.
 
 ---
 
@@ -77,8 +87,10 @@ head, so a later issue can pick them up.
 
 | Found | Issue | What | Status |
 |---|---|---|---|
-| 2026-08-11 | 00 | **D555 stopped streaming** (IR/depth 0 Hz, `map->odom` MISSING). Log shows "callback took too long!" then silence. Needs `cam` relaunch or a physical PoE power-cycle. | **blocking** |
-| 2026-08-10 | 03 | ESP32 `/wheel_state` publishes at 10.0 Hz; firmware asks for 20 Hz (`rover_firmware_v2.ino:391`). Cause not yet found. | open |
+| 2026-08-11 | 00 | ~~D555 stopped streaming~~ — **resolved 2026-08-11 by a plain `up` after a full power cycle.** No cable-pull was needed. Worth knowing: a dead D555 DDS server can survive a container restart but not a host reboot. | resolved |
+| 2026-08-11 | 03 | ESP32 `/wheel_state` dropped from 10.0 Hz to **exactly 1.00 Hz** (jitter ±0.05 s) across the reboot. This is *not* half-rate and *not* idle: the firmware publishes unconditionally every 50 ms once `AGENT_CONNECTED` (`rover_firmware_v2.ino:391`), with no motion gating. The only 1000 ms timer in the file is the `WAITING_AGENT` ping (`:374`), so the ESP32 is very likely **not in the connected loop**. Check the micro-ROS agent on the Pi 5 first — it has no systemd unit either. | open |
+| 2026-08-11 | 00 | `view` aborted with "does not respond to ping" while ssh worked fine. Laptop wifi power-saves: RTT swings 21 → 128 ms and the first ICMP packet is dropped. `ping -c1` now `-c3`. | fixed |
+| 2026-08-11 | 00 | `view start` failed again on Wayland — but a *different* variant: Xwayland had not started yet (GNOME starts it on demand), so the probe silently guessed `:0` + `~/.Xauthority`. It now refuses to guess and says so. | fixed |
 | 2026-08-10 | 06 | `esdf_slice_min_height` still at the 0.12 workaround value; the 4 cm camera-height error it was dodging is now fixed, so it can come down. | open |
 | 2026-08-10 | later | Pi 5 wheel-odom relay has no systemd unit — it dies on every reboot and must be restarted by hand. | open |
 | 2026-08-10 | — | Camera sees forward only (~87°). No pan/tilt head, so the map has no sides or back. Hardware gap, not a bug. | accepted |

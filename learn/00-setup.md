@@ -46,6 +46,13 @@ process itself** (`pgrep -a Xwayland` → `-auth /run/user/1000/.mutter-Xwayland
 which is authoritative for both. `view` now also prints the tail of the laptop's
 log when the launch fails, instead of telling you to go and read it.
 
+**Trap 3b — Xwayland isn't running *yet* (found 2026-08-11).** GNOME starts
+Xwayland **on demand**, so straight after you log in there may be no X server at
+all. The lookup above then finds nothing, and the old code quietly fell back to
+guessing `:0` — reproducing Trap 3 exactly. `view` now **refuses to guess** and
+tells you to open any window on the laptop first. Note the cookie path
+(`...auth.S6DNT3`) is regenerated on every login, so it can never be hardcoded.
+
 This is the third variation on the same theme: **RViz fails silently and the
 evidence lands on the other machine.**
 
@@ -213,7 +220,9 @@ does is a frame problem, and issues 01–08 all assume you have this.
 | Symptom | Cause | Fix |
 |---|---|---|
 | `up` aborts, log says "No RealSense devices were found" | The D555's on-camera DDS server is dead | **Physically power-cycle it** — unplug the PoE cable ~5 s, replug. No software restart recovers this. It still answers ping while dead, so ping is not a health check. |
+| `view` says "does not respond to ping" but ssh works fine | Laptop wifi power-save — the radio sleeps and drops the first ICMP packet (measured 2026-08-11: RTT swinging 21 → 128 ms) | Already fixed: the check now pings 3 times, not once. If it still fails, the laptop really is off. |
 | `view` says "does not respond to ping" | Laptop off/asleep, or you're on `.12` | It's `192.168.1.10`. Check with `getent hosts rover-esp32.local` that you're not looking at the ESP32. |
+| `view` says "Xwayland is not running yet" | GNOME starts Xwayland **on demand**, so right after login there is no X server for rviz2 to draw into | Open any window on the laptop (a terminal is enough) and re-run. Confirm with `pgrep -a Xwayland`. |
 | `view` says "NOBODY IS LOGGED IN" | Trap 2 | Physically log in at the laptop. |
 | `view start` says "rviz2 did not stay up" | Trap 3, or a genuine RViz error | `view` now prints the tail of the laptop's `/tmp/rviz.log` for you. If it mentions "Authorization required" or "could not connect to display", the Xwayland cookie lookup failed — check `pgrep -a Xwayland` on the laptop. |
 | RViz opens but everything is empty | `Fixed Frame` is set to a frame that doesn't exist yet | Set it to `odom`. |
