@@ -102,3 +102,21 @@ see `TODO.md §7`. Start at [`tasks/01-camera.md`](tasks/01-camera.md).
 
 The old stack at `../langrobo_perception/` is the **parts bin**: read it, never
 edit it. It still runs, so it is your fallback.
+
+---
+
+## Git
+
+This repo pushes to the **same GitHub repo** as the old stack, on its own branch:
+
+```
+github.com/Rakeshreddysr2401/-langrobo_perception-   branch: rover-v1
+```
+
+`rover-v1` is an **orphan branch** — it was a fresh `git init`, so it shares no
+commits with `main` or any `dev-0.0.x`. That is deliberate. It also means it will
+never merge into `main` without `--allow-unrelated-histories`, and it should not.
+
+```bash
+git push origin rover-v1
+```
