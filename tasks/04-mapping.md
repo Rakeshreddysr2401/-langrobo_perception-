@@ -6,6 +6,12 @@
 
 ---
 
+## Learn first
+
+Read [`04-tsdf-esdf-voxels.md`](../knowledge/04-tsdf-esdf-voxels.md) — what a voxel, a TSDF and an ESDF are, why the 3D map gets flattened into a 2D slice, and how to judge a map by counting cells instead of squinting at it.
+
+Not to memorise. Just so the words in this task mean something.
+
 ## What you are proving
 
 That driving a room produces a **room** — thin wall lines with open floor
@@ -110,3 +116,36 @@ git add -A && git commit -m "task 04: drove the room, walls are lines, occ/free 
 ```
 
 **Next:** [`05-persistence.md`](05-persistence.md)
+
+---
+
+## What I learned doing it
+
+*Fill this in while you still remember being confused — that is the valuable
+part, and it evaporates within a day.*
+
+**What surprised me**
+
+>
+
+**What I got wrong first**
+
+>
+
+**Numbers I measured**
+
+>
+
+**Codebase things worth remembering** — a file, a parameter, a line that turned
+out to matter more than it looked
+
+>
+
+**Still don't understand**
+
+>
+
+> Housekeeping when you finish: a measured number belongs in `FACTS.md`, a
+> broken or unverified thing belongs in `TODO.md`, and anything you learned about
+> the *concept* rather than about today should be promoted into
+> [`knowledge/`](../knowledge/).

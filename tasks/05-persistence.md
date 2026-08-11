@@ -40,3 +40,42 @@ with a driven map in front of you, not on paper.
 *To be written from real measurements.* Roughly: save a map, restart the stack,
 and have the rover localize on it within some bound you will have measured by
 then.
+
+## Learn first
+
+Read [`01-frames-and-tf.md`](../knowledge/01-frames-and-tf.md) then [`04-tsdf-esdf-voxels.md`](../knowledge/04-tsdf-esdf-voxels.md) — why `map` jumps and `odom` does not, and what that costs a map built in `odom`.
+
+Not to memorise. Just so the words in this task mean something.
+
+---
+
+## What I learned doing it
+
+*Fill this in while you still remember being confused — that is the valuable
+part, and it evaporates within a day.*
+
+**What surprised me**
+
+>
+
+**What I got wrong first**
+
+>
+
+**Numbers I measured**
+
+>
+
+**Codebase things worth remembering** — a file, a parameter, a line that turned
+out to matter more than it looked
+
+>
+
+**Still don't understand**
+
+>
+
+> Housekeeping when you finish: a measured number belongs in `FACTS.md`, a
+> broken or unverified thing belongs in `TODO.md`, and anything you learned about
+> the *concept* rather than about today should be promoted into
+> [`knowledge/`](../knowledge/).

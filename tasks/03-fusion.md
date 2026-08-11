@@ -6,6 +6,12 @@
 
 ---
 
+## Learn first
+
+Read [`03-sensor-fusion-ekf.md`](../knowledge/03-sensor-fusion-ekf.md) then [`01-frames-and-tf.md`](../knowledge/01-frames-and-tf.md) — what a Kalman filter is actually doing, how to read the boolean grid in `ekf.yaml`, and why only ONE node may publish `odom -> base_link`.
+
+Not to memorise. Just so the words in this task mean something.
+
 ## What you are proving
 
 That the pose stays sane through the moments vision fails: fast pivots, blank
@@ -111,3 +117,36 @@ git add -A && git commit -m "task 03: EKF 20 Hz, gyro 74 Hz, z=0.000, survives 2
 ```
 
 **Next:** [`04-mapping.md`](04-mapping.md)
+
+---
+
+## What I learned doing it
+
+*Fill this in while you still remember being confused — that is the valuable
+part, and it evaporates within a day.*
+
+**What surprised me**
+
+>
+
+**What I got wrong first**
+
+>
+
+**Numbers I measured**
+
+>
+
+**Codebase things worth remembering** — a file, a parameter, a line that turned
+out to matter more than it looked
+
+>
+
+**Still don't understand**
+
+>
+
+> Housekeeping when you finish: a measured number belongs in `FACTS.md`, a
+> broken or unverified thing belongs in `TODO.md`, and anything you learned about
+> the *concept* rather than about today should be promoted into
+> [`knowledge/`](../knowledge/).

@@ -6,6 +6,12 @@
 
 ---
 
+## Learn first
+
+Read [`02-visual-odometry.md`](../knowledge/02-visual-odometry.md) then [`01-frames-and-tf.md`](../knowledge/01-frames-and-tf.md) — how stereo VO turns two IR images into motion, why rotation is its weak case, and who publishes which transform.
+
+Not to memorise. Just so the words in this task mean something.
+
 ## What you are proving
 
 That the rover's sense of distance is **metrically honest**. Not that cuVSLAM is
@@ -96,3 +102,36 @@ git add -A && git commit -m "task 02: cuVSLAM reads 1.97 m on a 2.00 m push (1.5
 Put the real number in the message.
 
 **Next:** [`03-fusion.md`](03-fusion.md)
+
+---
+
+## What I learned doing it
+
+*Fill this in while you still remember being confused — that is the valuable
+part, and it evaporates within a day.*
+
+**What surprised me**
+
+>
+
+**What I got wrong first**
+
+>
+
+**Numbers I measured**
+
+>
+
+**Codebase things worth remembering** — a file, a parameter, a line that turned
+out to matter more than it looked
+
+>
+
+**Still don't understand**
+
+>
+
+> Housekeeping when you finish: a measured number belongs in `FACTS.md`, a
+> broken or unverified thing belongs in `TODO.md`, and anything you learned about
+> the *concept* rather than about today should be promoted into
+> [`knowledge/`](../knowledge/).

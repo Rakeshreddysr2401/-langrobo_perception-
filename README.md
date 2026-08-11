@@ -23,6 +23,7 @@ intelligence. It is the foundation, and stage 2 does not start until it passes.
 | **[ARCHITECTURE.md](ARCHITECTURE.md)** | every block, its inputs and outputs, and the frame tree |
 | **[TODO.md](TODO.md)** | every known bug and open question, nothing hidden in a comment |
 | **[tasks/](tasks/)** | the work, one layer at a time |
+| **[knowledge/](knowledge/)** | the concepts, one file per topic — what it all *means* |
 
 ---
 
@@ -61,10 +62,19 @@ Support commands:
 One task per session. Never two.
 
 ```
-read the task  ->  run it  ->  watch it in RViz  ->  CHECK THE GATE  ->  commit
+read knowledge/  ->  read the task  ->  run it  ->  watch it in RViz
+     ->  CHECK THE GATE  ->  write up what you learned  ->  commit
 ```
 
-The gate is the point. "It looked fine" is not a gate — record the **numbers**.
+Two things carry the weight here.
+
+**The gate.** "It looked fine" is not a gate — record the **numbers**.
+
+**The write-up.** Every task ends with a *"What I learned doing it"* section.
+Fill it in while you still remember being confused; that is the part that
+evaporates within a day. Then file it: a measured number goes to `FACTS.md`,
+something broken goes to `TODO.md`, and anything you understood about the
+*concept* gets promoted into [`knowledge/`](knowledge/) so it is there next time.
 
 ---
 

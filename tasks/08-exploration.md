@@ -7,6 +7,12 @@
 
 ---
 
+## Learn first
+
+Read [`08-frontier-exploration.md`](../knowledge/08-frontier-exploration.md) — what a frontier is, why 'unknown' is a third state and not just 'empty', and why an 87 deg robot has to spin to do a 360 deg job.
+
+Not to memorise. Just so the words in this task mean something.
+
 ## Goal
 
 Switch it on in an unmapped room. It drives around, works out where it has not
@@ -114,3 +120,36 @@ Specifically, task 08 cannot work unless:
 That last line is the one that matters. A map made while exploring must be as
 good as one made while you pushed it by hand — otherwise autonomy cost you
 quality, and it is not worth having.
+
+---
+
+## What I learned doing it
+
+*Fill this in while you still remember being confused — that is the valuable
+part, and it evaporates within a day.*
+
+**What surprised me**
+
+>
+
+**What I got wrong first**
+
+>
+
+**Numbers I measured**
+
+>
+
+**Codebase things worth remembering** — a file, a parameter, a line that turned
+out to matter more than it looked
+
+>
+
+**Still don't understand**
+
+>
+
+> Housekeeping when you finish: a measured number belongs in `FACTS.md`, a
+> broken or unverified thing belongs in `TODO.md`, and anything you learned about
+> the *concept* rather than about today should be promoted into
+> [`knowledge/`](../knowledge/).

@@ -6,6 +6,12 @@
 
 ---
 
+## Learn first
+
+Read [`05-qos-dds-and-rates.md`](../knowledge/05-qos-dds-and-rates.md) — why a topic can exist and still deliver nothing, why the D555 is a DDS device, and why we measure rates instead of publisher counts.
+
+Not to memorise. Just so the words in this task mean something.
+
 ## What you are proving
 
 That the camera streams, on its own, **stably**, with nothing else running.
@@ -71,3 +77,36 @@ git add -A && git commit -m "task 01: camera holds 26 Hz IR / 20 Hz depth for 5 
 Record the **actual numbers** you saw, not "worked".
 
 **Next:** [`02-cuvslam.md`](02-cuvslam.md)
+
+---
+
+## What I learned doing it
+
+*Fill this in while you still remember being confused — that is the valuable
+part, and it evaporates within a day.*
+
+**What surprised me**
+
+>
+
+**What I got wrong first**
+
+>
+
+**Numbers I measured**
+
+>
+
+**Codebase things worth remembering** — a file, a parameter, a line that turned
+out to matter more than it looked
+
+>
+
+**Still don't understand**
+
+>
+
+> Housekeeping when you finish: a measured number belongs in `FACTS.md`, a
+> broken or unverified thing belongs in `TODO.md`, and anything you learned about
+> the *concept* rather than about today should be promoted into
+> [`knowledge/`](../knowledge/).

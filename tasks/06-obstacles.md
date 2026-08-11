@@ -31,3 +31,42 @@ Real obstacles appear as obstacles; the floor never does.
 
 *To be written.* Roughly: a box on the floor appears as lethal cells; open floor
 has zero cost; lowering the slice band does not reintroduce the floor plateau.
+
+## Learn first
+
+Read [`06-costmaps-and-inflation.md`](../knowledge/06-costmaps-and-inflation.md) — what cost 0/253/254 mean, why obstacles are inflated by the robot's radius, and the signature of the floor being mapped as an obstacle.
+
+Not to memorise. Just so the words in this task mean something.
+
+---
+
+## What I learned doing it
+
+*Fill this in while you still remember being confused — that is the valuable
+part, and it evaporates within a day.*
+
+**What surprised me**
+
+>
+
+**What I got wrong first**
+
+>
+
+**Numbers I measured**
+
+>
+
+**Codebase things worth remembering** — a file, a parameter, a line that turned
+out to matter more than it looked
+
+>
+
+**Still don't understand**
+
+>
+
+> Housekeeping when you finish: a measured number belongs in `FACTS.md`, a
+> broken or unverified thing belongs in `TODO.md`, and anything you learned about
+> the *concept* rather than about today should be promoted into
+> [`knowledge/`](../knowledge/).
