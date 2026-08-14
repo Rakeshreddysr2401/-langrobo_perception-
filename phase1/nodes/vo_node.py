@@ -57,9 +57,16 @@ import time
 
 import numpy as np
 
-CAM_X_DEFAULT = 0.10   # metres forward of base_link origin  -- CONFIRM
-CAM_Y_DEFAULT = 0.00   # metres left                          -- CONFIRM
-CAM_Z_DEFAULT = 0.163  # metres above the ground              -- CONFIRM
+# Measured on the rover 2026-08-15. base_link's origin is on the GROUND at the
+# centre of the four wheel contact patches, so cam_x is taken from the pivot, not
+# from the front face of the body:
+#     wheelbase (front axle to rear axle, one side) = 25.0 cm
+#     camera lens back to the front axle line       =  4.5 cm
+#     cam_x = 4.5 + 25.0/2                          = 17.0 cm
+# This was 10.0 cm as a guess, i.e. 7 cm short.
+CAM_X_DEFAULT = 0.170  # metres forward of base_link origin   -- MEASURED
+CAM_Y_DEFAULT = 0.00   # metres left (camera on the centreline)
+CAM_Z_DEFAULT = 0.163  # metres above the ground              -- confirmed
 
 
 def base_from_optical(cam_x, cam_y, cam_z):

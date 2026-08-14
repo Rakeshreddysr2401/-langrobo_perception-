@@ -132,7 +132,7 @@ pose)
   # poses land in a frame tree with a missing link.
   echo "[pose] static TF base_link -> camera0_link"
   kill_match "[s]tatic_transform_publisher"
-  dexec "exec ros2 run tf2_ros static_transform_publisher --x 0.10 --y 0.0 --z 0.163 \
+  dexec "exec ros2 run tf2_ros static_transform_publisher --x 0.17 --y 0.0 --z 0.163 \
             --frame-id base_link --child-frame-id camera0_link > /tmp/statictf.log 2>&1"
   sleep 1
 
