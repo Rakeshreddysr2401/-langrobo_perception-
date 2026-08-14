@@ -85,7 +85,8 @@ camera)
          export LD_LIBRARY_PATH=/root/librealsense/install/lib:$LD_LIBRARY_PATH;
          exec ros2 launch realsense2_camera rs_launch.py camera_name:=camera0 \
             enable_infra1:=true enable_infra2:=true depth_module.infra_profile:=896x504x30 \
-            depth_module.emitter_enabled:=0 enable_depth:=true enable_color:=false \
+            depth_module.emitter_enabled:=false depth_module.laser_power:=0.0 \
+            enable_depth:=true enable_color:=false \
             enable_motion:=true enable_sync:=false > /tmp/camera.log 2>&1'
   t=0
   until cam_ready; do
@@ -97,6 +98,22 @@ camera)
     sleep 3
   done
   echo "      D555 streaming — OK"
+
+  # The emitter MUST be off, and a launch argument is not proof that it is.
+  # `emitter_enabled:=0` looks like it works and does nothing: the parameter is
+  # a Boolean and the string "0" does not parse as false, so the driver silently
+  # keeps its default of ON. That cost a session — the projector is bolted to the
+  # camera, so its dots move with the rig, the scene looks static, and cuVSLAM
+  # under-read a 60 cm push as 1.1 cm. Set it at runtime and READ IT BACK.
+  rexec "ros2 param set /camera/camera0 depth_module.emitter_enabled false; \
+         ros2 param set /camera/camera0 depth_module.laser_power 0.0" >/dev/null 2>&1 || true
+  em=$(rexec "ros2 param get /camera/camera0 depth_module.emitter_enabled" 2>/dev/null | tail -1)
+  case "$em" in
+    *False*) echo "      IR emitter OFF — verified" ;;
+    *)       echo "  ✗ IR EMITTER IS STILL ON ($em)."
+             echo "    Visual odometry will under-read badly. Do not trust any pose."
+             exit 1 ;;
+  esac
   echo
   echo "  GATE camera:"
   assert_rate "$CAM_NS/infra1/image_rect_raw" 15 "IR left"  || true
