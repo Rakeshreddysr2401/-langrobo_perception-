@@ -183,7 +183,12 @@ wheels)
 compare)
   need_container
   shift
-  rexec "python3 $SRC/nodes/compare.py $*"
+  # -it matters. Without a TTY, `docker exec` does not proxy SIGINT, so Ctrl-C
+  # kills the client while the Python inside the container never runs its
+  # shutdown path — no verdict printed and no CSV written. Every run before
+  # 2026-08-15 20:28 was lost that way.
+  ttyflag=""; [ -t 0 ] && ttyflag="-it"
+  docker exec $ttyflag "$NAME" bash -lc "$ENVSET python3 $SRC/nodes/compare.py $*"
   ;;
 
 # ── status ──────────────────────────────────────────────────────────────────
