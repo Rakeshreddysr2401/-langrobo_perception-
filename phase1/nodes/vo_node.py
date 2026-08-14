@@ -68,20 +68,42 @@ CAM_X_DEFAULT = 0.170  # metres forward of base_link origin   -- MEASURED
 CAM_Y_DEFAULT = 0.00   # metres left (camera on the centreline)
 CAM_Z_DEFAULT = 0.163  # metres above the ground              -- confirmed
 
+# The camera is not quite square on its bracket. Two straight 2 m hand pushes,
+# 2026-08-15, with the heading changing by under 0.6 deg in each:
+#     197.2 cm forward, 6.7 cm sideways  ->  1.95 deg
+#     194.9 cm forward, 7.4 cm sideways  ->  2.17 deg
+# Agreeing to 0.2 deg over two runs makes this a fixed mounting offset, not
+# noise. A 4-wheeled rover cannot crab sideways, so the rover was travelling
+# where it pointed and the CAMERA was rotated.
+#
+# A mount yaw is invisible in the two numbers you check first: it does not
+# affect distance travelled, and it cancels out of any measured rotation. It
+# only tilts the reported DIRECTION of travel — which is why it survived a
+# passing scale gate.
+CAM_YAW_DEG_DEFAULT = 2.06
 
-def base_from_optical(cam_x, cam_y, cam_z):
+
+def base_from_optical(cam_x, cam_y, cam_z, cam_yaw_deg=0.0):
     """The B matrix above: optical (x right, y down, z fwd) -> base (x fwd, y left, z up).
 
     Columns of M are where each optical axis lands in base coordinates:
         optical +x (right)   -> base -y
         optical +y (down)    -> base -z
         optical +z (forward) -> base +x
+
+    cam_yaw_deg corrects the camera not being square on its bracket. It rotates
+    the camera's axes about base z; the translation is the physically measured
+    mount position and is NOT rotated with it.
     """
     M = np.array([[0.0, 0.0, 1.0],
                   [-1.0, 0.0, 0.0],
                   [0.0, -1.0, 0.0]])
+    a = math.radians(cam_yaw_deg)
+    Rz = np.array([[math.cos(a), -math.sin(a), 0.0],
+                   [math.sin(a), math.cos(a), 0.0],
+                   [0.0, 0.0, 1.0]])
     B = np.eye(4)
-    B[:3, :3] = M
+    B[:3, :3] = Rz @ M
     B[:3, 3] = [cam_x, cam_y, cam_z]
     return B
 
@@ -90,7 +112,8 @@ def self_test():
     """Verify the frame conjugation without a camera, a rover or a container."""
     from scipy.spatial.transform import Rotation
 
-    B = base_from_optical(CAM_X_DEFAULT, CAM_Y_DEFAULT, CAM_Z_DEFAULT)
+    # Axis tests use zero mount yaw; the yaw correction is checked separately below.
+    B = base_from_optical(CAM_X_DEFAULT, CAM_Y_DEFAULT, CAM_Z_DEFAULT, 0.0)
     Binv = np.linalg.inv(B)
     ok = True
 
@@ -128,6 +151,21 @@ def self_test():
     T[:3, 3] = [-r * math.sin(th), 0.0, -r * (1 - math.cos(th))]
     check("pure body spin -> base_link origin does not move", (B @ T @ Binv)[:3, 3], [0, 0, 0], tol=1e-6)
 
+    # 6. The mount-yaw correction, checked against the two real pushes that
+    #    measured it. Uncorrected, a straight 2 m push reported ~7 cm sideways.
+    a = math.radians(CAM_YAW_DEG_DEFAULT)
+    Rz = np.array([[math.cos(a), -math.sin(a), 0.0],
+                   [math.sin(a), math.cos(a), 0.0],
+                   [0.0, 0.0, 1.0]])
+    for label, measured in (("run 1", [1.972, -0.067, 0.0]),
+                            ("run 2", [1.949, -0.074, 0.0])):
+        corrected = Rz @ np.array(measured)
+        good = abs(corrected[1]) < 0.01          # under 1 cm of residual sideways
+        ok &= good
+        print(f"  [{'ok' if good else 'FAIL'}] mount yaw fixes {label}: "
+              f"y {measured[1] * 100:+.1f} cm -> {corrected[1] * 100:+.1f} cm "
+              f"(x {corrected[0] * 100:.1f} cm)")
+
     print(f"\n  self-test: {'PASS' if ok else 'FAIL'}")
     return 0 if ok else 1
 
@@ -162,12 +200,13 @@ def main():
             self.declare_parameter('cam_x', CAM_X_DEFAULT)
             self.declare_parameter('cam_y', CAM_Y_DEFAULT)
             self.declare_parameter('cam_z', CAM_Z_DEFAULT)
+            self.declare_parameter('cam_yaw_deg', CAM_YAW_DEG_DEFAULT)
 
             g = lambda n: self.get_parameter(n).value
             self.ns = g('camera_ns')
             self.publish_tf = g('publish_tf')
             self.want_slam = g('slam')
-            self.B = base_from_optical(g('cam_x'), g('cam_y'), g('cam_z'))
+            self.B = base_from_optical(g('cam_x'), g('cam_y'), g('cam_z'), g('cam_yaw_deg'))
             self.Binv = np.linalg.inv(self.B)
 
             self.bridge = CvBridge()
