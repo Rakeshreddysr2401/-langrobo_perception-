@@ -1,0 +1,200 @@
+#!/usr/bin/env bash
+# rover — Phase 1 bring-up, one layer at a time.
+#
+#   ./rover camera     the D555, and nothing else
+#   ./rover pose       + visual odometry and the gyro
+#   ./rover wheels     check the ESP32 link (diagnose only; cannot fix from here)
+#   ./rover compare    the side-by-side readout — the Phase 1 instrument
+#   ./rover status     what is alive right now
+#   ./rover logs <n>   tail a layer's log (camera|vo|gyro)
+#   ./rover stop       tear the container down
+#
+# WHY LAYERS. Four machines and a camera that can be knocked offline by being
+# poked at. If everything starts at once, a failure is a wall of log with no
+# owner. Each layer here starts alone and prints its own PASS/FAIL, so the
+# failure names itself.
+set -eo pipefail
+
+IMAGE=${IMAGE:-orin-nav:1.1}
+NAME=${NAME:-rover}
+SRC=/opt/rover
+HOSTSRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/phase1"
+CAM_NS=/camera/camera0
+
+# The cuvslam wheel ships its own libcuvslam.so and CUDA-12 userspace libs, and
+# they must come BEFORE Isaac ROS's own build in /opt/ros/jazzy — that one is
+# compiled for Thor and will not run on this Orin.
+CU=/usr/local/lib/python3.12/dist-packages
+CU12="$CU/cuvslam:$CU/nvidia/cuda_runtime/lib:$CU/nvidia/cublas/lib:$CU/nvidia/cusolver/lib:$CU/nvidia/cusparse/lib:$CU/nvidia/nvjitlink/lib:$CU/nvidia/nvtx/lib"
+
+# A stale ROS_DISCOVERY_SERVER makes nodes silently invisible to each other,
+# which looks exactly like a crashed node. Clear it on every command.
+ENVSET='unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE; export ROS_DOMAIN_ID=0; source /opt/ros/jazzy/setup.bash;'
+
+dexec(){ docker exec -d "$NAME" bash -lc "$ENVSET $1"; }
+rexec(){ docker exec    "$NAME" bash -lc "$ENVSET $1"; }
+running(){ [ "$(docker inspect -f '{{.State.Running}}' "$NAME" 2>/dev/null)" = "true" ]; }
+die(){ echo "  ✗ $*" >&2; exit 1; }
+kill_match(){ docker exec "$NAME" bash -lc "for p in \$(pgrep -f '$1'); do kill -9 \$p 2>/dev/null; done; true" >/dev/null 2>&1 || true; }
+
+need_container(){ running || die "no container. Run: ./rover camera"; }
+
+# Measure a topic's rate. Rates are the honest signal: every failure this rig
+# has had was a rate collapsing, not a topic disappearing.
+rate_of(){
+  rexec "timeout 12 ros2 topic hz $1 --window 20 2>/dev/null | awk '/average rate/{r=\$3} END{print r+0}'" 2>/dev/null || echo 0
+}
+
+assert_rate(){ # topic  min_hz  label
+  local hz; hz=$(rate_of "$1")
+  local ok; ok=$(awk -v a="$hz" -v b="$2" 'BEGIN{print (a>=b)?1:0}')
+  printf '      %-22s %7.1f Hz   (want >= %s)   %s\n' "$3" "$hz" "$2" \
+    "$([ "$ok" = 1 ] && echo OK || echo FAIL)"
+  [ "$ok" = 1 ]
+}
+
+start_container(){
+  docker rm -f "$NAME" >/dev/null 2>&1 || true
+  mkdir -p "$(dirname "$HOSTSRC")/logs"
+  # phase1/ is mounted READ-ONLY: edit a node on the host, restart the layer,
+  # no rebuild. The image has no build recipe, so it must never be modified.
+  docker run -d --name "$NAME" --entrypoint /bin/bash \
+    --runtime=nvidia --network=host --privileged \
+    -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all -e NVIDIA_DISABLE_REQUIRE=1 \
+    -e ROS_DOMAIN_ID=0 \
+    -v "$HOSTSRC":$SRC:ro \
+    -v "$(dirname "$HOSTSRC")/logs":/logs \
+    "$IMAGE" -c 'sleep infinity' >/dev/null
+  sleep 2
+}
+
+# The D555 answers ping while completely dead — it is a network device speaking
+# DDS, not a USB camera. The only real check is a live publisher on infra1.
+cam_ready(){
+  rexec "n=\$(ros2 topic info $CAM_NS/infra1/image_rect_raw 2>/dev/null | awk '/Publisher count/{print \$3}'); [ \"\${n:-0}\" -ge 1 ]" >/dev/null 2>&1
+}
+
+case "${1:-}" in
+
+# ── camera ──────────────────────────────────────────────────────────────────
+camera)
+  start_container
+  echo "[camera] D555 — stereo IR + depth + motion"
+  echo "         emitter OFF and sync OFF; both are load-bearing, see phase1/README.md"
+  dexec 'printf "{\"context\":{\"dds\":{\"enabled\":true,\"domain\":0}}}" > ~/.realsense-config.json;
+         export LD_LIBRARY_PATH=/root/librealsense/install/lib:$LD_LIBRARY_PATH;
+         exec ros2 launch realsense2_camera rs_launch.py camera_name:=camera0 \
+            enable_infra1:=true enable_infra2:=true depth_module.infra_profile:=896x504x30 \
+            depth_module.emitter_enabled:=0 enable_depth:=true enable_color:=false \
+            enable_motion:=true enable_sync:=false > /tmp/camera.log 2>&1'
+  t=0
+  until cam_ready; do
+    t=$((t+3)); [ "$t" -ge 40 ] && { echo "  ✗ D555 not streaming after 40 s."
+      docker exec "$NAME" grep -q "No RealSense devices were found" /tmp/camera.log 2>/dev/null \
+        && echo "    Its on-camera DDS server is offline. It still answers ping; that means nothing."
+      echo "    Only a physical PoE power-cycle (unplug ~5 s) recovers this."
+      echo "    Container left up so you can retry: ./rover camera"; exit 1; }
+    sleep 3
+  done
+  echo "      D555 streaming — OK"
+  echo
+  echo "  GATE camera:"
+  assert_rate "$CAM_NS/infra1/image_rect_raw" 15 "IR left"  || true
+  assert_rate "$CAM_NS/depth/image_rect_raw"  10 "depth"    || true
+  echo
+  echo "  Next: ./rover pose"
+  ;;
+
+# ── pose ────────────────────────────────────────────────────────────────────
+pose)
+  need_container
+  echo "  checking the camera is still healthy before building on it..."
+  assert_rate "$CAM_NS/infra1/image_rect_raw" 15 "IR left" || die "camera unhealthy — fix that first"
+
+  # base_link -> camera0_link must exist BEFORE the pose starts, or the first
+  # poses land in a frame tree with a missing link.
+  echo "[pose] static TF base_link -> camera0_link"
+  kill_match "[s]tatic_transform_publisher"
+  dexec "exec ros2 run tf2_ros static_transform_publisher --x 0.10 --y 0.0 --z 0.163 \
+            --frame-id base_link --child-frame-id camera0_link > /tmp/statictf.log 2>&1"
+  sleep 1
+
+  echo "[pose] visual odometry  (stereo IR -> /vo/odom, TF odom -> base_link)"
+  kill_match "[v]o_node.py"
+  dexec "export LD_LIBRARY_PATH=$CU12:\$LD_LIBRARY_PATH; exec python3 $SRC/nodes/vo_node.py > /tmp/vo.log 2>&1"
+
+  echo "[pose] gyro  (D555 IMU, re-framed into base_link -> /gyro/base)"
+  kill_match "[g]yro_node.py"
+  dexec "exec python3 $SRC/nodes/gyro_node.py > /tmp/gyro.log 2>&1"
+  sleep 10
+
+  echo
+  echo "  GATE pose — rate only. Alive is not the same as HONEST:"
+  assert_rate /vo/odom   10 "visual odometry" || true
+  assert_rate /gyro/base 50 "gyro"            || true
+  echo
+  echo "  Now prove it is honest, with a tape measure:"
+  echo "      ./rover compare --expect 2.00     push 2.00 m straight"
+  echo "      ./rover compare --return          out 2.00 m and back to the mark"
+  echo "      ./rover compare --spin 360        rotate 360 deg by hand"
+  ;;
+
+# ── wheels ──────────────────────────────────────────────────────────────────
+wheels)
+  need_container
+  echo "[wheels] ESP32 -> micro-ROS agent (Pi 5) -> /wheel_state"
+  echo "         firmware publishes at 20 Hz whenever it is AGENT_CONNECTED,"
+  echo "         with no motion gating — so a low rate never means 'it was parked'."
+  echo
+  assert_rate /wheel_state 15 "wheel_state" && { echo; echo "  Wheels are live."; exit 0; }
+  echo
+  echo "  ✗ Wheel odometry is not usable. Known state as of 2026-08-15:"
+  echo "      /wheel_state arrives at a metronomic 1.000 Hz (sigma 3.4 ms over 55 samples)."
+  echo "      Packet loss is ruled out by that regularity; the ESP32 is connected"
+  echo "      in one stable micro-ROS session. But rover_firmware_v2.ino has NO"
+  echo "      1 Hz publish path — telemetry is EXECUTE_EVERY_N_MS(50,...) = 20 Hz."
+  echo "      => the flashed binary does not match the repo source."
+  echo
+  echo "    Neither the Jetson nor the Pi 5 has a flashing toolchain or USB serial,"
+  echo "    so this needs a reflash from your own machine. OTA is compiled in;"
+  echo "    the board is now at 192.168.1.3 (it moved off .12)."
+  echo
+  echo "    compare still runs without it — the wheels row just stays empty."
+  ;;
+
+# ── compare ─────────────────────────────────────────────────────────────────
+compare)
+  need_container
+  shift
+  rexec "python3 $SRC/nodes/compare.py $*"
+  ;;
+
+# ── status ──────────────────────────────────────────────────────────────────
+status)
+  need_container
+  echo "  layer          topic                            rate"
+  echo "  ---------------------------------------------------------------"
+  for pair in "camera:$CAM_NS/infra1/image_rect_raw" "camera:$CAM_NS/depth/image_rect_raw" \
+              "pose:/vo/odom" "pose:/gyro/base" "wheels:/wheel_state"; do
+    l=${pair%%:*}; t=${pair#*:}
+    printf '  %-14s %-32s %6.1f Hz\n' "$l" "$t" "$(rate_of "$t")"
+  done
+  ;;
+
+logs)
+  need_container
+  docker exec "$NAME" bash -lc "tail -n 60 -f /tmp/${2:-camera}.log"
+  ;;
+
+stop)
+  docker rm -f "$NAME" >/dev/null 2>&1 && echo "  container removed" || echo "  nothing running"
+  ;;
+
+selftest)
+  python3 "$HOSTSRC/nodes/vo_node.py" --self-test
+  ;;
+
+*)
+  sed -n '2,12p' "$0" | sed 's/^# \?//'
+  ;;
+esac
