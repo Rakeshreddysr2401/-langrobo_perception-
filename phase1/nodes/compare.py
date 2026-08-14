@@ -74,6 +74,12 @@ GYRO_BIAS_S = 5.0
 # be thrown away, not graded.
 JUMP_M = 0.15
 
+# Longest gap between /wheel_state messages we will still integrate across.
+# The ESP32 should publish at 20 Hz but currently manages 1.000 Hz, so anything
+# tighter than this throws away every sample and the wheels row reads a
+# permanent 0.0 while messages are visibly arriving.
+WHEEL_MAX_DT = 1.5
+
 # Display / logging order.
 ORDER = ('cuvslam', 'wheels', 'gyro', 'FUSED')
 
@@ -172,6 +178,7 @@ class Compare(Node):
         }
         self.t0 = time.time()
         self.wheel_last_t = None
+        self.wheel_prev = (0.0, 0.0)
         self.gyro_last_t = None
         self.gyro_yaw = 0.0
         self.gyro_bias = None        # rad/s, measured while still at startup
@@ -240,14 +247,21 @@ class Compare(Node):
         s = self.src['wheels']
         s.seen()
         now = time.time()
+        vx = (m.x + m.y) / 2.0
+        wz = (m.y - m.x) / WHEEL_BASE_M
         if self.wheel_last_t is not None:
             dt = now - self.wheel_last_t
-            # Guard against the integrator eating one huge step after a stall.
-            if 0 < dt < 0.5:
-                vx = (m.x + m.y) / 2.0
-                wz = (m.y - m.x) / WHEEL_BASE_M
-                s.integrate(vx, wz, dt)
+            if 0 < dt < WHEEL_MAX_DT:
+                # Trapezoidal, not rectangular. The firmware reports the
+                # INSTANTANEOUS velocity it measured over one 20 ms control
+                # period, so at 1 Hz we are point-sampling a signal that updates
+                # 50x faster. Assuming the last sample held for the whole second
+                # is the crudest possible estimate; averaging consecutive samples
+                # roughly halves the error when speed varies smoothly.
+                pv, pw = self.wheel_prev
+                s.integrate((vx + pv) / 2.0, (wz + pw) / 2.0, dt)
         self.wheel_last_t = now
+        self.wheel_prev = (vx, wz)
 
     def _gyro(self, m):
         s = self.src['gyro']
@@ -305,6 +319,11 @@ class Compare(Node):
                        f'keep it under 25 cm/s or the tracker loses features')
         elif self.vo_peak > 0:
             out.append(f'  push speed peak {self.vo_peak * 100:.0f} cm/s — good')
+
+        w = self.src['wheels']
+        if w.n and w.hz > 0 and w.hz < 15:
+            out.append(f'  ⚠ wheels at {w.hz:.1f} Hz, not 20 — distance is a coarse '
+                       f'estimate, treat it as a sanity check not a reference')
 
         if self.src['gyro'].n:
             if self.gyro_bias is None:
