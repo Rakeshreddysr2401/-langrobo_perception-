@@ -59,6 +59,15 @@ PATH_CHORD_M = 0.005
 # Seconds of stillness at startup used to measure gyro bias before integrating.
 GYRO_BIAS_S = 5.0
 
+# A step larger than this between consecutive /vo/odom messages is not motion.
+# At ~28 Hz this is over 4 m/s, which no hand push reaches. Measured 2026-08-15:
+# cuVSLAM teleported 202 cm in a single frame, at a healthy 28 Hz, with nothing
+# logged — it had lost tracking during a fast shove (peak 76 cm/s, against
+# 19 cm/s in the run that worked) and silently re-initialised. Every number after
+# such a jump is measured from a corrupted origin, so a run containing one must
+# be thrown away, not graded.
+JUMP_M = 0.15
+
 
 class Source:
     """One independent story about how the robot moved."""
@@ -150,6 +159,9 @@ class Compare(Node):
         self.gyro_bias = None        # rad/s, measured while still at startup
         self.gyro_cal = []           # samples collected during calibration
         self.rows = []
+        self.jumps = []              # (t, size_m) teleports seen on /vo/odom
+        self.vo_prev = None
+        self.vo_peak = 0.0           # fastest real motion seen, m/s
 
         self.create_subscription(Odometry, '/vo/odom', self._vo, qos_profile_sensor_data)
         self.create_subscription(Vector3, '/wheel_state', self._wheels, qos_profile_sensor_data)
@@ -159,8 +171,20 @@ class Compare(Node):
     def _vo(self, m):
         s = self.src['cuvslam']
         s.seen()
-        s.advance(m.pose.pose.position.x, m.pose.pose.position.y,
-                  yaw_of(m.pose.pose.orientation))
+        px, py = m.pose.pose.position.x, m.pose.pose.position.y
+
+        # Watch the RAW stream for teleports before it is folded into totals.
+        now = time.time()
+        if self.vo_prev is not None:
+            dt = now - self.vo_prev[0]
+            step = math.hypot(px - self.vo_prev[1], py - self.vo_prev[2])
+            if step > JUMP_M:
+                self.jumps.append((now - self.t0, step))
+            elif dt > 0:
+                self.vo_peak = max(self.vo_peak, step / dt)
+        self.vo_prev = (now, px, py)
+
+        s.advance(px, py, yaw_of(m.pose.pose.orientation))
 
     def _wheels(self, m):
         s = self.src['wheels']
@@ -223,6 +247,15 @@ class Compare(Node):
                            f'{s.straight * 100:11.1f}  {s.path * 100:8.1f}  {s.hz:6.1f}{flag}')
         out.append('')
 
+        if self.jumps:
+            out.append(f'  ⚠ {len(self.jumps)} POSE JUMP(S) — tracking was lost. '
+                       f'THIS RUN IS INVALID, restart it.')
+        if self.vo_peak > 0.25:
+            out.append(f'  ⚠ peak speed {self.vo_peak * 100:.0f} cm/s — too fast, '
+                       f'keep it under 25 cm/s or the tracker loses features')
+        elif self.vo_peak > 0:
+            out.append(f'  push speed peak {self.vo_peak * 100:.0f} cm/s — good')
+
         if self.src['gyro'].n:
             if self.gyro_bias is None:
                 out.append(f'  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL '
@@ -271,6 +304,16 @@ class Compare(Node):
 
         print()
         vo = self.src['cuvslam']
+        if self.jumps:
+            print(f'  ✗ RUN INVALID — {len(self.jumps)} pose jump(s), tracking was lost:')
+            for t, d in self.jumps[:5]:
+                print(f'      t={t:.1f}s   the pose teleported {d * 100:.0f} cm in one frame')
+            print(f'    Peak speed was {self.vo_peak * 100:.0f} cm/s. cuVSLAM matches features')
+            print('    between frames; move too fast and there is no overlap to match, so it')
+            print('    re-initialises and every later number is measured from a wrong origin.')
+            print('    NOT GRADED. Push slower (under ~25 cm/s) and run it again.')
+            self._write_csv()
+            return
         if vo.n == 0:
             print('  GATE: cannot grade — cuvslam never published.')
         elif a.expect:
