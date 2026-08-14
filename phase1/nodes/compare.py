@@ -46,6 +46,19 @@ from sensor_msgs.msg import Imu
 WHEEL_BASE_M = 0.34    # rover_firmware_v2.ino:100 — 34 cm between L/R wheel centres
 STALE_S = 1.0          # a source with no message for this long is shown as stale
 
+# Path is accumulated in CHORDS of at least this length, not per frame.
+# Measured 2026-08-15: parked 125 s, per-frame position noise is ~26 um. Summing
+# |delta| every frame adds a magnitude that can never cancel, so `path` ratcheted
+# up 9.0 cm while the rover sat perfectly still (`straight` stayed at 0.3 cm, so
+# the pose itself was fine — only the accumulator was lying). Waiting until the
+# pose has moved 5 mm from the last anchor point puts real travel far above the
+# noise floor. Cost: travel is quantised to 5 mm, and a crawl slower than about
+# 0.15 cm/s reads low.
+PATH_CHORD_M = 0.005
+
+# Seconds of stillness at startup used to measure gyro bias before integrating.
+GYRO_BIAS_S = 5.0
+
 
 class Source:
     """One independent story about how the robot moved."""
@@ -61,7 +74,7 @@ class Source:
         self.last_rate_t = 0.0
         self.last_rate_n = 0
         self.hz = 0.0
-        self._px = self._py = None
+        self._ax = self._ay = None      # last path anchor
 
     def seen(self):
         self.n += 1
@@ -76,9 +89,7 @@ class Source:
         c, s = math.cos(-fth), math.sin(-fth)
         self.x, self.y = c * dx - s * dy, s * dx + c * dy
         self.th = wrap(th - fth)
-        if self._px is not None:
-            self.path += math.hypot(self.x - self._px, self.y - self._py)
-        self._px, self._py = self.x, self.y
+        self._accumulate_path()
 
     def integrate(self, vx, wz, dt):
         """Dead reckoning for sources that give velocity, not pose."""
@@ -86,7 +97,17 @@ class Source:
         d = vx * dt
         self.x += d * math.cos(self.th)
         self.y += d * math.sin(self.th)
-        self.path += abs(d)
+        self._accumulate_path()
+
+    def _accumulate_path(self):
+        """Add travel in chords of >= PATH_CHORD_M, so noise cannot ratchet it up."""
+        if self._ax is None:
+            self._ax, self._ay = self.x, self.y
+            return
+        d = math.hypot(self.x - self._ax, self.y - self._ay)
+        if d >= PATH_CHORD_M:
+            self.path += d
+            self._ax, self._ay = self.x, self.y
 
     def tick_rate(self, now):
         dt = now - self.last_rate_t
@@ -126,6 +147,8 @@ class Compare(Node):
         self.wheel_last_t = None
         self.gyro_last_t = None
         self.gyro_yaw = 0.0
+        self.gyro_bias = None        # rad/s, measured while still at startup
+        self.gyro_cal = []           # samples collected during calibration
         self.rows = []
 
         self.create_subscription(Odometry, '/vo/odom', self._vo, qos_profile_sensor_data)
@@ -156,10 +179,22 @@ class Compare(Node):
         s = self.src['gyro']
         s.seen()
         now = time.time()
+
+        # A MEMS gyro has a constant offset; integrate it and the heading walks
+        # away at a steady rate. Measured 2026-08-15: 9.75 deg over 125 s parked,
+        # i.e. 0.078 deg/s — nearly 5 deg per minute, against a 10 deg gate.
+        # So: hold still at startup, average the offset, subtract it forever after.
+        if self.gyro_bias is None:
+            self.gyro_cal.append(m.angular_velocity.z)
+            if now - self.t0 >= GYRO_BIAS_S and len(self.gyro_cal) > 50:
+                self.gyro_bias = sum(self.gyro_cal) / len(self.gyro_cal)
+                self.gyro_last_t = now
+            return
+
         if self.gyro_last_t is not None:
             dt = now - self.gyro_last_t
             if 0 < dt < 0.5:
-                self.gyro_yaw = wrap(self.gyro_yaw + m.angular_velocity.z * dt)
+                self.gyro_yaw = wrap(self.gyro_yaw + (m.angular_velocity.z - self.gyro_bias) * dt)
                 s.th = self.gyro_yaw
         self.gyro_last_t = now
 
@@ -186,6 +221,15 @@ class Compare(Node):
             else:
                 out.append(f'  {key:<10} {s.x * 100:7.1f}  {s.y * 100:7.1f}  {math.degrees(s.th):8.2f}  '
                            f'{s.straight * 100:11.1f}  {s.path * 100:8.1f}  {s.hz:6.1f}{flag}')
+        out.append('')
+
+        if self.src['gyro'].n:
+            if self.gyro_bias is None:
+                out.append(f'  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL '
+                           f'({max(0.0, GYRO_BIAS_S - el):.1f}s left)')
+            else:
+                out.append(f'  gyro bias removed: {math.degrees(self.gyro_bias):+.4f} deg/s '
+                           f'({math.degrees(self.gyro_bias) * 60:+.2f} deg/min)')
         out.append('')
 
         a = self.args
@@ -217,7 +261,10 @@ class Compare(Node):
                 print(f'  {key:<10} never published — no opinion')
                 continue
             if s.gives == 'th':
-                print(f'  {key:<10} heading {math.degrees(s.th):+8.2f} deg   ({s.n} msgs, {s.hz:.1f} Hz)')
+                bias = ('' if self.gyro_bias is None
+                        else f'   [bias {math.degrees(self.gyro_bias):+.4f} deg/s removed]')
+                print(f'  {key:<10} heading {math.degrees(s.th):+8.2f} deg   '
+                      f'({s.n} msgs, {s.hz:.1f} Hz){bias}')
             else:
                 print(f'  {key:<10} straight {s.straight * 100:7.1f} cm   path {s.path * 100:7.1f} cm   '
                       f'heading {math.degrees(s.th):+7.2f} deg   ({s.n} msgs, {s.hz:.1f} Hz)')
