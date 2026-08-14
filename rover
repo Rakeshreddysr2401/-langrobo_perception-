@@ -5,6 +5,7 @@
 #   ./rover pose       + visual odometry and the gyro
 #   ./rover wheels     check the ESP32 link (diagnose only; cannot fix from here)
 #   ./rover compare    the side-by-side readout — the Phase 1 instrument
+#   ./rover values     every sensor's current reading, in one place
 #   ./rover status     what is alive right now
 #   ./rover logs <n>   tail a layer's log (camera|vo|gyro)
 #   ./rover stop       tear the container down
@@ -192,6 +193,11 @@ compare)
   ;;
 
 # ── status ──────────────────────────────────────────────────────────────────
+values)
+  need_container
+  rexec "python3 $SRC/nodes/values.py"
+  ;;
+
 status)
   need_container
   echo "  layer          topic                            rate"
