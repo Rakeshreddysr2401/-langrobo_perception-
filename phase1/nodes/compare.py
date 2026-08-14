@@ -36,6 +36,7 @@ import time
 from datetime import datetime
 
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from nav_msgs.msg import Odometry
@@ -168,7 +169,7 @@ class Compare(Node):
             s.tick_rate(now)
         el = now - self.t0
 
-        out = ['\033[H\033[J']
+        out = ['' if self.args.plain else '\033[H\033[J']
         out.append(f'  PHASE 1 — where does each sensor think it is?     t+{el:6.1f}s')
         out.append('')
         out.append('  source        x cm     y cm    th deg   straight cm   path cm      Hz')
@@ -261,7 +262,9 @@ class Compare(Node):
         print(f'\n  log: {path}\n')
 
     def _write_csv(self):
-        d = os.path.expanduser('~/rover/logs')
+        # /logs is bind-mounted to the host's rover/logs, so a run survives the
+        # container being torn down. Fall back only if it is not mounted.
+        d = '/logs' if os.path.isdir('/logs') else os.path.expanduser('~/rover-logs')
         os.makedirs(d, exist_ok=True)
         p = os.path.join(d, f'compare-{datetime.now():%Y%m%d-%H%M%S}.csv')
         head = ['t']
@@ -279,17 +282,24 @@ def main():
     ap.add_argument('--expect', type=float, metavar='M', help='grade a straight push of M metres')
     ap.add_argument('--return', dest='ret', action='store_true', help='grade an out-and-back: expect to end where you started')
     ap.add_argument('--spin', type=float, metavar='DEG', help='grade a rotation of DEG degrees')
+    ap.add_argument('--plain', action='store_true', help='do not clear the screen (for logging)')
     args, _ = ap.parse_known_args()
 
     rclpy.init()
     node = Compare(args)
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
-        node.verdict()
+    except (KeyboardInterrupt, ExternalShutdownException):
+        # Ctrl-C gives KeyboardInterrupt, SIGTERM (timeout, systemd) gives
+        # ExternalShutdownException. Both must still print the verdict — a run
+        # that ends without one has wasted a tape measurement.
+        pass
     finally:
-        node.destroy_node()
-        rclpy.try_shutdown()
+        try:
+            node.verdict()
+        finally:
+            node.destroy_node()
+            rclpy.try_shutdown()
 
 
 if __name__ == '__main__':
