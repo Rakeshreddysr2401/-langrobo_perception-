@@ -14,8 +14,7 @@ theories in this file were wrong and are recorded as dead at the bottom.
 
 | ruled out | evidence |
 |---|---|
-| `loop()` running slow | round-trip probe: the board consumed **19.71 of 20** `/cmd_vel` per second with **zero lag growth** over 12 s |
-| the flashed binary not matching source | that same probe — `cmdVelCb` and the telemetry publish are in the same `loop()`, and the inbound half is healthy |
+| the flashed binary not matching source | the sweep below reproduces exactly what the source predicts once you account for the executor blocking |
 | a second ESP32 | agent log names its client: `session established … address: 192.168.1.3:47138` |
 | WiFi / power-save | ping to `.3` is 2.4–10 ms, −36 dBm, 866 Mbit/s |
 | the Pi 5 → Jetson DDS hop | same best-effort listener, same instant: Pi 5 **1.000 Hz ±2.9 ms**, Jetson **1.000 Hz ±38.7 ms** |
@@ -25,67 +24,93 @@ theories in this file were wrong and are recorded as dead at the bottom.
 
 ### What it actually is
 
-`/wheel_state` is created with `rclc_publisher_init_best_effort`. In micro-ROS a
-best-effort message is written into an output stream buffer and only goes onto
-the wire when the XRCE session next runs — `rcl_publish` does not send it. The
-session is driven by `rclc_executor_spin_some`, so with no traffic to service
-the stream drains at about 1 Hz.
+**`loop()` runs once per inbound message, or once per second if none arrives.**
+`rclc_executor_spin_some(&executor, RCL_MS_TO_NS(5))` blocks until data is
+available rather than returning after its 5 ms timeout. The telemetry publish
+sits immediately after that call, so it can only fire as often as the call
+returns.
 
-The decisive observation is that **the telemetry rate tracks inbound traffic**:
+Proven by sweeping the rate we publish TO the board, 12 s per step:
 
-| condition | `/wheel_state` rate |
-|---|---|
-| silent | 0.996 Hz |
-| while sending `/cmd_vel` at 20 Hz | 1.87 Hz, and 11.5 Hz on an earlier run |
+| `/cmd_vel` out | `/wheel_state` in | ratio |
+|---|---|---|
+| silent | 1.00 Hz | — |
+| 2 Hz | 3.13 Hz | 1.56 |
+| 5 Hz | 5.08 Hz | 1.02 |
+| 10 Hz | 10.08 Hz | 1.01 |
+| 20 Hz | 11.76 Hz | 0.59 |
+| 40 Hz | 16.44 Hz | 0.41 |
 
-And the controlled comparison is already in the data: `/cmd_vel` is **reliable**
-and moves 19.71 msg/s on the same board, same link, same loop, while
-`/wheel_state` is **best-effort** and manages 1. Reliable streams are flushed
-inside `rmw_publish` via `uxr_run_session_until_confirm_delivery`; best-effort
-ones are not.
+It tracks 1:1 up to 10 Hz then saturates. The 2 Hz row is the giveaway: 2 from
+arriving messages plus ~1 from the idle timeout is exactly the 3.13 observed.
 
-### Fix
+### Workaround, in place now, no flash
 
-One line in `rover_firmware_v2.ino`:
+Publish zero `/cmd_vel` at 40 Hz and the board keeps turning. `logs/keepalive.py`
+does this and `./rover compare` starts it automatically. Measured **17.1 Hz**,
+gaps 58 ms against the intended 50, no gap over 800 ms. `./rover wheels` passes
+at 17.0 Hz.
 
-```c
-rclc_publisher_init_best_effort(&wheelStatePub, …)   // current
-rclc_publisher_init_default(&wheelStatePub, …)       // reliable, flushes on publish
-```
+All-zero commands cannot cause motion — `pidStep()` returns 0 for both sides —
+they only keep `lastCmdMs` fresh.
 
-The best-effort choice was deliberate (see the comment above `createEntities`) on
-the reasoning that high-rate telemetry should not be reliable. On this transport
-that reasoning is inverted. Needs an OTA flash.
+**Never run the keepalive while teleoperating.** It publishes to `/cmd_vel`, so
+it would interleave with real commands and make the rover stutter. Hand-pushed
+measurement runs only.
 
-**Still unconfirmed:** whether the board emits 1 UDP packet/s or 20 that the
-agent then drops. Needs root on the Pi 5:
+### Proper fix, still to do
 
-```bash
-ssh -t 192.168.1.16 "sudo timeout 10 tcpdump -i any -nn 'src 192.168.1.3 and udp' -w /dev/null"
-```
+Stop `loop()` blocking on the executor. Options, cheapest first:
 
-~10 packets → the flush theory above is confirmed, flash the fix.
-~200 packets → the board is fine and the **agent** is dropping; do not flash.
+1. `rclc_executor_spin_some(&executor, 0)` — non-blocking poll, so `loop()` free-runs
+   at its `delay(1)` rate and the 50 ms timer fires properly. One line, but
+   untested: if the timeout is being ignored entirely, zero may block too.
+2. Set a spin period on the executor (`rclc_executor_set_timeout`) explicitly.
+3. Move telemetry into `controlTask`, which provably runs at 50 Hz on its own
+   core. **Risky** — micro-ROS sessions are not thread-safe, so this needs the
+   publish handed to `loop()` rather than called from the task.
+
+Do this next time the board is being flashed anyway; the workaround holds until
+autonomous driving, where nav2's own `/cmd_vel` stream keeps `loop()` fed.
+
+### Confirmed not the cause
+
+Reliable QoS was flashed on 2026-08-15 (`e580d5e`) on the theory that
+best-effort messages sat unflushed in an output stream. `ros2 topic info -v`
+confirms the publisher is now `RELIABLE` and the rate was **still exactly
+1.000 Hz**. The theory was wrong. The change is harmless and has been kept, but
+it is not the fix.
+
+That flash also invalidated the round-trip probe that appeared to show `loop()`
+consuming 19.71 cmd/s with zero lag: micro-ROS keeps a shallow input queue that
+retains the newest message, so "lag 0" appears no matter how slowly `loop()`
+runs. **The sweep above is the measurement to trust**, because it varies the
+input rate instead of assuming queue semantics.
 
 ### Dead theories, kept so they are not re-litigated
 
-- ~~"the flashed binary is not built from this source"~~ — the inbound half of
-  the same `loop()` works perfectly.
-- ~~"`loop()` is blocked by `ArduinoOTA.handle()` or the WiFi stack"~~ — measured
-  fast.
+- ~~"the flashed binary is not built from this source"~~ — the source predicts
+  the observed behaviour exactly once the executor block is accounted for. Cost
+  two pointless reflashes; the lesson is that "the binary must be wrong" is what
+  you reach for when the real mechanism is in a library you did not read.
+- ~~"`loop()` is blocked by `ArduinoOTA.handle()` or the WiFi stack"~~ — right
+  that `loop()` was blocked, wrong about where.
 - ~~"`controlTask` (prio 2, core 1) starves `loopTask` (prio 1, core 1)"~~ —
-  plausible on inspection, but it blocks on `vTaskDelayUntil(20 ms)` and the
-  measurement says `loop()` is fast.
+  plausible on inspection, but it blocks on `vTaskDelayUntil(20 ms)`, and
+  starvation cannot explain the rate tracking inbound traffic 1:1.
+- ~~"best-effort messages sit unflushed in an output stream"~~ — flashed
+  reliable, publisher confirms `RELIABLE`, rate unchanged at 1.000 Hz.
 - ~~"rate at the Pi 5 is 1 Hz, measured with `ros2 topic hz`"~~ — that tool
-  defaults to **reliable** QoS, which is incompatible with this best-effort
-  publisher and silently receives nothing. The number happened to be right;
-  the method was not. Always measure this topic with `qos_profile_sensor_data`.
+  defaulted to **reliable** QoS, incompatible with what was then a best-effort
+  publisher, and silently received nothing. The number happened to be right;
+  the method was not. Now moot (the publisher is reliable), but measure with
+  `qos_profile_sensor_data` regardless.
 
-**Consequence while unfixed:** at 1 Hz the wheels are a coarse sanity check, not
-a reference. `compare.py` integrates them trapezoidally across gaps up to
-`WHEEL_MAX_DT`, but the firmware reports *instantaneous* velocity measured over
-one 20 ms control period, so at 1 Hz we point-sample a signal that updates 50×
-faster.
+**Consequence at 1 Hz, if the keepalive is ever not running:** the wheels are a
+coarse sanity check, not a reference. `compare.py` integrates them trapezoidally
+across gaps up to `WHEEL_MAX_DT`, but the firmware reports *instantaneous*
+velocity measured over one 20 ms control period, so at 1 Hz we point-sample a
+signal that updates 50× faster. At 17 Hz that objection largely goes away.
 
 ---
 

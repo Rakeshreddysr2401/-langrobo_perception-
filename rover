@@ -189,7 +189,18 @@ compare)
   # shutdown path — no verdict printed and no CSV written. Every run before
   # 2026-08-15 20:28 was lost that way.
   ttyflag=""; [ -t 0 ] && ttyflag="-it"
+
+  # The ESP32's loop() blocks in rclc_executor_spin_some until a message
+  # arrives, so /wheel_state comes out at whatever rate we talk TO the board:
+  # silent 1.0 Hz, 40 Hz in -> ~17 Hz out. nav2 keeps it fed while driving, but
+  # a hand-pushed gate run publishes nothing, which is why the wheels row read
+  # 1 Hz all along. Zero commands cannot move anything (pidStep returns 0 for
+  # both sides), they only keep loop() turning. See TODO.md section 1.
+  kill_match 'keepalive.py'
+  dexec "python3 /logs/keepalive.py 40 > /tmp/keepalive.log 2>&1"
+  sleep 2
   docker exec $ttyflag "$NAME" bash -lc "$ENVSET python3 $SRC/nodes/compare.py $*"
+  kill_match 'keepalive.py'
   ;;
 
 # ── status ──────────────────────────────────────────────────────────────────
