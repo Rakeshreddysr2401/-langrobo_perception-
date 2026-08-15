@@ -2,22 +2,31 @@
 
 ## Why this needs doing
 
-`/wheel_state` arrives at a metronomic **1.000 Hz** (min 0.989, max 1.012,
-σ = 3.4 ms over 55 samples). That regularity rules out packet loss — it is a
-timer.
+**One line changed on 2026-08-15: `/wheel_state` is now a RELIABLE publisher.**
+That is the whole fix for the 1 Hz problem, and it needs a flash to take effect.
 
-The board is healthy in every other respect:
+`/wheel_state` was arriving at a metronomic **1.000 Hz** (±2.9 ms measured at the
+agent) while `loop()` was publishing at 20 Hz. The code was never wrong — a
+best-effort message in micro-ROS is written into an output stream buffer and only
+reaches the wire when the XRCE session next runs, so 19 of every 20 messages sat
+in that buffer. Reliable streams are flushed inside `rmw_publish`, so they leave
+at once.
 
-- `langrobo-microros.service` on the Pi 5 exists, is enabled, and starts at boot
-- the ESP32 holds **one stable session** (`_CREATED_BY_BARE_DDS_APP_`), so it is
-  `AGENT_CONNECTED`, not reconnecting in a loop
-- it answers at `192.168.1.3` (it moved off `.12` — DHCP)
+Everything else about the board was already proven healthy:
 
-But `rover_firmware_v2.ino` publishes `/wheel_state` **only** in the
-`AGENT_CONNECTED` branch, at `EXECUTE_EVERY_N_MS(50, …)` = 20 Hz. No state in it
-publishes at 1 Hz, and the macro's `static` is correctly scoped per expansion.
+- it consumed **19.71 of 20** `/cmd_vel` per second with zero lag — `loop()` is fast
+- both encoders verified by hand, correct channels, correct sign
+- one stable micro-ROS session at `192.168.1.3`, no reconnect loop
+- ping 2.4–10 ms at −36 dBm; the WiFi is not the problem
 
-**So the flashed binary is not built from this source.** Reflashing is the fix.
+Full diagnosis, including everything that was ruled out, is in `TODO.md` §1.
+
+**If this flash does not raise the rate**, the remaining possibility is that the
+board emits 20 packets/s and the agent discards them. Settle it with:
+
+```bash
+ssh -t 192.168.1.16 "sudo timeout 10 tcpdump -i any -nn 'src 192.168.1.3 and udp' -w /dev/null"
+```
 
 ## What it unblocks
 

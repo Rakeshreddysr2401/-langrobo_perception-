@@ -281,12 +281,22 @@ bool createEntities() {
     // Commands IN use RELIABLE QoS: best_effort was dropping /cmd_vel over WiFi, so
     // the 500ms watchdog kept zeroing the target -> slow / twitchy / pivot wheel
     // never sustained. Reliable guarantees small command msgs arrive (matches nav2
-    // + teleop reliable publishers). Only the high-rate telemetry OUT is best_effort.
+    // + teleop reliable publishers).
     if (rclc_subscription_init_default(&cmdVelSub, &node,
             ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist), "/cmd_vel") != RCL_RET_OK) return false;
     if (rclc_subscription_init_default(&pidGainsSub, &node,
             ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Vector3), "/pid_gains") != RCL_RET_OK) return false;
-    if (rclc_publisher_init_best_effort(&wheelStatePub, &node,
+    // Telemetry OUT is RELIABLE, which reads backwards for a 20 Hz stream. It is
+    // not about delivery guarantees, it is about when the message is sent.
+    // micro-ROS writes a best_effort message into an output stream buffer and
+    // only puts it on the wire when the XRCE session next runs; rcl_publish
+    // does not flush it. With nothing else talking to the board that drained at
+    // 1.000 Hz (+/-2.9 ms measured at the agent) while this loop was publishing
+    // at 20 Hz -- 19 of every 20 messages sat in the buffer. Reliable streams
+    // are flushed inside rmw_publish via uxr_run_session_until_confirm_delivery,
+    // so the message leaves immediately. /cmd_vel proves reliable sustains
+    // 19.71 msg/s on this link. See TODO.md section 1.
+    if (rclc_publisher_init_default(&wheelStatePub, &node,
             ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Vector3), "/wheel_state") != RCL_RET_OK) return false;
 
     rclc_executor_init(&executor, &support.context, 2, &allocator);   // 2 subs
