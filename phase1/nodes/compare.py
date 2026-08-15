@@ -35,6 +35,7 @@ Ctrl-C ends a run and prints the verdict. Every run is also written to CSV.
 """
 import argparse
 import csv
+import json
 import math
 import os
 import sys
@@ -48,6 +49,7 @@ from rclpy.qos import qos_profile_sensor_data
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Vector3
 from sensor_msgs.msg import Imu
+from std_msgs.msg import String
 
 WHEEL_BASE_M = 0.34    # rover_firmware_v2.ino:100 — 34 cm between L/R wheel centres
 STALE_S = 1.0          # a source with no message for this long is shown as stale
@@ -73,6 +75,14 @@ GYRO_BIAS_S = 5.0
 # such a jump is measured from a corrupted origin, so a run containing one must
 # be thrown away, not graded.
 JUMP_M = 0.15
+# Fastest a person plausibly pushes this rover by hand. Anything above it is the
+# tracker re-initialising, not motion, however small the step.
+MAX_PUSH_MS = 1.0
+# Below this many tracked landmarks cuVSLAM has too little to match against. The
+# operator reported jumps "near walls" and "coming back" — a blank wall with the
+# IR emitter off carries almost no texture, so this is the number that should
+# collapse just before a teleport. Recorded at every jump to test that.
+LOW_LANDMARKS = 30
 
 # Longest gap between /wheel_state messages we will still integrate across.
 # The ESP32 should publish at 20 Hz but currently manages 1.000 Hz, so anything
@@ -187,13 +197,16 @@ class Compare(Node):
         self.gyro_bias = None        # rad/s, measured while still at startup
         self.gyro_cal = []           # samples collected during calibration
         self.rows = []
-        self.jumps = []              # (t, size_m) teleports seen on /vo/odom
+        self.jumps = []              # (t, size_m, landmarks) teleports on /vo/odom
         self.vo_prev = None
         self.vo_peak = 0.0           # fastest real motion seen, m/s
+        self.landmarks = -1          # latest from /vo/status, -1 = never seen
+        self.landmarks_min = None
 
         self.create_subscription(Odometry, '/vo/odom', self._vo, qos_profile_sensor_data)
         self.create_subscription(Vector3, '/wheel_state', self._wheels, qos_profile_sensor_data)
         self.create_subscription(Imu, '/gyro/base', self._gyro, qos_profile_sensor_data)
+        self.create_subscription(String, '/vo/status', self._status, 10)
         self.create_timer(0.25, self._draw)
 
     def _vo(self, m):
@@ -207,15 +220,40 @@ class Compare(Node):
         if self.vo_prev is not None:
             dt = now - self.vo_prev[0]
             step = math.hypot(px - self.vo_prev[1], py - self.vo_prev[2])
-            if step > JUMP_M:
-                self.jumps.append((now - self.t0, step))
+            speed = step / dt if dt > 0 else 0.0
+
+            # Two tests, not one. A fixed 15 cm threshold lets a 14.7 cm hop in a
+            # single 33 ms frame through as "real motion" -- which reads as
+            # 442 cm/s and then gets reported as the operator pushing too fast.
+            # Nobody hand-pushes a rover at 4.4 m/s, so any step implying more
+            # than MAX_PUSH_MS is a teleport whatever its size.
+            if step > JUMP_M or speed > MAX_PUSH_MS:
+                self.jumps.append((now - self.t0, step, self.landmarks))
             else:
-                if dt > 0:
-                    self.vo_peak = max(self.vo_peak, step / dt)
+                self.vo_peak = max(self.vo_peak, speed)
                 self._fuse(px, py, pth)
         self.vo_prev = (now, px, py, pth)
 
         s.advance(px, py, pth)
+
+    def _status(self, m):
+        """Track cuVSLAM's landmark count — the number that should explain jumps.
+
+        A teleport is the tracker failing to match features between frames. The
+        landmark count is how many it currently holds, so if the operator's
+        observation is right (jumps near walls, jumps reversing) this collapses
+        first. Recorded per jump so the correlation is visible rather than
+        argued about.
+        """
+        try:
+            d = json.loads(m.data)
+        except (ValueError, TypeError):
+            return
+        n = d.get('landmarks')
+        if isinstance(n, (int, float)):
+            self.landmarks = int(n)
+            if self.landmarks_min is None or self.landmarks < self.landmarks_min:
+                self.landmarks_min = self.landmarks
 
     def _fuse(self, px, py, pth):
         """Distance from cuVSLAM, heading from the gyro.
@@ -336,6 +374,11 @@ class Compare(Node):
                        f'keep it under 25 cm/s or the tracker loses features')
         elif self.vo_peak > 0:
             out.append(f'  push speed peak {self.vo_peak * 100:.0f} cm/s — good')
+        if self.landmarks >= 0:
+            tag = '  ← TOO FEW, tracking is fragile here' \
+                  if self.landmarks < LOW_LANDMARKS else ''
+            out.append(f'  landmarks {self.landmarks:4d}  (lowest seen '
+                       f'{self.landmarks_min if self.landmarks_min is not None else 0}){tag}')
 
         w = self.src['wheels']
         if w.n and w.hz > 0 and w.hz < 15:
@@ -403,12 +446,34 @@ class Compare(Node):
         vo = self.src['cuvslam']
         if self.jumps:
             print(f'  ✗ RUN INVALID — {len(self.jumps)} pose jump(s), tracking was lost:')
-            for t, d in self.jumps[:5]:
-                print(f'      t={t:.1f}s   the pose teleported {d * 100:.0f} cm in one frame')
-            print(f'    Peak speed was {self.vo_peak * 100:.0f} cm/s. cuVSLAM matches features')
-            print('    between frames; move too fast and there is no overlap to match, so it')
-            print('    re-initialises and every later number is measured from a wrong origin.')
-            print('    NOT GRADED. Push slower (under ~25 cm/s) and run it again.')
+            for t, d, lm in self.jumps[:5]:
+                lmtxt = '' if lm < 0 else f'   landmarks {lm}'
+                print(f'      t={t:.1f}s   the pose teleported {d * 100:.0f} cm '
+                      f'in one frame{lmtxt}')
+
+            # Was it speed, or was it a featureless scene? These need different
+            # answers -- push slower vs move somewhere with texture -- and
+            # blaming speed by default sent the operator to fix the wrong thing.
+            lms = [lm for _, _, lm in self.jumps if lm >= 0]
+            starved = [lm for lm in lms if lm < LOW_LANDMARKS]
+            print()
+            print(f'    real peak push speed {self.vo_peak * 100:.0f} cm/s '
+                  f'(teleports excluded)')
+            if lms:
+                print(f'    landmarks at the jumps: min {min(lms)}, median '
+                      f'{sorted(lms)[len(lms) // 2]}, max {max(lms)}')
+            if lms and len(starved) >= max(1, len(lms) // 2):
+                print('    => MOSTLY A FEATURELESS SCENE, not speed. cuVSLAM had too')
+                print('       few landmarks to match against. A blank wall with the IR')
+                print('       emitter off has almost no texture. Run where the camera')
+                print('       can see furniture, edges, clutter — not a bare wall.')
+            elif self.vo_peak > 0.25:
+                print('    => TOO FAST. Keep it under ~25 cm/s: cuVSLAM matches features')
+                print('       between frames, and past that there is no overlap to match.')
+            else:
+                print('    => Neither speed nor landmark starvation stands out. Suspect')
+                print('       reversing (measured much worse than forward) or motion blur.')
+            print('    NOT GRADED. Fix the above and run it again.')
             self._write_csv()
             return
         if vo.n == 0:
