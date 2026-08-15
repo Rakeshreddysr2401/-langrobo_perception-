@@ -4,46 +4,88 @@ Status: 🔴 blocks a gate · 🟠 real, worked around · 🟡 unverified · ⚪
 
 ---
 
-## 🔴 1. `/wheel_state` publishes at 1.000 Hz, not 20 Hz — cause unknown
+## 🔴 1. `/wheel_state` publishes at 1.000 Hz, not 20 Hz
 
-**Reflashing did not fix it**, so the original "wrong binary" theory is probably
-wrong.
+**The cause is the best-effort output stream on the ESP32, not the firmware
+logic and not the network.** Diagnosed 2026-08-15 afternoon. Several earlier
+theories in this file were wrong and are recorded as dead at the bottom.
 
-Measured 2026-08-15:
+### What is ruled out, and by what
 
-| check | result |
+| ruled out | evidence |
 |---|---|
-| rate at the Pi 5, beside the agent | **1.000 Hz**, min 0.989 max 1.012, **σ 3.4 ms** |
-| so, packet loss? | ruled out — random loss cannot give 3 ms jitter |
-| session churn in a 20 s window | **zero** new sessions — it is not reconnect-looping |
-| publisher identity | `_CREATED_BY_BARE_DDS_APP_`, i.e. genuinely the ESP32 |
-| systemd agent | `langrobo-microros.service` enabled and running |
-| after reflash | **unchanged, still 1.000 Hz** |
+| `loop()` running slow | round-trip probe: the board consumed **19.71 of 20** `/cmd_vel` per second with **zero lag growth** over 12 s |
+| the flashed binary not matching source | that same probe — `cmdVelCb` and the telemetry publish are in the same `loop()`, and the inbound half is healthy |
+| a second ESP32 | agent log names its client: `session established … address: 192.168.1.3:47138` |
+| WiFi / power-save | ping to `.3` is 2.4–10 ms, −36 dBm, 866 Mbit/s |
+| the Pi 5 → Jetson DDS hop | same best-effort listener, same instant: Pi 5 **1.000 Hz ±2.9 ms**, Jetson **1.000 Hz ±38.7 ms** |
+| packet loss | ±2.9 ms on a 1000.1 ms gap is a timer; random loss cannot be that regular |
+| burst-then-idle buffering | zero inter-arrival gaps under 100 ms — it is genuinely one message per second |
+| dead encoders | see §10 — both sides verified by hand |
 
-`rover_firmware_v2.ino` publishes `/wheel_state` **only** in `AGENT_CONNECTED`,
-at `EXECUTE_EVERY_N_MS(50, …)` = 20 Hz. No state publishes at 1 Hz, and the
-macro's `static` is correctly scoped per expansion. `EXECUTE_EVERY_N_MS(50, …)`
-can only fire as often as `loop()` iterates — so **`loop()` is running at ~1 Hz**,
-blocked by something. `ArduinoOTA.handle()` and the WiFi stack are the suspects.
+### What it actually is
 
-**The one test that would settle it, not yet done:** connect the ESP32 to the
-Pi 5 by USB and read its debug serial. `DEBUG_SERIAL` prints
-`IN vx=… | OUT velL=… dt=0.020` at ~2 Hz from the control task, which runs on its
-own FreeRTOS task independent of WiFi.
+`/wheel_state` is created with `rclc_publisher_init_best_effort`. In micro-ROS a
+best-effort message is written into an output stream buffer and only goes onto
+the wire when the XRCE session next runs — `rcl_publish` does not send it. The
+session is driven by `rclc_executor_spin_some`, so with no traffic to service
+the stream drains at about 1 Hz.
 
-- lines at ~2 Hz with `dt≈20 ms` → control loop healthy, fault is inside `loop()`
-- much slower → the whole board is slow, micro-ROS is innocent
-- no lines at all → the running binary is not the one we think
+The decisive observation is that **the telemetry rate tracks inbound traffic**:
 
-A reader is already staged at `~/esp32_serial.py` **on the Pi 5**. It needs
-`sudo chmod a+rw /dev/ttyUSB*` first — the user is not in `dialout`.
+| condition | `/wheel_state` rate |
+|---|---|
+| silent | 0.996 Hz |
+| while sending `/cmd_vel` at 20 Hz | 1.87 Hz, and 11.5 Hz on an earlier run |
 
-**Deferred by choice 2026-08-15: continuing over WiFi for now.**
+And the controlled comparison is already in the data: `/cmd_vel` is **reliable**
+and moves 19.71 msg/s on the same board, same link, same loop, while
+`/wheel_state` is **best-effort** and manages 1. Reliable streams are flushed
+inside `rmw_publish` via `uxr_run_session_until_confirm_delivery`; best-effort
+ones are not.
 
-**Consequence:** at 1 Hz the wheels are a coarse sanity check, not a reference.
-`compare.py` integrates them trapezoidally across gaps up to `WHEEL_MAX_DT`, but
-the firmware reports *instantaneous* velocity measured over one 20 ms control
-period, so at 1 Hz we point-sample a signal that updates 50× faster.
+### Fix
+
+One line in `rover_firmware_v2.ino`:
+
+```c
+rclc_publisher_init_best_effort(&wheelStatePub, …)   // current
+rclc_publisher_init_default(&wheelStatePub, …)       // reliable, flushes on publish
+```
+
+The best-effort choice was deliberate (see the comment above `createEntities`) on
+the reasoning that high-rate telemetry should not be reliable. On this transport
+that reasoning is inverted. Needs an OTA flash.
+
+**Still unconfirmed:** whether the board emits 1 UDP packet/s or 20 that the
+agent then drops. Needs root on the Pi 5:
+
+```bash
+ssh -t 192.168.1.16 "sudo timeout 10 tcpdump -i any -nn 'src 192.168.1.3 and udp' -w /dev/null"
+```
+
+~10 packets → the flush theory above is confirmed, flash the fix.
+~200 packets → the board is fine and the **agent** is dropping; do not flash.
+
+### Dead theories, kept so they are not re-litigated
+
+- ~~"the flashed binary is not built from this source"~~ — the inbound half of
+  the same `loop()` works perfectly.
+- ~~"`loop()` is blocked by `ArduinoOTA.handle()` or the WiFi stack"~~ — measured
+  fast.
+- ~~"`controlTask` (prio 2, core 1) starves `loopTask` (prio 1, core 1)"~~ —
+  plausible on inspection, but it blocks on `vTaskDelayUntil(20 ms)` and the
+  measurement says `loop()` is fast.
+- ~~"rate at the Pi 5 is 1 Hz, measured with `ros2 topic hz`"~~ — that tool
+  defaults to **reliable** QoS, which is incompatible with this best-effort
+  publisher and silently receives nothing. The number happened to be right;
+  the method was not. Always measure this topic with `qos_profile_sensor_data`.
+
+**Consequence while unfixed:** at 1 Hz the wheels are a coarse sanity check, not
+a reference. `compare.py` integrates them trapezoidally across gaps up to
+`WHEEL_MAX_DT`, but the firmware reports *instantaneous* velocity measured over
+one 20 ms control period, so at 1 Hz we point-sample a signal that updates 50×
+faster.
 
 ---
 
@@ -135,6 +177,27 @@ check**. Recovery is unplug 5 s, replug, then `./rover camera`.
 nor its 57.8 GB base has a recipe. If it is deleted, everything stops. The only
 insurance is `docker save` to external storage. `/` has ~45 GB free of 227 GB, so
 this needs somewhere else to go.
+
+---
+
+## ✅ 10. Encoders — both sides verified good (2026-08-15)
+
+Rover lifted, each wheel spun by hand in isolation, watching `/wheel_state`
+(`x = velL`, `y = velR`, computed in the 50 Hz control task on its own core):
+
+| spun | velL | velR |
+|---|---|---|
+| LEFT wheel, right held still | **14 of 15 samples non-zero, peak 0.068** | 0.000 throughout |
+
+Left drives the left channel, right drives the right, correct sign, no
+crosstalk. So the encoders, `ENC_*_DIR`, `METRES_PER_COUNT` and the control task
+are all sound, and §1 is purely a transport problem.
+
+**Beware a false negative here.** A first attempt reported "LEFT encoder: NO
+SIGNAL" simply because samples arrive once a second and the test's phase
+boundaries did not line up with which wheel was being spun. Any hand test on
+this rig must name one wheel and hold the others still —
+`logs/spin_one.py` does that.
 
 ---
 
