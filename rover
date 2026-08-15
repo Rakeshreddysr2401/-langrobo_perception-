@@ -205,17 +205,14 @@ compare)
   # 2026-08-15 20:28 was lost that way.
   ttyflag=""; [ -t 0 ] && ttyflag="-it"
 
-  # The ESP32's loop() blocks in rclc_executor_spin_some until a message
-  # arrives, so /wheel_state comes out at whatever rate we talk TO the board:
-  # silent 1.0 Hz, 40 Hz in -> ~17 Hz out. nav2 keeps it fed while driving, but
-  # a hand-pushed gate run publishes nothing, which is why the wheels row read
-  # 1 Hz all along. Zero commands cannot move anything (pidStep returns 0 for
-  # both sides), they only keep loop() turning. See TODO.md section 1.
+  # No keepalive here any more. It existed to work around loop() blocking in
+  # rclc_executor_spin_some, and the firmware fix (timeout 0) removed the need:
+  # /wheel_state now runs at 20.3 Hz with nothing publishing to the board. Keep
+  # logs/keepalive.py as a fallback if a future flash regresses, but do not run
+  # it by default — it publishes /cmd_vel continuously, which keeps the 500 ms
+  # motion watchdog permanently fed and would mask a teleop fault.
   kill_match 'keepalive.py'
-  dexec "python3 /logs/keepalive.py 40 > /tmp/keepalive.log 2>&1"
-  sleep 2
   docker exec $ttyflag "$NAME" bash -lc "$ENVSET python3 $SRC/nodes/compare.py $*"
-  kill_match 'keepalive.py'
   ;;
 
 # ── status ──────────────────────────────────────────────────────────────────

@@ -179,6 +179,9 @@ class Compare(Node):
         self.t0 = time.time()
         self.wheel_last_t = None
         self.wheel_prev = (0.0, 0.0)
+        self.wheel_moved_l = False
+        self.wheel_moved_r = False
+        self.wheel_dead_side = None
         self.gyro_last_t = None
         self.gyro_yaw = 0.0
         self.gyro_bias = None        # rad/s, measured while still at startup
@@ -249,6 +252,20 @@ class Compare(Node):
         now = time.time()
         vx = (m.x + m.y) / 2.0
         wz = (m.y - m.x) / WHEEL_BASE_M
+
+        # Watch for one side reading a hard zero while the other moves. Both LEFT
+        # encoders died on 2026-08-15 (they worked three hours earlier), and the
+        # arithmetic above turns that into a rover that appears to spin: velL is
+        # pinned at 0 so wz = velR / 0.34 forever. Without this flag the wheels
+        # row just prints a confident wrong heading, which is worse than printing
+        # nothing. Detection is asymmetric on purpose -- both sides at zero is a
+        # parked rover, not a fault.
+        if abs(m.x) > 0.01:
+            self.wheel_moved_l = True
+        if abs(m.y) > 0.01:
+            self.wheel_moved_r = True
+        if self.wheel_moved_l != self.wheel_moved_r:
+            self.wheel_dead_side = 'LEFT' if self.wheel_moved_r else 'RIGHT'
         if self.wheel_last_t is not None:
             dt = now - self.wheel_last_t
             if 0 < dt < WHEEL_MAX_DT:
@@ -342,6 +359,11 @@ class Compare(Node):
             out.append('  target: out and back to the SAME mark   pass: straight <= 10.0 cm')
         elif a.spin:
             out.append(f'  target: rotate {a.spin:.0f} deg by hand   pass: |error| <= 10 deg')
+        if self.wheel_dead_side:
+            out.append('')
+            out.append(f'  !! {self.wheel_dead_side} encoders reading zero while the other side moves.')
+            out.append('     IGNORE the wheels row — it will report a turn that is not happening.')
+            out.append('     cuvslam, gyro and FUSED are unaffected.')
         out.append('')
         out.append('  Ctrl-C to finish and grade.')
         print('\n'.join(out), flush=True)
@@ -357,6 +379,12 @@ class Compare(Node):
     def verdict(self):
         a = self.args
         print('\n\n  ── result ' + '─' * 58)
+        if self.wheel_dead_side:
+            print(f'  NOTE: {self.wheel_dead_side} encoders read zero throughout while the other')
+            print('  side moved. The wheels row below is arithmetic on a dead input —')
+            print('  disregard it. The gates are graded on cuvslam / gyro / FUSED,')
+            print('  none of which use the wheels.')
+            print()
         for key in ORDER:
             s = self.src[key]
             if s.n == 0:
