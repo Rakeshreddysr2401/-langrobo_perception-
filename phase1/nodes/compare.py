@@ -125,6 +125,17 @@ YAW_TRUST_VO = 0.001
 # no ordinary manoeuvre produces.
 DEAD_SIDE_SAMPLES = 100
 
+# Continuous gyro-bias tracking. Measured on 2026-08-15 across three runs, the
+# offset was +0.0838, +0.1050 and +0.1808 deg/s -- it moves as the board warms,
+# so a five-second average taken at startup goes stale and starts adding error
+# instead of removing it. Per sample at ~200 Hz this is a ~25 s time constant:
+# slow enough that noise cannot move it, fast enough to follow a warm-up.
+BIAS_ADAPT = 2.0e-4
+# Below these, both witnesses agree the rover is parked and the gyro is reading
+# pure bias. Wheels in m/s, cuVSLAM in m/s.
+STILL_WHEEL_MS = 0.010
+STILL_VO_MS = 0.010
+
 # Longest gap between /wheel_state messages we will still integrate across.
 # The ESP32 should publish at 20 Hz but currently manages 1.000 Hz, so anything
 # tighter than this throws away every sample and the wheels row reads a
@@ -247,6 +258,9 @@ class Compare(Node):
         self.pitch = None
         self.pitch_still = []        # accel-only pitch while stationary = mount pitch
         self.fused_yaw = 0.0
+        self.gyro_prev_yaw = 0.0
+        self.bias_updates = 0
+        self.vo_speed = 0.0
         self.enc_path_prev = 0.0
         self.enc_corrections = 0     # how many steps the encoders actually rescaled
         self.accel = (0.0, 0.0, 0.0)      # raw, base_link frame
@@ -286,6 +300,7 @@ class Compare(Node):
             if step > JUMP_M or speed > MAX_PUSH_MS:
                 self.jumps.append((now - self.t0, step, self.landmarks))
             else:
+                self.vo_speed = speed
                 self.vo_peak = max(self.vo_peak, speed)
                 self._fuse(px, py, pth)
         self.vo_prev = (now, px, py, pth)
@@ -348,8 +363,18 @@ class Compare(Node):
 
         # ── heading: gyro, pulled slowly onto cuVSLAM so bias cannot run away ──
         vo_th = self.src['cuvslam'].th
-        err = wrap(vo_th - self.gyro_yaw)
-        self.fused_yaw = wrap(self.gyro_yaw + err * YAW_TRUST_VO)
+        # Recursive, on its OWN previous value. Written as
+        #     fused = gyro_yaw + err * k
+        # the correction never accumulated -- every message recomputed it from
+        # gyro_yaw, so the result stayed 99.9% gyro no matter how long it ran.
+        # Measured 2026-08-15: parked 107 s, cuVSLAM held +0.01 deg, the gyro
+        # walked to -9.52 deg, and FUSED reported -9.51. The filter was doing
+        # nothing at all. Integrating the gyro's STEP onto the fused state and
+        # then pulling that toward cuVSLAM is what actually bounds the drift.
+        self.fused_yaw = wrap(self.fused_yaw + wrap(self.gyro_yaw - self.gyro_prev_yaw))
+        self.fused_yaw = wrap(self.fused_yaw
+                              + wrap(vo_th - self.fused_yaw) * YAW_TRUST_VO)
+        self.gyro_prev_yaw = self.gyro_yaw
 
         # ── distance: encoders if both sides are alive, else cuVSLAM ──────────
         vo_step = math.hypot(bx, by)
@@ -432,16 +457,33 @@ class Compare(Node):
         self.gyro_xyz = (m.angular_velocity.x, m.angular_velocity.y,
                          m.angular_velocity.z)
 
-        # A MEMS gyro has a constant offset; integrate it and the heading walks
-        # away at a steady rate. Measured 2026-08-15: 9.75 deg over 125 s parked,
-        # i.e. 0.078 deg/s — nearly 5 deg per minute, against a 10 deg gate.
-        # So: hold still at startup, average the offset, subtract it forever after.
+        # A MEMS gyro has an offset; integrate it and the heading walks away at a
+        # steady rate. Measure it while still at startup and subtract it after.
+        #
+        # BUT THE OFFSET IS NOT CONSTANT. Three runs on 2026-08-15 measured it at
+        # +0.0838, +0.1050 and +0.1808 deg/s — better than a factor of two apart,
+        # and it moves with temperature as the board warms. Subtracting a stale
+        # five-second average is then worse than useless: on the third run it
+        # OVER-corrected and the heading walked -9.52 deg in 107 s with the rover
+        # standing still. Against a 10 deg gate that is nearly a failure produced
+        # entirely by a parked robot.
+        #
+        # So the bias is re-measured continuously. Any moment the rover is known
+        # to be still, whatever the gyro reads IS the bias by definition, and it
+        # is eased toward that. See _still().
         if self.gyro_bias is None:
             self.gyro_cal.append(m.angular_velocity.z)
             if now - self.t0 >= GYRO_BIAS_S and len(self.gyro_cal) > 50:
                 self.gyro_bias = sum(self.gyro_cal) / len(self.gyro_cal)
                 self.gyro_last_t = now
             return
+
+        if self._still():
+            # Standing still, so every rad/s the gyro reports is offset. Ease
+            # toward it rather than jumping: a single noisy sample must not
+            # become the bias, but a slow warm-up drift must be followed.
+            self.gyro_bias += (m.angular_velocity.z - self.gyro_bias) * BIAS_ADAPT
+            self.bias_updates += 1
 
         if self.gyro_last_t is not None:
             dt = now - self.gyro_last_t
@@ -450,6 +492,24 @@ class Compare(Node):
                 s.th = self.gyro_yaw
                 self._attitude(m, dt)
         self.gyro_last_t = now
+
+    def _still(self):
+        """Is the rover definitely not moving?
+
+        Deliberately conservative — a false 'still' while turning would absorb
+        real rotation into the bias and permanently corrupt the heading. So it
+        needs BOTH independent witnesses to agree there is no motion: the wheels
+        (which cannot be fooled by a textureless scene) and cuVSLAM (which cannot
+        be fooled by wheels spinning on a slippery floor).
+        """
+        if self.src['wheels'].n == 0 or self.src['cuvslam'].n == 0:
+            return False
+        if time.time() - self.src['wheels'].last_msg > 1.0:
+            return False                      # no fresh wheel data; do not guess
+        velL, velR = self.wheel_prev
+        if abs(velL) > STILL_WHEEL_MS or abs(velR) > STILL_WHEEL_MS:
+            return False
+        return self.vo_speed < STILL_VO_MS
 
     def _attitude(self, m, dt):
         """Roll and pitch, from the accelerometer and the two unused gyro axes.
@@ -564,8 +624,10 @@ class Compare(Node):
                 out.append(f'  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL '
                            f'({max(0.0, GYRO_BIAS_S - el):.1f}s left)')
             else:
+                still = '  STILL — retuning bias' if self._still() else ''
                 out.append(f'  gyro bias removed: {math.degrees(self.gyro_bias):+.4f} deg/s '
-                           f'({math.degrees(self.gyro_bias) * 60:+.2f} deg/min)')
+                           f'({math.degrees(self.gyro_bias) * 60:+.2f} deg/min)   '
+                           f'{self.bias_updates} updates{still}')
         out.append('')
 
         a = self.args
