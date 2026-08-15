@@ -222,7 +222,61 @@ this needs somewhere else to go.
 
 ---
 
-## ✅ 10. Encoders — both sides verified good (2026-08-15)
+## ✅ 11. cuVSLAM under-reads distance by ~2.2%, consistently
+
+Four independent measurements against a tape:
+
+| pushed | cuVSLAM read | error |
+|---|---|---|
+| 200 cm | 197.3 cm | −1.35% |
+| 200 cm | 195.1 cm | −2.45% |
+| 120 cm | 116.9 cm | −2.6% |
+| 200 cm | 195.4 cm | −2.3% |
+
+That is a **systematic scale error, not noise** — it is the same sign and
+roughly the same size every time. It passes the ±5% scale gate, so Phase 1 does
+not care, but over a long route it compounds: 100 m of driving is 2.2 m short.
+
+A constant scale factor points at the stereo baseline, which is what converts
+disparity into metres. `−P[3]/P[0]` gives 9.49 cm; a true baseline of
+9.49 × 1.022 = **9.70 cm** would remove the error exactly. Worth checking against
+the physical lens spacing before anyone hard-codes a fudge factor.
+
+The encoders are now the better distance reference (§10), so FUSED takes
+magnitude from them and direction from cuVSLAM, which removes this from the
+fused pose without touching the driver.
+
+---
+
+## ✅ 10. Encoders — all four verified good AND calibrated (2026-08-15)
+
+`ENCODER_CPR = 1560` is **correct**. Measured against a 200 cm tape push:
+
+| wheel | counts | implied CPR | vs configured |
+|---|---|---|---|
+| LF | 11434 | 1526.6 | 0.98× |
+| LR | 11378 | 1519.2 | 0.97× |
+| RF | 11623 | 1551.9 | 0.99× |
+| RR | 11275 | 1505.4 | 0.97× |
+
+All four within 3% of each other and of the configured value. No firmware
+change needed. `logs/calibrate_encoders.py <cm>` repeats it.
+
+**Two false alarms got here first, both mine, both worth remembering:**
+
+1. *"LEFT encoders are dead"* — the four-wheel test printed its prompts through
+   a buffered pipe, so the operator never saw them and nothing was spun at the
+   right moment. A test that needs the human and the script to agree on WHEN is
+   fragile; `logs/wheels_selfpaced.py` asks only for a total instead.
+2. *"Encoders are 2× out and the rear reads 25% more than the front"* — that
+   compared cumulative counts, which measure **arc length**, against cuVSLAM's
+   `straight`, which is **displacement**. On a push that curves or doubles back
+   those are different quantities. Calibrate on a straight forward push against
+   a tape, and against nothing else.
+
+---
+
+## ✅ 12. Encoders — both sides verified good (2026-08-15)
 
 Rover lifted, each wheel spun by hand in isolation, watching `/wheel_state`
 (`x = velL`, `y = velR`, computed in the 50 Hz control task on its own core):
