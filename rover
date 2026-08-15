@@ -106,13 +106,28 @@ camera)
   # keeps its default of ON. That cost a session — the projector is bolted to the
   # camera, so its dots move with the rig, the scene looks static, and cuVSLAM
   # under-read a 60 cm push as 1.1 cm. Set it at runtime and READ IT BACK.
-  rexec "ros2 param set /camera/camera0 depth_module.emitter_enabled false; \
-         ros2 param set /camera/camera0 depth_module.laser_power 0.0" >/dev/null 2>&1 || true
-  em=$(rexec "ros2 param get /camera/camera0 depth_module.emitter_enabled" 2>/dev/null | tail -1)
+  #
+  # Retry it. Streaming coming up does NOT mean the camera's control channel is
+  # ready: seen 2026-08-15, `ros2 param set` returned
+  #   "timeout waiting for reply: {"id":"set-option","option-name":"Emitter Enabled"}"
+  # on every attempt while infra1 was streaming perfectly at 30 Hz. The device
+  # answers image traffic before it answers option traffic, so attaching too soon
+  # after a power-cycle leaves the emitter stuck on with everything else looking
+  # healthy. Give it up to ~30 s.
+  em=""
+  for a in 1 2 3 4 5 6; do
+    rexec "ros2 param set /camera/camera0 depth_module.emitter_enabled false; \
+           ros2 param set /camera/camera0 depth_module.laser_power 0.0" >/dev/null 2>&1 || true
+    em=$(rexec "ros2 param get /camera/camera0 depth_module.emitter_enabled" 2>/dev/null | tail -1)
+    case "$em" in *False*) break ;; esac
+    [ "$a" -lt 6 ] && { echo "      emitter still on, control channel not ready — retry $a/5"; sleep 5; }
+  done
   case "$em" in
     *False*) echo "      IR emitter OFF — verified" ;;
     *)       echo "  ✗ IR EMITTER IS STILL ON ($em)."
              echo "    Visual odometry will under-read badly. Do not trust any pose."
+             echo "    The camera is half-alive: it streams but will not accept options."
+             echo "    Power-cycle the D555, wait 30 s for it to finish booting, retry."
              exit 1 ;;
   esac
   echo

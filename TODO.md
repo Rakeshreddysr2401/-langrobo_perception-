@@ -187,12 +187,29 @@ will move the ground plane in Phase 2's mapping.
 
 ---
 
-## ⚪ 7. The D555 dies if it loses power, and only a physical power-cycle helps
+## 🟠 7. The D555 drops out constantly, in three distinct ways
 
-Went offline at 21:20 on 2026-08-15 when the rover was unplugged for the ESP32
-work. `dds-device.cpp:46 throwing: device is offline`, driver process still
-alive, 0 publishers. It answers ping the whole time — **ping is not a health
-check**. Recovery is unplug 5 s, replug, then `./rover camera`.
+It went down **four times on 2026-08-15 alone**. For an autonomous rover this is
+the least solved thing on the vehicle — a robot that needs a human to reseat a
+cable is not autonomous. The three failures look similar and are not:
+
+| symptom | what is true | fix |
+|---|---|---|
+| `No RealSense devices were found` **and** `ethtool` says `Link detected: no` | no electrical link at all — cable or PoE injector | reseat the cable; nothing on the camera can help |
+| `dds-device.cpp:46 device is offline`, driver alive, 0 publishers | link fine, on-camera DDS server dead | unplug 5 s, replug |
+| streams at 30 Hz but `ros2 param set` times out | **half-alive**: image traffic works, option traffic does not | wait ~30 s after power-up, then retry |
+
+That third one is new and dangerous. Seen 2026-08-15: infra1 streaming at
+30 Hz with the emitter stuck ON, and every attempt returning
+`timeout waiting for reply: {"id":"set-option","option-name":"Emitter Enabled"}`.
+Everything looks healthy and the pose is quietly worthless — this is the failure
+that made a 60 cm push read 1.1 cm. **The camera answers image traffic before it
+answers option traffic**, so attaching the driver too soon after a power-cycle
+lands here. `./rover camera` now retries the emitter set for ~30 s and refuses to
+continue if it never takes.
+
+**Ping is not a health check** in any of the three. Nor is a live image stream.
+The only proof is the emitter read-back.
 
 ---
 
