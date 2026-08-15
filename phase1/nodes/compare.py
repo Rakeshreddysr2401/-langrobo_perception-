@@ -11,13 +11,34 @@ WHY THIS SHAPE
 SOURCES  (a row appears when its topic does; nothing here blocks on a dead one)
     cuvslam   /vo/odom       pose straight from stereo visual odometry
     wheels    /wheel_state   Vector3(velL, velR, cmd_vx), dead-reckoned here
-    gyro      /gyro/base     yaw rate only, integrated to a heading
-    FUSED                    distance from cuVSLAM, heading from the gyro
+    gyro      /gyro/base     all six IMU axes: 3 rates + 3 accelerations
+    wheels    /wheel_ticks   cumulative per-wheel counts (LF, LR, RF, RR)
+    FUSED                    every source used for what it is actually good at
 
-WHY THERE IS A FUSED ROW AS WELL
-    Showing the sources separately is what finds the faults; a fused estimate is
-    what you actually navigate on. Measured 2026-08-15 on a 2 m out-and-back,
-    fusing this way took the endpoint error from 28.4 cm to 12.2 cm.
+WHAT FUSED USES, AND WHY EACH
+    No sensor here is good at everything, and one that is bad at a job does not
+    get that job.
+
+    heading   gyro z, integrated, bias measured at startup. Beat cuVSLAM by
+              7.68 deg on a return leg. Pulled onto cuVSLAM's heading very
+              slowly, because gyro bias walks and cuVSLAM's heading does not.
+    distance  encoders when both sides are alive -- they do not care about
+              texture or direction of travel, which is exactly where cuVSLAM
+              fails. cuVSLAM supplies the DIRECTION, the wheels the MAGNITUDE.
+              Falls back to cuVSLAM alone when the encoders cannot be trusted.
+    tilt      roll and pitch from the ACCELEROMETER, which measures gravity and
+              therefore never drifts, smoothed with gyro x and y. Used to keep a
+              slope from being counted as floor distance.
+
+    NOT used for position: the accelerometer. Integrating it twice grows error
+    with t^2 and diverges by hundreds of metres. Its value is the gravity vector,
+    not motion.
+    NOT used at all: depth. It is a PRODUCT of the same stereo pair cuVSLAM
+    already consumes, so it adds no independent information about where we are.
+    It is Phase 2's input for mapping.
+
+    Measured 2026-08-15 on a 2 m out-and-back, gyro heading alone took the
+    endpoint error from 28.4 cm to 12.2 cm.
 
 WHAT THE COLUMNS MEAN
     x, y     displacement from where you started, in centimetres
@@ -47,7 +68,7 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from nav_msgs.msg import Odometry
-from geometry_msgs.msg import Vector3
+from geometry_msgs.msg import Vector3, Quaternion
 from sensor_msgs.msg import Imu
 from std_msgs.msg import String
 
@@ -83,6 +104,21 @@ MAX_PUSH_MS = 1.0
 # IR emitter off carries almost no texture, so this is the number that should
 # collapse just before a teleport. Recorded at every jump to test that.
 LOW_LANDMARKS = 30
+
+# Complementary-filter time constant for roll/pitch, seconds. Above it the
+# accelerometer wins (absolute, no drift); below it the gyro wins (smooth, and
+# immune to the fake tilt that acceleration puts on the accelerometer). A quarter
+# second is long enough to ride out a shove and short enough to track a real ramp.
+ATTITUDE_TAU = 0.25
+
+# How hard the fused heading is pulled onto cuVSLAM's, per /vo/odom message.
+# The gyro measured BETTER than cuVSLAM over a two-minute run (+7.68 deg of
+# cuVSLAM error on a return leg), so the gyro must stay dominant -- but its
+# residual bias still walks, and cuVSLAM's heading does not drift because it is
+# re-measured against the world every frame. At 30 Hz this is a ~30 s time
+# constant: long enough that a teleport cannot yank the heading, short enough to
+# bound gyro drift over a long run.
+YAW_TRUST_VO = 0.001
 
 # Longest gap between /wheel_state messages we will still integrate across.
 # The ESP32 should publish at 20 Hz but currently manages 1.000 Hz, so anything
@@ -202,11 +238,26 @@ class Compare(Node):
         self.vo_peak = 0.0           # fastest real motion seen, m/s
         self.landmarks = -1          # latest from /vo/status, -1 = never seen
         self.landmarks_min = None
+        self.roll = None             # rad, gravity + gyro complementary filter
+        self.pitch = None
+        self.pitch_still = []        # accel-only pitch while stationary = mount pitch
+        self.fused_yaw = 0.0
+        self.enc_path_prev = 0.0
+        self.enc_corrections = 0     # how many steps the encoders actually rescaled
+        self.accel = (0.0, 0.0, 0.0)      # raw, base_link frame
+        self.gyro_xyz = (0.0, 0.0, 0.0)   # raw rates, all three axes
+        self.ticks = (0, 0, 0, 0)         # LF, LR, RF, RR cumulative counts
 
         self.create_subscription(Odometry, '/vo/odom', self._vo, qos_profile_sensor_data)
         self.create_subscription(Vector3, '/wheel_state', self._wheels, qos_profile_sensor_data)
         self.create_subscription(Imu, '/gyro/base', self._gyro, qos_profile_sensor_data)
         self.create_subscription(String, '/vo/status', self._status, 10)
+        # Per-wheel cumulative counts. Velocity has to be integrated and loses
+        # whatever a dropped message carried; a total never does. It is also the
+        # only view that shows one wheel slipping, since velL averages the two
+        # left encoders together and hides it.
+        self.create_subscription(Quaternion, '/wheel_ticks', self._ticks,
+                                 qos_profile_sensor_data)
         self.create_timer(0.25, self._draw)
 
     def _vo(self, m):
@@ -268,21 +319,56 @@ class Compare(Node):
         the gyro's. Replaying the run this way took the endpoint error from
         28.4 cm to 12.2 cm.
 
-        The residual is distance, not heading: that same return leg registered
-        186.5 cm against the outbound 198.0 cm, so reversing under-reads by ~6%.
-        cuVSLAM is currently the only translation source, so nothing can correct
-        it. WHEEL ODOMETRY IS THAT CORRECTION — encoders measure distance without
-        caring about visual texture or direction. Blend it in here once the ESP32
-        is publishing at 20 Hz again.
+        DISTANCE comes from the encoders when they are trustworthy. That same
+        return leg registered 186.5 cm against the outbound 198.0 cm, so cuVSLAM
+        under-reads ~6% in reverse, and being the only translation source nothing
+        could contradict it. Encoders measure distance without caring about
+        visual texture or direction of travel, so where both exist we take
+        cuVSLAM's DIRECTION and the encoders' MAGNITUDE.
+
+        HEADING is corrected slowly toward cuVSLAM. The gyro is better over a
+        two-minute run but its residual bias still walks; cuVSLAM's heading does
+        not drift because it is measured against the world afresh each frame. A
+        long time constant takes the drift-free part without importing its noise.
+
+        TILT tips the step out of the horizontal plane, using roll/pitch from
+        gravity, so driving up a ramp is not counted as floor distance.
         """
         if self.gyro_bias is None:
             return                      # gyro not calibrated yet; nothing to fuse
         _, ox, oy, oth = self.vo_prev
         dx, dy = px - ox, py - oy
         c, s = math.cos(-oth), math.sin(-oth)          # into the body frame
+        bx, by = c * dx - s * dy, s * dx + c * dy
+
+        # ── heading: gyro, pulled slowly onto cuVSLAM so bias cannot run away ──
+        vo_th = self.src['cuvslam'].th
+        err = wrap(vo_th - self.gyro_yaw)
+        self.fused_yaw = wrap(self.gyro_yaw + err * YAW_TRUST_VO)
+
+        # ── distance: encoders if both sides are alive, else cuVSLAM ──────────
+        vo_step = math.hypot(bx, by)
+        w = self.src['wheels']
+        enc_ok = (self.wheel_dead_side is None and self.wheel_moved_l
+                  and self.wheel_moved_r)
+        if enc_ok:
+            enc_travel = w.path
+            gained = enc_travel - self.enc_path_prev
+            self.enc_path_prev = enc_travel
+            if gained > 0 and vo_step > 1e-6:
+                scale = gained / vo_step
+                if 0.5 < scale < 2.0:           # sanity: ignore absurd corrections
+                    bx, by = bx * scale, by * scale
+                    self.enc_corrections += 1
+
+        # ── tilt: only the horizontal component is floor travel ───────────────
+        if self.pitch is not None:
+            bx *= math.cos(self.pitch)
+            by *= math.cos(self.roll)
+
         f = self.src['FUSED']
         f.seen()
-        f.step_body(c * dx - s * dy, s * dx + c * dy, self.gyro_yaw)
+        f.step_body(bx, by, self.fused_yaw)
 
     def _wheels(self, m):
         s = self.src['wheels']
@@ -318,10 +404,17 @@ class Compare(Node):
         self.wheel_last_t = now
         self.wheel_prev = (vx, wz)
 
+    def _ticks(self, m):
+        self.ticks = (int(m.x), int(m.y), int(m.z), int(m.w))
+
     def _gyro(self, m):
         s = self.src['gyro']
         s.seen()
         now = time.time()
+        self.accel = (m.linear_acceleration.x, m.linear_acceleration.y,
+                      m.linear_acceleration.z)
+        self.gyro_xyz = (m.angular_velocity.x, m.angular_velocity.y,
+                         m.angular_velocity.z)
 
         # A MEMS gyro has a constant offset; integrate it and the heading walks
         # away at a steady rate. Measured 2026-08-15: 9.75 deg over 125 s parked,
@@ -339,7 +432,61 @@ class Compare(Node):
             if 0 < dt < 0.5:
                 self.gyro_yaw = wrap(self.gyro_yaw + (m.angular_velocity.z - self.gyro_bias) * dt)
                 s.th = self.gyro_yaw
+                self._attitude(m, dt)
         self.gyro_last_t = now
+
+    def _attitude(self, m, dt):
+        """Roll and pitch, from the accelerometer and the two unused gyro axes.
+
+        The accelerometer cannot give position -- integrating it twice makes the
+        error grow with t^2 and it diverges by hundreds of metres. That is why
+        the plan calls it unusable, and for position that is correct.
+
+        But it measures the GRAVITY VECTOR, and gravity does not drift. Whichever
+        way the rover tips, gravity still points down, so it gives roll and pitch
+        as absolute angles with no accumulating error. That is something no other
+        sensor on this rover provides: the gyro's roll/pitch rates drift, and
+        cuVSLAM's tilt comes from the same visual tracking that teleports.
+
+        The two are complementary in the literal sense. The gyro is smooth and
+        instant but drifts; the accelerometer is absolute but noisy and confused
+        by acceleration (push the rover forward and it reads a fake backwards
+        tilt). So integrate the gyro for the short term and let the accelerometer
+        pull it back slowly. TAU sets how slowly.
+
+        Used for two things:
+          * tilt-compensating the travel direction, so a slope or a threshold
+            does not get counted as horizontal distance
+          * measuring the camera's mount pitch, which was never put on a tape
+            (TODO 6) and shifts the ground plane in Phase 2's map
+        """
+        ax, ay, az = (m.linear_acceleration.x, m.linear_acceleration.y,
+                      m.linear_acceleration.z)
+        mag = math.sqrt(ax * ax + ay * ay + az * az)
+        if not (5.0 < mag < 15.0):      # being shaken or dropped; gravity unreadable
+            return
+
+        # Gravity in base_link: level and still means (0, 0, +9.81).
+        pitch_acc = math.atan2(-ax, math.hypot(ay, az))
+        roll_acc = math.atan2(ay, az)
+
+        if self.pitch is None:                 # first good sample seeds it
+            self.pitch, self.roll = pitch_acc, roll_acc
+            return
+
+        k = ATTITUDE_TAU / (ATTITUDE_TAU + dt)      # gyro weight
+        self.pitch = wrap(k * (self.pitch + m.angular_velocity.y * dt)
+                          + (1.0 - k) * pitch_acc)
+        self.roll = wrap(k * (self.roll + m.angular_velocity.x * dt)
+                         + (1.0 - k) * roll_acc)
+
+        # While the rover is still, the accelerometer alone IS the mount pitch:
+        # the rig is level, so anything left over is the camera sitting nose-up
+        # or nose-down relative to base_link.
+        if self.gyro_bias is not None and abs(m.angular_velocity.z - self.gyro_bias) < 0.01:
+            self.pitch_still.append(pitch_acc)
+            if len(self.pitch_still) > 2000:
+                self.pitch_still.pop(0)
 
     def _draw(self):
         now = time.time()
@@ -380,6 +527,17 @@ class Compare(Node):
             out.append(f'  landmarks {self.landmarks:4d}  (lowest seen '
                        f'{self.landmarks_min if self.landmarks_min is not None else 0}){tag}')
 
+        if self.pitch is not None:
+            mp = ''
+            if len(self.pitch_still) > 200:
+                mp = (f'   camera mount pitch '
+                      f'{math.degrees(sum(self.pitch_still) / len(self.pitch_still)):+.2f} deg')
+            out.append(f'  tilt: roll {math.degrees(self.roll):+6.2f} deg   '
+                       f'pitch {math.degrees(self.pitch):+6.2f} deg{mp}')
+        if self.enc_corrections:
+            out.append(f'  encoders rescaled {self.enc_corrections} FUSED steps '
+                       f'(distance taken from the wheels, direction from cuVSLAM)')
+
         w = self.src['wheels']
         if w.n and w.hz > 0 and w.hz < 15:
             out.append(f'  ⚠ wheels at {w.hz:.1f} Hz, not 20 — distance is a coarse '
@@ -411,12 +569,21 @@ class Compare(Node):
         out.append('  Ctrl-C to finish and grade.')
         print('\n'.join(out), flush=True)
 
-        self.rows.append([round(el, 3)] + [
-            v for key in ORDER
-            for v in (round(self.src[key].x, 5), round(self.src[key].y, 5),
-                      round(math.degrees(self.src[key].th), 3),
-                      round(self.src[key].straight, 5), round(self.src[key].path, 5),
-                      round(self.src[key].hz, 2))])
+        self.rows.append(
+            [round(el, 3)]
+            + [v for key in ORDER
+               for v in (round(self.src[key].x, 5), round(self.src[key].y, 5),
+                         round(math.degrees(self.src[key].th), 3),
+                         round(self.src[key].straight, 5),
+                         round(self.src[key].path, 5),
+                         round(self.src[key].hz, 2))]
+            + [round(math.degrees(self.roll), 3) if self.roll is not None else '',
+               round(math.degrees(self.pitch), 3) if self.pitch is not None else '',
+               self.landmarks]
+            + [round(v, 4) for v in self.accel]
+            + [round(v, 5) for v in self.gyro_xyz]
+            + [round(self.wheel_prev[0], 4), round(self.wheel_prev[1], 4)]
+            + list(self.ticks))
 
     # ── verdict ────────────────────────────────────────────────────────────
     def verdict(self):
@@ -545,6 +712,13 @@ class Compare(Node):
         head = ['t']
         for k in ORDER:
             head += [f'{k}_{c}' for c in ('x', 'y', 'th_deg', 'straight', 'path', 'hz')]
+        # Everything the sensors actually said, not just the derived poses. A run
+        # that produces a surprising number is worth re-reading afterwards, and
+        # you cannot re-read what was never written down.
+        head += ['roll_deg', 'pitch_deg', 'landmarks',
+                 'accel_x', 'accel_y', 'accel_z',
+                 'gyro_x', 'gyro_y', 'gyro_z',
+                 'velL', 'velR', 'tick_LF', 'tick_LR', 'tick_RF', 'tick_RR']
         with open(p, 'w', newline='') as f:
             w = csv.writer(f)
             w.writerow(head)
