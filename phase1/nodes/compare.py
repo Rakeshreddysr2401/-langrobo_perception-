@@ -120,6 +120,11 @@ ATTITUDE_TAU = 0.25
 # bound gyro drift over a long run.
 YAW_TRUST_VO = 0.001
 
+# How many samples of one-sided motion before we call the other side dead. At
+# 20 Hz this is ~5 s of one wheel turning while the other reports nothing, which
+# no ordinary manoeuvre produces.
+DEAD_SIDE_SAMPLES = 100
+
 # Longest gap between /wheel_state messages we will still integrate across.
 # The ESP32 should publish at 20 Hz but currently manages 1.000 Hz, so anything
 # tighter than this throws away every sample and the wheels row reads a
@@ -225,8 +230,8 @@ class Compare(Node):
         self.t0 = time.time()
         self.wheel_last_t = None
         self.wheel_prev = (0.0, 0.0)
-        self.wheel_moved_l = False
-        self.wheel_moved_r = False
+        self.wheel_moved_l = 0       # samples this side reported real motion
+        self.wheel_moved_r = 0
         self.wheel_dead_side = None
         self.gyro_last_t = None
         self.gyro_yaw = 0.0
@@ -385,11 +390,22 @@ class Compare(Node):
         # nothing. Detection is asymmetric on purpose -- both sides at zero is a
         # parked rover, not a fault.
         if abs(m.x) > 0.01:
-            self.wheel_moved_l = True
+            self.wheel_moved_l += 1
         if abs(m.y) > 0.01:
-            self.wheel_moved_r = True
-        if self.wheel_moved_l != self.wheel_moved_r:
-            self.wheel_dead_side = 'LEFT' if self.wheel_moved_r else 'RIGHT'
+            self.wheel_moved_r += 1
+
+        # Count samples, do not latch a boolean. The first version set the flag
+        # the moment either side registered first and never cleared it, so a
+        # right wheel that started a fraction of a second after the left was
+        # reported dead for the rest of the run -- it wrongly accused a working
+        # encoder on 2026-08-15, and the tick log disproved it. Now a side has to
+        # stay silent through a meaningful amount of the OTHER side's motion, and
+        # the accusation is withdrawn as soon as it does move.
+        lo, hi = sorted((self.wheel_moved_l, self.wheel_moved_r))
+        if lo == 0 and hi >= DEAD_SIDE_SAMPLES:
+            self.wheel_dead_side = 'LEFT' if self.wheel_moved_r > 0 else 'RIGHT'
+        else:
+            self.wheel_dead_side = None
         if self.wheel_last_t is not None:
             dt = now - self.wheel_last_t
             if 0 < dt < WHEEL_MAX_DT:
