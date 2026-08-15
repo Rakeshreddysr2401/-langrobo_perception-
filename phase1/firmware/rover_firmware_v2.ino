@@ -15,16 +15,27 @@
 //  reversal on long presses. This split fixes both.)
 //
 //  ── ROS INTERFACE ────────────────────────────────────────────────────────────
-//  IN   /cmd_vel     geometry_msgs/Twist    target body vx, wz   (nav2 / teleop)  [RELIABLE]
-//  IN   /pid_gains   geometry_msgs/Vector3  live PID tuning: x=Kp y=Ki z=minMoveDuty [RELIABLE]
-//  OUT  /wheel_state geometry_msgs/Vector3  x=velL y=velR z=cmd vx  (small)         [BEST_EFFORT]
-//       Commands IN are RELIABLE (guaranteed delivery — small msgs); only the
-//       high-rate telemetry OUT is best_effort (reliable stalls ESP32->host on WiFi).
-//       For the EKF (cuVSLAM + IMU gyro + wheel odom): a small Pi5 RELAY node
-//       subscribes /wheel_state and publishes nav_msgs/Odometry on /wheel_odom
-//       (odom->base_link owned by robot_localization, config/ekf.yaml). Odometry
-//       is NOT published from here — it exceeds the micro-ROS WiFi message size.
-//       This node publishes NO TF.
+//  IN   /cmd_vel     geometry_msgs/Twist       target body vx, wz  (nav2 / teleop)
+//  IN   /pid_gains   geometry_msgs/Vector3     live tuning: x=Kp y=Ki z=minMoveDuty
+//  IN   /reset_odom  geometry_msgs/Vector3     any message zeroes the odom pose
+//  OUT  /wheel_state geometry_msgs/Vector3     x=velL y=velR z=cmd vx      @20 Hz
+//  OUT  /wheel_ticks geometry_msgs/Quaternion  x=LF y=LR z=RF w=RR         @20 Hz
+//                    CUMULATIVE counts, direction-corrected. Prefer these to
+//                    /wheel_state for odometry: totals survive dropped messages,
+//                    velocities do not, and four values expose a slipping wheel.
+//  OUT  /wheel_odom  geometry_msgs/Vector3     x, y (m), z = theta (rad)   @20 Hz
+//                    integrated on-board at the full 50 Hz. Not nav_msgs/Odometry
+//                    — that carries two 6x6 covariance blocks, ~700 bytes, over a
+//                    512-byte micro-ROS MTU. Wrap it Jetson-side where bandwidth
+//                    is free.
+//  OUT  /rover_diag  geometry_msgs/Vector3     x=loop() Hz y=free heap KB
+//                    z=agent state              @1 Hz
+//                    Exists because the 1 Hz telemetry fault of 2026-08-15 took a
+//                    day to find, purely because nothing reported how fast loop()
+//                    was running. x should read in the hundreds.
+//
+//  This node publishes NO TF. odom->base_link stays with whatever fuses these
+//  with cuVSLAM and the gyro.
 //
 //  ── SAFETY ───────────────────────────────────────────────────────────────────
 //  500 ms /cmd_vel watchdog (silence -> stop). Motors driven ONLY while the agent
@@ -60,6 +71,7 @@
 #include <rmw_microros/rmw_microros.h>
 #include <geometry_msgs/msg/twist.h>
 #include <geometry_msgs/msg/vector3.h>
+#include <geometry_msgs/msg/quaternion.h>   // 4 doubles -> the four wheels
 
 // ── WiFi + agent ─────────────────────────────────────────────────────────────
 //  Fill WIFI_PASS locally before flashing. Do NOT commit real credentials.
@@ -132,8 +144,30 @@ volatile uint32_t lastCmdMs = 0;
 volatile bool     controlEnabled = false;             // true only when agent connected
 volatile float    gVelL = 0.0f, gVelR = 0.0f;         // measured (task -> telemetry)
 
+// Cumulative encoder counts, direction-corrected, published raw.
+//
+// WHY RAW COUNTS AND NOT JUST VELOCITY. gVelL/gVelR are instantaneous, measured
+// over one 20 ms control period. Anything consuming them has to integrate, so a
+// dropped or late message loses that distance permanently and the error never
+// comes back. Counts are cumulative: however many messages go missing, the next
+// one still carries the exact total. Distance becomes independent of the publish
+// rate, which is what makes wheel odometry usable as a reference rather than a
+// sanity check. Four separate values also expose one wheel slipping or stalling,
+// which a per-side average hides.
+volatile int32_t gTickLF = 0, gTickLR = 0, gTickRF = 0, gTickRR = 0;
+
 // ── Odometry pose (integrated in the control task) ───────────────────────────
-float odomX = 0.0f, odomY = 0.0f, odomTh = 0.0f;
+// volatile because loop() reads these for telemetry while the control task
+// writes them; without it the compiler may keep a stale copy in a register.
+volatile float odomX = 0.0f, odomY = 0.0f, odomTh = 0.0f;
+volatile bool odomResetReq = false;   // set by /reset_odom, serviced by the task
+
+// ── loop() rate, measured and published ──────────────────────────────────────
+// The 1 Hz telemetry bug on 2026-08-15 was loop() being starved, and it took a
+// day to find because nothing on the board reported how fast loop() was running.
+// It does now: /rover_diag makes the next occurrence a glance instead of an
+// investigation.
+volatile float gLoopHz = 0.0f;
 
 // ── Encoders ─────────────────────────────────────────────────────────────────
 ESP32Encoder encLF, encLR, encRF, encRR;
@@ -141,10 +175,18 @@ ESP32Encoder encLF, encLR, encRF, encRR;
 // ── micro-ROS entities ───────────────────────────────────────────────────────
 rcl_subscription_t cmdVelSub;
 rcl_subscription_t pidGainsSub;
+rcl_subscription_t resetOdomSub;
 rcl_publisher_t    wheelStatePub;
-geometry_msgs__msg__Twist   twistMsg;
-geometry_msgs__msg__Vector3 pidGainsMsg;
-geometry_msgs__msg__Vector3 wheelStateMsg;
+rcl_publisher_t    wheelTicksPub;
+rcl_publisher_t    wheelOdomPub;
+rcl_publisher_t    diagPub;
+geometry_msgs__msg__Twist      twistMsg;
+geometry_msgs__msg__Vector3    pidGainsMsg;
+geometry_msgs__msg__Vector3    resetOdomMsg;
+geometry_msgs__msg__Vector3    wheelStateMsg;
+geometry_msgs__msg__Quaternion wheelTicksMsg;
+geometry_msgs__msg__Vector3    wheelOdomMsg;
+geometry_msgs__msg__Vector3    diagMsg;
 rclc_executor_t executor;
 rclc_support_t  support;
 rcl_allocator_t allocator;
@@ -226,6 +268,18 @@ void controlTask(void* /*arg*/) {
         float velR = distR / dt;
         gVelL = velL; gVelR = velR;
 
+        // publish the totals, not just this tick's delta — see the note by the
+        // declaration. These are already direction-corrected.
+        gTickLF = (int32_t)cLF; gTickLR = (int32_t)cLR;
+        gTickRF = (int32_t)cRF; gTickRR = (int32_t)cRR;
+
+        // an odometry reset has to happen here, not in loop(), or it would race
+        // the integration below and lose whatever arrived in the same period
+        if (odomResetReq) {
+            odomX = 0.0f; odomY = 0.0f; odomTh = 0.0f;
+            odomResetReq = false;
+        }
+
         // target with safety gates: only drive when connected AND command is fresh
         float tvx = targetVx, twz = targetWz;
         if (!controlEnabled || (millis() - lastCmdMs > CMD_TIMEOUT_MS)) { tvx = 0.0f; twz = 0.0f; }
@@ -262,14 +316,44 @@ void cmdVelCb(const void* msgIn) {
 
 void pidGainsCb(const void* msgIn) {   // live tuning: Vector3 x=Kp y=Ki z=minMoveDuty
     const geometry_msgs__msg__Vector3* m = (const geometry_msgs__msg__Vector3*)msgIn;
-    gKp = (float)m->x;
-    gKi = (float)m->y;
-    gMinDuty = (float)m->z;
-    integL = integR = 0.0f;
-    Serial.printf("[PID] set Kp=%.3f Ki=%.3f minDuty=%.3f\n", gKp, gKi, gMinDuty);
+    float kp = (float)m->x, ki = (float)m->y, md = (float)m->z;
+    // Only clear the integrators when a gain actually changed. Clearing on every
+    // message meant anything republishing the same gains at a steady rate would
+    // hold integral action permanently at zero and quietly turn the PID into a P
+    // controller — a trap for exactly the kind of keepalive publisher we use.
+    bool changed = (kp != gKp) || (ki != gKi) || (md != gMinDuty);
+    gKp = kp; gKi = ki; gMinDuty = md;
+    if (changed) {
+        integL = integR = 0.0f;
+        Serial.printf("[PID] set Kp=%.3f Ki=%.3f minDuty=%.3f\n", gKp, gKi, gMinDuty);
+    }
+}
+
+// Zero the wheel odometry pose. Any message resets; the payload is ignored.
+// Needed because a measurement run wants a known origin without power-cycling
+// the board, and because a fused estimator restarting must be able to say
+// "start counting from here".
+void resetOdomCb(const void* /*msgIn*/) {
+    odomResetReq = true;
+    Serial.println("[odom] reset requested");
 }
 
 // ── micro-ROS entity lifecycle ───────────────────────────────────────────────
+// Name the entity that failed. micro_ros_arduino ships precompiled with fixed
+// caps (RMW_UXRCE_MAX_PUBLISHERS / _SUBSCRIPTIONS), and this firmware went from
+// 3 entities to 7 on 2026-08-15. Overrunning a cap makes createEntities() return
+// false, which the state machine reads as "agent not ready" and retries forever
+// -- a board that looks like a WiFi problem and is not. If that happens, the
+// serial monitor now says which one, and the cheapest cure is to drop
+// /rover_diag first, then /wheel_odom (the Jetson can integrate /wheel_ticks
+// itself). Never drop /wheel_ticks.
+#define INIT_OR_FAIL(call, what) do {                                   \
+    if ((call) != RCL_RET_OK) {                                         \
+        Serial.printf("[uROS] FAILED to create %s — entity limit?\n", what); \
+        return false;                                                   \
+    }                                                                   \
+} while (0)
+
 bool createEntities() {
     allocator = rcl_get_default_allocator();
     if (rclc_support_init(&support, 0, NULL, &allocator) != RCL_RET_OK) return false;
@@ -282,26 +366,49 @@ bool createEntities() {
     // the 500ms watchdog kept zeroing the target -> slow / twitchy / pivot wheel
     // never sustained. Reliable guarantees small command msgs arrive (matches nav2
     // + teleop reliable publishers).
-    if (rclc_subscription_init_default(&cmdVelSub, &node,
-            ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist), "/cmd_vel") != RCL_RET_OK) return false;
-    if (rclc_subscription_init_default(&pidGainsSub, &node,
-            ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Vector3), "/pid_gains") != RCL_RET_OK) return false;
-    // Telemetry OUT is RELIABLE, which reads backwards for a 20 Hz stream. It is
-    // not about delivery guarantees, it is about when the message is sent.
-    // micro-ROS writes a best_effort message into an output stream buffer and
-    // only puts it on the wire when the XRCE session next runs; rcl_publish
-    // does not flush it. With nothing else talking to the board that drained at
-    // 1.000 Hz (+/-2.9 ms measured at the agent) while this loop was publishing
-    // at 20 Hz -- 19 of every 20 messages sat in the buffer. Reliable streams
-    // are flushed inside rmw_publish via uxr_run_session_until_confirm_delivery,
-    // so the message leaves immediately. /cmd_vel proves reliable sustains
-    // 19.71 msg/s on this link. See TODO.md section 1.
-    if (rclc_publisher_init_default(&wheelStatePub, &node,
-            ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Vector3), "/wheel_state") != RCL_RET_OK) return false;
+    INIT_OR_FAIL(rclc_subscription_init_default(&cmdVelSub, &node,
+            ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist), "/cmd_vel"), "/cmd_vel");
+    INIT_OR_FAIL(rclc_subscription_init_default(&pidGainsSub, &node,
+            ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Vector3), "/pid_gains"), "/pid_gains");
+    INIT_OR_FAIL(rclc_subscription_init_default(&resetOdomSub, &node,
+            ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Vector3), "/reset_odom"), "/reset_odom");
+    // Telemetry OUT is RELIABLE. This was flashed on the theory that best_effort
+    // messages sat unflushed in an output stream; that theory was WRONG (the
+    // rate stayed at exactly 1.000 Hz afterwards -- the cause was the executor,
+    // see loop()). It is kept only because it is already flashed and proven
+    // harmless.
+    //
+    // It may still be worth reverting to best_effort: reliable publishes wait for
+    // an agent ACK inside rmw_publish, and there are now three of them per 50 ms
+    // cycle. Loss also no longer costs anything, because /wheel_ticks carries
+    // cumulative totals rather than deltas. Decide it from evidence rather than
+    // argument: if /rover_diag shows loop() running fast while the telemetry
+    // rate still sits below 20 Hz, ACK latency is the reason and best_effort is
+    // the fix. See TODO.md section 1.
+    INIT_OR_FAIL(rclc_publisher_init_default(&wheelStatePub, &node,
+            ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Vector3), "/wheel_state"), "/wheel_state");
 
-    rclc_executor_init(&executor, &support.context, 2, &allocator);   // 2 subs
+    // /wheel_ticks — Quaternion abused as four doubles: x=LF y=LR z=RF w=RR,
+    // cumulative direction-corrected counts. Not elegant, but it is 32 bytes and
+    // needs no custom message package on either end, which matters when the
+    // container that builds the Jetson side has no rebuild recipe.
+    INIT_OR_FAIL(rclc_publisher_init_default(&wheelTicksPub, &node,
+            ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Quaternion), "/wheel_ticks"), "/wheel_ticks");
+    // /wheel_odom — Vector3 x, y (metres), z = theta (radians), integrated at the
+    // full 50 Hz on-board where no message can be missed. Deliberately not
+    // nav_msgs/Odometry: that carries two 6x6 covariance blocks, ~700 bytes,
+    // over a 512-byte micro-ROS MTU. The Jetson can wrap these three numbers in
+    // a proper Odometry message where bandwidth is free.
+    INIT_OR_FAIL(rclc_publisher_init_default(&wheelOdomPub, &node,
+            ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Vector3), "/wheel_odom"), "/wheel_odom");
+    // /rover_diag — x = measured loop() Hz, y = free heap KB, z = agent state.
+    INIT_OR_FAIL(rclc_publisher_init_default(&diagPub, &node,
+            ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Vector3), "/rover_diag"), "/rover_diag");
+
+    rclc_executor_init(&executor, &support.context, 3, &allocator);   // 3 subs
     rclc_executor_add_subscription(&executor, &cmdVelSub, &twistMsg, &cmdVelCb, ON_NEW_DATA);
     rclc_executor_add_subscription(&executor, &pidGainsSub, &pidGainsMsg, &pidGainsCb, ON_NEW_DATA);
+    rclc_executor_add_subscription(&executor, &resetOdomSub, &resetOdomMsg, &resetOdomCb, ON_NEW_DATA);
 
 #if defined(RMW_UROS_SYNC_SESSION) || __has_include(<rmw_microros/time_sync.h>)
     timeSynced = (rmw_uros_sync_session(1000) == RMW_RET_OK);
@@ -317,7 +424,11 @@ bool createEntities() {
 void destroyEntities() {
     rcl_subscription_fini(&cmdVelSub, &node);
     rcl_subscription_fini(&pidGainsSub, &node);
+    rcl_subscription_fini(&resetOdomSub, &node);
     rcl_publisher_fini(&wheelStatePub, &node);
+    rcl_publisher_fini(&wheelTicksPub, &node);
+    rcl_publisher_fini(&wheelOdomPub, &node);
+    rcl_publisher_fini(&diagPub, &node);
     rclc_executor_fini(&executor);
     rcl_node_fini(&node);
     rclc_support_fini(&support);
@@ -377,6 +488,18 @@ void setup() {
 
 // ── Loop — micro-ROS messaging only (control lives in the task) ──────────────
 void loop() {
+    // Measure our own iteration rate. Published on /rover_diag once a second.
+    {
+        static uint32_t lastRateMs = 0, iters = 0;
+        iters++;
+        uint32_t nowMs = millis();
+        if (nowMs - lastRateMs >= 1000) {
+            gLoopHz = iters * 1000.0f / (float)(nowMs - lastRateMs);
+            iters = 0;
+            lastRateMs = nowMs;
+        }
+    }
+
     ArduinoOTA.handle();
     switch (agentState) {
     case WAITING_AGENT:
@@ -397,11 +520,35 @@ void loop() {
             else if (++pingMiss >= 3) agentState = AGENT_DISCONNECTED;
         });
         if (agentState == AGENT_CONNECTED) {
-            rclc_executor_spin_some(&executor, RCL_MS_TO_NS(5));
+            // Timeout 0, NOT 5 ms. Measured 2026-08-15: with a non-zero timeout
+            // this call blocks until a message arrives, or ~1 s if none does, so
+            // loop() ran once per inbound message and everything below it
+            // inherited that rate. /wheel_state tracked whatever we published TO
+            // the board 1:1 -- 2 Hz in gave 3 Hz out, 10 Hz in gave 10 Hz out,
+            // silence gave 1.000 Hz. Polling non-blocking lets delay(1) set the
+            // loop rate and the 50 ms timer below fire as intended.
+            // /rover_diag reports the result, so this is verifiable from the
+            // Jetson rather than by inference.
+            rclc_executor_spin_some(&executor, 0);
+
             // publish telemetry from the shared measured velocities (~20 Hz)
             EXECUTE_EVERY_N_MS(50, {
                 wheelStateMsg.x = gVelL; wheelStateMsg.y = gVelR; wheelStateMsg.z = targetVx;
                 rcl_publish(&wheelStatePub, &wheelStateMsg, NULL);
+
+                wheelTicksMsg.x = (double)gTickLF; wheelTicksMsg.y = (double)gTickLR;
+                wheelTicksMsg.z = (double)gTickRF; wheelTicksMsg.w = (double)gTickRR;
+                rcl_publish(&wheelTicksPub, &wheelTicksMsg, NULL);
+
+                wheelOdomMsg.x = odomX; wheelOdomMsg.y = odomY; wheelOdomMsg.z = odomTh;
+                rcl_publish(&wheelOdomPub, &wheelOdomMsg, NULL);
+            });
+
+            EXECUTE_EVERY_N_MS(1000, {
+                diagMsg.x = gLoopHz;
+                diagMsg.y = (double)(ESP.getFreeHeap() / 1024);
+                diagMsg.z = (double)agentState;
+                rcl_publish(&diagPub, &diagMsg, NULL);
             });
         }
         break;
