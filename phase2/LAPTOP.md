@@ -47,19 +47,43 @@ rviz2 -d rover.rviz
 
 | display | topic | |
 |---|---|---|
-| **Fused pose** | `/odom` | teal arrow — where the rover thinks it is, with its covariance ellipse |
-| **Where it has been** | `/fusion/path` | green line — the track it has driven |
-| **TF** | | the frame tree: `odom → base_link → camera0_link` |
-| Raw cuVSLAM | `/vo/odom` | red arrow, **off by default**. Turn it on to watch it teleport while the fused pose does not |
-| IR left | `infra1` | off by default; on if you want to see what the camera sees |
-| nvblox mesh / 2D slice | | the map, once Phase 2b is running |
+| **ROOM (nvblox)** | `static_occupancy_grid` | the map, built as you drive |
+| **Track driven** | `/fusion/path` | green line — where it has been |
+| **nav2 plan** | `/plan` | amber line — the route nav2 computed |
+| **Fused pose** | `/odom` | teal arrow, with its covariance ellipse |
+| **Footprint** | `published_footprint` | the rover's real outline, 35 × 38 cm |
+| Costmap global / local | | **off** — turn on to see obstacle inflation |
+| Raw cuVSLAM | `/vo/odom` | **off** — turn on to watch it teleport |
+| TF, IR left | | **off** |
 
-**Fixed Frame is `odom`.** Not `map` — there is no map frame until a map is being
-saved and localized against, which is Phase 2c.
+**Fixed Frame is `odom`.** Not `map` — there is no map frame until something
+localizes against a saved map, which is Phase 2c. Setting it to `map` gives an
+empty screen and a confusing hunt.
 
-The **covariance ellipse** around the pose grows when a sensor drops out. That is
-the estimate telling you it is less sure, and it is worth watching: it should
-swell when you drive at a blank wall and shrink again afterwards.
+### Driving to a goal
+
+Use the **2D Goal Pose** tool in the toolbar: click a point and drag to set the
+direction. nav2 plans a route (amber) and drives it.
+
+### The two QoS settings that decide whether you see anything
+
+RViz shows an empty screen for a QoS mismatch, exactly as it does for a dead
+publisher, so these are worth knowing:
+
+| topic | Durability | |
+|---|---|---|
+| `static_occupancy_grid` | **Volatile** | nvblox publishes volatile |
+| `/global_costmap/costmap` | **Transient Local** | nav2 publishes latched |
+| `/fusion/path` | **Transient Local** | so a late RViz gets the whole track |
+
+They are opposite, and both are already set correctly in `rover.rviz`.
+
+### What the nvblox mesh is not here
+
+The 3D mesh needs `nvblox_rviz_plugin`, which is in the rover's container but
+not on the laptop. Everything above uses standard ROS message types that any
+Jazzy install renders, so nothing here depends on that plugin. The 2D map is
+what nav2 plans on anyway.
 
 ## 5. If the laptop is not available
 
