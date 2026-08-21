@@ -92,9 +92,9 @@ Visualization Manager:
       Name: nvblox 2D slice
       Enabled: true
       Topic:
-        Value: /nvblox_node/static_map_slice
+        Value: /nvblox_node/static_occupancy_grid
         Depth: 1
-        Durability Policy: Transient Local
+        Durability Policy: Volatile
         Reliability Policy: Reliable
       Color Scheme: costmap
       Alpha: 0.7

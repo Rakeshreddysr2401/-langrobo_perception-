@@ -8,6 +8,7 @@
 #   ./rover values     every sensor's current reading, in one place
 #   ./rover status     what is alive right now
 #   ./rover fused      the fused pose -> /odom + TF, what nav2 consumes
+#   ./rover map        nvblox — build the room as it drives (Phase 2)
 #   ./rover rviz       view it (prefer a laptop — see phase2/LAPTOP.md)
 #   ./rover logs <n>   tail a layer's log (camera|vo|gyro|fused)
 #   ./rover stop       tear the container down
@@ -217,6 +218,34 @@ fused)
   echo
   echo "  Health, live:  ./rover compare"
   echo "  Raw status:    ros2 topic echo /fusion/status"
+  ;;
+
+# ── map ─────────────────────────────────────────────────────────────────────
+map)
+  need_container
+  echo "  checking the fused pose is up before building a map on it..."
+  assert_rate /odom 15 "fused odom" || die "no fused pose — run ./rover fused first"
+  kill_match 'nvblox_node'
+  echo "[map] nvblox — depth + the FUSED pose -> TSDF mesh and a 2D floor slice"
+  echo "      built on /odom, not raw cuvslam: nvblox writes depth wherever the"
+  echo "      pose claims the robot is, so a teleport smears the map permanently."
+  dexec "ros2 launch $SRC2/launch/nvblox.launch.py > /tmp/map.log 2>&1"
+  # nvblox allocates GPU hash tables and warms up its integrators before it
+  # publishes anything; checked too early it reads 0 Hz and looks broken.
+  sleep 25
+  echo
+  echo "  GATE map:"
+  # static_occupancy_grid, NOT static_map_slice: that name carries an
+  # nvblox_msgs/DistanceMapSlice, while the nav_msgs/OccupancyGrid RViz and
+  # nav2 want is this one.
+  assert_rate /nvblox_node/static_occupancy_grid 1 "2D occupancy grid" || true
+  assert_rate "/nvblox_node/back_projected_depth/camera0_depth_optical_frame" 5 "depth integrated" || true
+  echo
+  echo "  How much is mapped:"
+  rexec "python3 /logs/map_stats.py" 2>/dev/null | sed -n "/grid/,/occupied/p" | sed "s/^/    /"
+  echo
+  echo "  Drive it and the map grows. In RViz: nvblox mesh, nvblox 2D slice."
+  echo "  Log: ./rover logs map"
   ;;
 
 # ── rviz ────────────────────────────────────────────────────────────────────
