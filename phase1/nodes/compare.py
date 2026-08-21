@@ -141,6 +141,12 @@ SCALE_LO, SCALE_HI = 0.85, 1.25
 BIAS_ADAPT = 2.0e-4
 # Below these, both witnesses agree the rover is parked and the gyro is reading
 # pure bias. Wheels in m/s, cuVSLAM in m/s.
+# A source silent this long is not contributing, and somebody else must cover
+# for it. Deliberately tighter than STALE_S (which is only a display hint):
+# by the time a sensor has been quiet half a second the pose has already stopped
+# being updated by it, and waiting longer just loses more travel.
+COVER_STALE_S = 0.5
+
 STILL_WHEEL_MS = 0.010
 STILL_VO_MS = 0.010
 
@@ -275,6 +281,9 @@ class Compare(Node):
         self.enc_path_at_fuse = 0.0  # wheels path at the last FUSED advance
         self.enc_path_dr = 0.0       # wheels path spent dead-reckoning, excluded from the ratio
         self.dr_steps = 0            # frames carried without cuVSLAM
+        self.cover_vo = 0            # frames the wheels+gyro covered for cuVSLAM
+        self.cover_gyro = 0          # frames cuVSLAM covered for the gyro
+        self.cover_enc = 0           # frames cuVSLAM covered for the encoders
         self.enc_corrections = 0     # how many steps the encoders actually rescaled
         self.accel = (0.0, 0.0, 0.0)      # raw, base_link frame
         self.gyro_xyz = (0.0, 0.0, 0.0)   # raw rates, all three axes
@@ -291,6 +300,13 @@ class Compare(Node):
         self.create_subscription(Quaternion, '/wheel_ticks', self._ticks,
                                  qos_profile_sensor_data)
         self.create_timer(0.25, self._draw)
+        # FUSED must NOT be driven by /vo/odom alone. Until 2026-08-21 both the
+        # fusion and the dead-reckoning fallback were called from _vo, so
+        # cuVSLAM was still the heartbeat: if it stopped publishing outright --
+        # camera unplugged, driver dead, not merely a teleport -- the fused pose
+        # froze even though the wheels and the gyro were still healthy. This
+        # timer gives the estimate its own pulse, independent of any one sensor.
+        self.create_timer(0.05, self._watchdog)
 
     def _vo(self, m):
         s = self.src['cuvslam']
@@ -344,6 +360,23 @@ class Compare(Node):
             if self.landmarks_min is None or self.landmarks < self.landmarks_min:
                 self.landmarks_min = self.landmarks
 
+    def _watchdog(self):
+        """Keep the pose alive when cuVSLAM goes quiet altogether.
+
+        A teleport is handled in _vo, because a message still arrives. This is
+        the other failure: no message at all. Nothing else would notice, because
+        every other path here is triggered by an incoming /vo/odom.
+        """
+        if self.gyro_bias is None:
+            return
+        now = time.time()
+        vo, w = self.src['cuvslam'], self.src['wheels']
+        vo_gone = vo.n == 0 or (now - vo.last_msg) > COVER_STALE_S
+        w_alive = w.n > 0 and (now - w.last_msg) <= COVER_STALE_S
+        if vo_gone and w_alive:
+            self._deadreckon()
+            self.cover_vo += 1
+
     def _deadreckon(self):
         """cuVSLAM teleported — advance FUSED on wheels and gyro alone.
 
@@ -367,6 +400,15 @@ class Compare(Node):
         # encoder/cuVSLAM scale ratio -- that would inflate the calibration by
         # exactly the distance the camera failed to see.
         self.enc_path_dr += max(0.0, gained)
+
+        # Mark FUSED alive BEFORE the early returns. Standing still with cuVSLAM
+        # dead is a perfectly good estimate -- the rover is exactly where it was
+        # -- but without this the row went stale and printed "no publisher",
+        # which reads as the fused pose having died at precisely the moment it
+        # was doing its job.
+        f = self.src['FUSED']
+        f.seen()
+
         if gained <= 0:
             return
         velL, velR = self.wheel_prev
@@ -377,8 +419,6 @@ class Compare(Node):
         self.fused_yaw = wrap(self.fused_yaw
                               + wrap(self.gyro_yaw - self.gyro_prev_yaw))
         self.gyro_prev_yaw = self.gyro_yaw
-        f = self.src['FUSED']
-        f.seen()
         f.step_body(gained if vx > 0 else -gained, 0.0, self.fused_yaw)
         self.dr_steps += 1
 
@@ -427,9 +467,19 @@ class Compare(Node):
         # walked to -9.52 deg, and FUSED reported -9.51. The filter was doing
         # nothing at all. Integrating the gyro's STEP onto the fused state and
         # then pulling that toward cuVSLAM is what actually bounds the drift.
-        self.fused_yaw = wrap(self.fused_yaw + wrap(self.gyro_yaw - self.gyro_prev_yaw))
-        self.fused_yaw = wrap(self.fused_yaw
-                              + wrap(vo_th - self.fused_yaw) * YAW_TRUST_VO)
+        g = self.src['gyro']
+        if g.n and (time.time() - g.last_msg) <= COVER_STALE_S:
+            self.fused_yaw = wrap(self.fused_yaw
+                                  + wrap(self.gyro_yaw - self.gyro_prev_yaw))
+            self.fused_yaw = wrap(self.fused_yaw
+                                  + wrap(vo_th - self.fused_yaw) * YAW_TRUST_VO)
+        else:
+            # The gyro has gone quiet. Its step is the thing being integrated, so
+            # a stale one would hold the heading frozen through a real turn --
+            # worse than having no gyro at all. cuVSLAM's heading does not drift,
+            # so hand the job straight to it rather than coasting on a dead input.
+            self.fused_yaw = vo_th
+            self.cover_gyro += 1
         self.gyro_prev_yaw = self.gyro_yaw
 
         # ── distance: one scale factor from TOTALS, not a per-step ratio ──────
@@ -452,7 +502,10 @@ class Compare(Node):
         enc_ok = (self.wheel_dead_side is None and self.wheel_moved_l
                   and self.wheel_moved_r)
         self.enc_path_at_fuse = w.path
-        if enc_ok and self.vo_path_raw > SCALE_MIN_TRAVEL:
+        w_fresh = w.n > 0 and (time.time() - w.last_msg) <= COVER_STALE_S
+        if not (enc_ok and w_fresh):
+            self.cover_enc += 1        # cuVSLAM carrying distance on its own
+        if enc_ok and w_fresh and self.vo_path_raw > SCALE_MIN_TRAVEL:
             ratio = (w.path - self.enc_path_dr) / self.vo_path_raw
             # cuVSLAM reads ~2% under, so ~1.02 is expected. Anything outside
             # this band is wheel slip or a tracking failure, not calibration.
@@ -673,6 +726,23 @@ class Compare(Node):
                   if self.landmarks < LOW_LANDMARKS else ''
             out.append(f'  landmarks {self.landmarks:4d}  (lowest seen '
                        f'{self.landmarks_min if self.landmarks_min is not None else 0}){tag}')
+
+        now_t = time.time()
+        alive = {k: (self.src[k].n > 0
+                     and (now_t - self.src[k].last_msg) <= COVER_STALE_S)
+                 for k in ('cuvslam', 'wheels', 'gyro')}
+        trio = '  '.join(f'{k}{"OK" if v else "DOWN"}'.replace(k, k + ' ')
+                         for k, v in alive.items())
+        cover = []
+        if self.cover_vo:
+            cover.append(f'wheels+gyro covered cuvslam {self.cover_vo}x')
+        if self.cover_gyro:
+            cover.append(f'cuvslam covered gyro {self.cover_gyro}x')
+        if self.cover_enc:
+            cover.append(f'cuvslam covered wheels {self.cover_enc}x')
+        out.append(f'  health: {trio}'
+                   + ('   |  ' + ',  '.join(cover) if cover else
+                      '   |  all three contributing'))
 
         if self.pitch is not None:
             mp = ''

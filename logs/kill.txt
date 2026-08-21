@@ -1,0 +1,1696 @@
+
+  PHASE 1 — where does each sensor think it is?     t+   0.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0     0.0
+  gyro                       — no publisher —               
+  FUSED                      — no publisher —               
+
+  health: cuvslam DOWN  wheels OK  gyro DOWN   |  all three contributing
+  ⚠ wheels at 0.0 Hz, not 20 — distance is a coarse estimate, treat it as a sanity check not a reference
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   0.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0     0.0
+  gyro                       — no publisher —               
+  FUSED                      — no publisher —               
+
+  health: cuvslam DOWN  wheels OK  gyro DOWN   |  all three contributing
+  ⚠ wheels at 0.0 Hz, not 20 — distance is a coarse estimate, treat it as a sanity check not a reference
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   0.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0     0.0
+  gyro             —        —      0.00            —         —     0.0
+  FUSED                      — no publisher —               
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  all three contributing
+  ⚠ wheels at 0.0 Hz, not 20 — distance is a coarse estimate, treat it as a sanity check not a reference
+  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL (4.2s left)
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   1.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0     0.0
+  gyro             —        —      0.00            —         —     0.0
+  FUSED                      — no publisher —               
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  all three contributing
+  ⚠ wheels at 0.0 Hz, not 20 — distance is a coarse estimate, treat it as a sanity check not a reference
+  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL (4.0s left)
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   1.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0     0.0
+  gyro             —        —      0.00            —         —     0.0
+  FUSED                      — no publisher —               
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  all three contributing
+  ⚠ wheels at 0.0 Hz, not 20 — distance is a coarse estimate, treat it as a sanity check not a reference
+  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL (3.7s left)
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   1.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.8
+  gyro             —        —      0.00            —         —   158.4
+  FUSED                      — no publisher —               
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  all three contributing
+  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL (3.5s left)
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   1.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.8
+  gyro             —        —      0.00            —         —   158.4
+  FUSED                      — no publisher —               
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  all three contributing
+  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL (3.2s left)
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   2.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.8
+  gyro             —        —      0.00            —         —   158.4
+  FUSED                      — no publisher —               
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  all three contributing
+  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL (3.0s left)
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   2.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.8
+  gyro             —        —      0.00            —         —   158.4
+  FUSED                      — no publisher —               
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  all three contributing
+  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL (2.7s left)
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   2.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.00            —         —   200.0
+  FUSED                      — no publisher —               
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  all three contributing
+  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL (2.5s left)
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   2.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.00            —         —   200.0
+  FUSED                      — no publisher —               
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  all three contributing
+  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL (2.2s left)
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   3.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.00            —         —   200.0
+  FUSED                      — no publisher —               
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  all three contributing
+  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL (2.0s left)
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   3.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.00            —         —   200.0
+  FUSED                      — no publisher —               
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  all three contributing
+  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL (1.7s left)
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   3.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.00            —         —   201.0
+  FUSED                      — no publisher —               
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  all three contributing
+  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL (1.5s left)
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   3.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.00            —         —   201.0
+  FUSED                      — no publisher —               
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  all three contributing
+  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL (1.2s left)
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   4.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.00            —         —   201.0
+  FUSED                      — no publisher —               
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  all three contributing
+  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL (1.0s left)
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   4.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.00            —         —   201.0
+  FUSED                      — no publisher —               
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  all three contributing
+  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL (0.7s left)
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   4.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.00            —         —   201.0
+  FUSED                      — no publisher —               
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  all three contributing
+  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL (0.5s left)
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   4.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.00            —         —   199.2
+  FUSED                      — no publisher —               
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  all three contributing
+  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL (0.2s left)
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   5.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.00            —         —   199.2
+  FUSED                      — no publisher —               
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  all three contributing
+  tilt: roll  +0.64 deg   pitch  -0.98 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   5.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.00            —         —   199.2
+  FUSED          0.0      0.0      0.00          0.0       0.0     0.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 5x
+  tilt: roll  +0.54 deg   pitch  -1.11 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   5.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.00            —         —   199.2
+  FUSED          0.0      0.0      0.00          0.0       0.0     0.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 10x
+  tilt: roll  +0.52 deg   pitch  -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   5.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    19.0
+  gyro             —        —      0.00            —         —   201.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    15.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 15x
+  tilt: roll  +0.45 deg   pitch  -1.15 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   6.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    19.0
+  gyro             —        —     -0.00            —         —   201.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    15.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 20x
+  tilt: roll  +0.50 deg   pitch  -1.14 deg   camera mount pitch -1.15 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   6.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    19.0
+  gyro             —        —     -0.00            —         —   201.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    15.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 25x
+  tilt: roll  +0.48 deg   pitch  -1.10 deg   camera mount pitch -1.14 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   6.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    19.0
+  gyro             —        —      0.01            —         —   201.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    15.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 30x
+  tilt: roll  +0.50 deg   pitch  -1.17 deg   camera mount pitch -1.15 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   6.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    19.0
+  gyro             —        —      0.01            —         —   201.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    15.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 35x
+  tilt: roll  +0.51 deg   pitch  -1.15 deg   camera mount pitch -1.14 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   7.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.8
+  gyro             —        —     -0.00            —         —   200.8
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 40x
+  tilt: roll  +0.51 deg   pitch  -1.13 deg   camera mount pitch -1.14 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   7.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.8
+  gyro             —        —      0.01            —         —   200.8
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 45x
+  tilt: roll  +0.49 deg   pitch  -1.16 deg   camera mount pitch -1.14 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   7.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.8
+  gyro             —        —      0.00            —         —   200.8
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 50x
+  tilt: roll  +0.52 deg   pitch  -1.09 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   7.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.8
+  gyro             —        —     -0.00            —         —   200.8
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 55x
+  tilt: roll  +0.48 deg   pitch  -1.13 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   8.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.01            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 60x
+  tilt: roll  +0.51 deg   pitch  -1.10 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   8.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.02            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 65x
+  tilt: roll  +0.50 deg   pitch  -1.10 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   8.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.02            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 70x
+  tilt: roll  +0.49 deg   pitch  -1.13 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   8.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.01            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 75x
+  tilt: roll  +0.49 deg   pitch  -1.11 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   9.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.01            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 80x
+  tilt: roll  +0.53 deg   pitch  -1.09 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   9.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.01            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 85x
+  tilt: roll  +0.53 deg   pitch  -1.11 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   9.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.01            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 90x
+  tilt: roll  +0.50 deg   pitch  -1.10 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   9.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.01            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 95x
+  tilt: roll  +0.51 deg   pitch  -1.13 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  10.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.01            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 100x
+  tilt: roll  +0.54 deg   pitch  -1.14 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  10.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.01            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 105x
+  tilt: roll  +0.49 deg   pitch  -1.14 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  10.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.01            —         —   200.8
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 110x
+  tilt: roll  +0.51 deg   pitch  -1.14 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  10.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.00            —         —   200.8
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 115x
+  tilt: roll  +0.52 deg   pitch  -1.18 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  11.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.01            —         —   200.8
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 120x
+  tilt: roll  +0.51 deg   pitch  -1.17 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  11.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.00            —         —   200.8
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 125x
+  tilt: roll  +0.53 deg   pitch  -1.19 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  11.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.01            —         —   200.8
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 130x
+  tilt: roll  +0.52 deg   pitch  -1.19 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  11.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.01            —         —   200.8
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 135x
+  tilt: roll  +0.51 deg   pitch  -1.16 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  12.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.01            —         —   200.8
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 140x
+  tilt: roll  +0.53 deg   pitch  -1.16 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  12.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.02            —         —   200.8
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 145x
+  tilt: roll  +0.57 deg   pitch  -1.15 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  12.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.02            —         —   200.8
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 150x
+  tilt: roll  +0.51 deg   pitch  -1.13 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  12.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.02            —         —   199.3
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 155x
+  tilt: roll  +0.51 deg   pitch  -1.12 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  13.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.02            —         —   199.3
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 160x
+  tilt: roll  +0.55 deg   pitch  -1.14 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  13.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.01            —         —   199.3
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 165x
+  tilt: roll  +0.49 deg   pitch  -1.20 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  13.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.01            —         —   199.3
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 170x
+  tilt: roll  +0.48 deg   pitch  -1.13 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  13.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.01            —         —   201.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 175x
+  tilt: roll  +0.45 deg   pitch  -1.13 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  14.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.01            —         —   201.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 180x
+  tilt: roll  +0.46 deg   pitch  -1.13 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  14.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.01            —         —   201.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 185x
+  tilt: roll  +0.51 deg   pitch  -1.13 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  14.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.01            —         —   201.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 190x
+  tilt: roll  +0.49 deg   pitch  -1.18 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  14.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    19.0
+  gyro             —        —      0.01            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 195x
+  tilt: roll  +0.52 deg   pitch  -1.14 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  15.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    19.0
+  gyro             —        —      0.00            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 200x
+  tilt: roll  +0.51 deg   pitch  -1.16 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  15.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    19.0
+  gyro             —        —     -0.01            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 205x
+  tilt: roll  +0.54 deg   pitch  -1.11 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  15.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    19.0
+  gyro             —        —     -0.01            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 210x
+  tilt: roll  +0.54 deg   pitch  -1.12 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  15.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    19.0
+  gyro             —        —     -0.01            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 215x
+  tilt: roll  +0.54 deg   pitch  -1.16 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  16.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.8
+  gyro             —        —     -0.02            —         —   200.8
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 220x
+  tilt: roll  +0.52 deg   pitch  -1.12 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  16.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.8
+  gyro             —        —      0.00            —         —   200.8
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 225x
+  tilt: roll  +0.50 deg   pitch  -1.10 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  16.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.8
+  gyro             —        —      0.01            —         —   200.8
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 230x
+  tilt: roll  +0.44 deg   pitch  -1.19 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  16.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.8
+  gyro             —        —      0.01            —         —   200.8
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 235x
+  tilt: roll  +0.50 deg   pitch  -1.14 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  17.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.8
+  gyro             —        —      0.01            —         —   200.8
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 240x
+  tilt: roll  +0.55 deg   pitch  -1.14 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  17.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.02            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 245x
+  tilt: roll  +0.50 deg   pitch  -1.11 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  17.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.02            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 250x
+  tilt: roll  +0.50 deg   pitch  -1.07 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  17.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.01            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 255x
+  tilt: roll  +0.50 deg   pitch  -1.10 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  18.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.02            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 260x
+  tilt: roll  +0.51 deg   pitch  -1.11 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  18.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.01            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 265x
+  tilt: roll  +0.51 deg   pitch  -1.09 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  18.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.01            —         —   200.8
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 270x
+  tilt: roll  +0.48 deg   pitch  -1.09 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  18.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.01            —         —   200.8
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 275x
+  tilt: roll  +0.45 deg   pitch  -1.14 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  19.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.01            —         —   200.8
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 280x
+  tilt: roll  +0.47 deg   pitch  -1.11 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  19.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.02            —         —   200.8
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 285x
+  tilt: roll  +0.45 deg   pitch  -1.09 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  19.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.03            —         —   200.9
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 290x
+  tilt: roll  +0.53 deg   pitch  -1.09 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  19.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.03            —         —   200.9
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 295x
+  tilt: roll  +0.50 deg   pitch  -1.12 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  20.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.04            —         —   200.9
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 300x
+  tilt: roll  +0.53 deg   pitch  -1.08 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  20.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.03            —         —   200.9
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 305x
+  tilt: roll  +0.50 deg   pitch  -1.14 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  20.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.04            —         —   200.9
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 310x
+  tilt: roll  +0.50 deg   pitch  -1.14 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  20.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    19.2
+  gyro             —        —     -0.04            —         —   199.3
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 315x
+  tilt: roll  +0.48 deg   pitch  -1.18 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  21.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    19.2
+  gyro             —        —     -0.04            —         —   199.3
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 320x
+  tilt: roll  +0.48 deg   pitch  -1.13 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  21.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    19.2
+  gyro             —        —     -0.04            —         —   199.3
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 325x
+  tilt: roll  +0.53 deg   pitch  -1.13 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  21.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    19.2
+  gyro             —        —     -0.04            —         —   199.3
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 330x
+  tilt: roll  +0.54 deg   pitch  -1.13 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  21.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    21.0
+  gyro             —        —     -0.04            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 335x
+  tilt: roll  +0.50 deg   pitch  -1.10 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  22.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    21.0
+  gyro             —        —     -0.03            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 340x
+  tilt: roll  +0.53 deg   pitch  -1.10 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  22.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    21.0
+  gyro             —        —     -0.04            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 345x
+  tilt: roll  +0.51 deg   pitch  -1.11 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  22.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    21.0
+  gyro             —        —     -0.02            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 350x
+  tilt: roll  +0.46 deg   pitch  -1.08 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  22.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    21.0
+  gyro             —        —     -0.02            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 355x
+  tilt: roll  +0.49 deg   pitch  -1.13 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  23.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.02            —         —   201.6
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 360x
+  tilt: roll  +0.54 deg   pitch  -1.10 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  23.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.02            —         —   201.6
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 365x
+  tilt: roll  +0.53 deg   pitch  -1.13 deg   camera mount pitch -1.11 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  23.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.02            —         —   201.6
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 370x
+  tilt: roll  +0.54 deg   pitch  -1.14 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  23.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.02            —         —   201.6
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 375x
+  tilt: roll  +0.54 deg   pitch  -1.16 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  24.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.03            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 380x
+  tilt: roll  +0.54 deg   pitch  -1.18 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  24.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.02            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 385x
+  tilt: roll  +0.52 deg   pitch  -1.14 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  24.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.02            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 390x
+  tilt: roll  +0.54 deg   pitch  -1.11 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  24.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.02            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 395x
+  tilt: roll  +0.52 deg   pitch  -1.13 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  25.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.03            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 400x
+  tilt: roll  +0.50 deg   pitch  -1.16 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  25.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.04            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 405x
+  tilt: roll  +0.50 deg   pitch  -1.14 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  25.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.05            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 410x
+  tilt: roll  +0.51 deg   pitch  -1.15 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  25.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.05            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 415x
+  tilt: roll  +0.50 deg   pitch  -1.15 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  26.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.05            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 420x
+  tilt: roll  +0.49 deg   pitch  -1.17 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  26.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.06            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 425x
+  tilt: roll  +0.50 deg   pitch  -1.18 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  26.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.06            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 430x
+  tilt: roll  +0.49 deg   pitch  -1.17 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  26.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam                    — no publisher —               
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.06            —         —   200.0
+  FUSED          0.0      0.0      0.00          0.0       0.0    20.0
+
+  health: cuvslam DOWN  wheels OK  gyro OK   |  wheels+gyro covered cuvslam 435x
+  tilt: roll  +0.53 deg   pitch  -1.10 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0847 deg/s (+5.08 deg/min)   0 updates
+
+
+  Ctrl-C to finish and grade.
