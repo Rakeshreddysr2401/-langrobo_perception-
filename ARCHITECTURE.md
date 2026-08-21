@@ -1,194 +1,240 @@
-# ARCHITECTURE — every block, and what goes in and out
+# Architecture — the system as built
+
+What runs where, what talks to what, and **why each decision went the way it
+did**. For the measured numbers see [PHASE1.md](PHASE1.md); for how to run it
+see [OPERATIONS.md](OPERATIONS.md); for open faults see [TODO.md](TODO.md).
 
 ---
 
-## 1. Frames — the idea that explains most confusion
+## 1. Four machines
 
 ```
-map ──────────> odom ──────────> base_link ──────────> camera0_link
-      ▲                 ▲                     ▲
-   cuVSLAM            EKF              static TF (measured:
- (jumps when      (smooth, but         x 0.10, z 0.163)
-  it recognises    drifts slowly)
-  a place)
+   ┌─────────────────────────────────────────────────────────────┐
+   │  D555 depth camera            192.168.11.55  (own subnet)   │
+   │  stereo IR · depth · IMU      Ethernet + PoE, NOT USB       │
+   └───────────────┬─────────────────────────────────────────────┘
+                   │  DDS over Ethernet
+   ┌───────────────▼─────────────────────────────────────────────┐
+   │  Jetson Orin Nano             192.168.1.15                  │
+   │  everything in orin-nav:1.1                                 │
+   │    vo_node      stereo IR → cuVSLAM → /vo/odom              │
+   │    gyro_node    IMU → base_link → /gyro/base                │
+   │    fusion_node  → /odom + TF odom→base_link                 │
+   │    compare.py   the measurement instrument                  │
+   └───────────────▲─────────────────────────────────────────────┘
+                   │  DDS over WiFi
+   ┌───────────────┴─────────────────────────────────────────────┐
+   │  Pi 5                         192.168.1.16                  │
+   │    micro-ROS agent   ESP32 ↔ ROS, UDP :8888                 │
+   │    teleop web        hold-to-move → /cmd_vel, :8091         │
+   └───────────────▲─────────────────────────────────────────────┘
+                   │  micro-ROS over WiFi UDP
+   ┌───────────────┴─────────────────────────────────────────────┐
+   │  ESP32                        192.168.1.3                   │
+   │    50 Hz PID control task (own FreeRTOS core)               │
+   │    4× quadrature encoders · 2× BTS7960                      │
+   └─────────────────────────────────────────────────────────────┘
 ```
 
-| Frame | Means | Behaviour |
+**Why the split.** The ESP32 runs the control loop on its own FreeRTOS core so
+that a network stall cannot stop the wheels being controlled. The Pi 5 owns the
+micro-ROS bridge because it sits on the rover and the link to the board must be
+short. The Jetson owns everything needing a GPU.
+
+---
+
+## 2. Topics
+
+### From the ESP32
+
+| topic | type | rate | contents |
+|---|---|---|---|
+| `/wheel_state` | `Vector3` | 20 Hz | `x`=velL, `y`=velR, `z`=commanded vx |
+| `/wheel_ticks` | `Quaternion` | 20 Hz | **cumulative** counts: LF, LR, RF, RR |
+| `/wheel_odom` | `Vector3` | 20 Hz | x, y (m), θ (rad), integrated on-board at 50 Hz |
+| `/rover_diag` | `Vector3` | 1 Hz | `loop()` Hz, free heap KB, agent state |
+| `/cmd_vel` | `Twist` | in | target body vx, wz |
+| `/pid_gains` | `Vector3` | in | live tuning: Kp, Ki, minDuty |
+| `/reset_odom` | `Vector3` | in | any message zeroes the on-board pose |
+
+**Why `Quaternion` for four wheel counts.** It is four doubles, 32 bytes, and
+needs no custom message package on either end — which matters when the container
+that builds the Jetson side has no rebuild recipe.
+
+**Why `/wheel_odom` is not `nav_msgs/Odometry`.** That message carries two 6×6
+covariance blocks, ~700 bytes, over a 512-byte micro-ROS MTU. The Jetson wraps
+three numbers where bandwidth is free.
+
+**Why `/rover_diag` exists.** The 1 Hz telemetry fault took a day to find purely
+because nothing reported how fast `loop()` was running. It does now — the next
+occurrence is a glance rather than an investigation.
+
+### From the camera
+
+| topic | rate | used by |
 |---|---|---|
-| `map` | the world, corrected | **accurate but jumps** at loop closure |
-| `odom` | dead-reckoned world | **smooth but drifts** — never jumps |
-| `base_link` | the rover itself | origin on the **ground**, x forward |
-| `camera0_link` | the camera | 10 cm forward, 16.3 cm up |
+| `/camera/camera0/infra1,2/image_rect_raw` | 30 Hz | cuVSLAM |
+| `/camera/camera0/infra1,2/camera_info` | 30 Hz | intrinsics + baseline |
+| `/camera/camera0/depth/image_rect_raw` | 30 Hz | **nothing yet** — Phase 2 |
+| `/camera/camera0/motion/sample` | 200 Hz | `gyro_node` |
 
-**Why two world frames instead of one.** A controller cannot cope with the robot
-teleporting mid-manoeuvre, so it needs `odom`. A goal must not drift away over
-ten minutes, so it needs `map`. You cannot have both properties in one frame, so
-ROS uses two and keeps the difference in the `map → odom` transform.
+### On the Jetson
 
-**`base_link`'s origin is on the floor.** That is why open floor must deproject
-to z ≈ 0.000, and why a 3.7 cm error in the camera height mapped the floor as a
-wall.
+| topic | type | rate | published by |
+|---|---|---|---|
+| `/vo/odom` | `Odometry` | 30 Hz | `vo_node` — **raw**, teleports |
+| `/vo/status` | `String` | 1 Hz | `vo_node` — landmarks, health |
+| `/gyro/base` | `Imu` | 200 Hz | `gyro_node` — re-framed into `base_link` |
+| **`/odom`** | `Odometry` | 20 Hz | **`fusion_node` — what nav2 consumes** |
+| `/fusion/status` | `String` | 1 Hz | `fusion_node` — who is covering for whom |
 
 ---
 
-## 2. The blocks
+## 3. Frames
 
-### `realsense2_camera` — the eyes
+```
+  odom ──(fusion_node, 20 Hz)──► base_link ──(static)──► camera0_link
+```
 
-| | |
-|---|---|
-| **In** | the D555 over DDS/ethernet at `192.168.11.55` |
-| **Out** | `/camera/camera0/infra1/image_rect_raw` (left IR, 896×504@30)<br>`/camera/camera0/infra2/image_rect_raw` (right IR)<br>`/camera/camera0/depth/image_rect_raw`<br>`/camera/camera0/motion/*` (gyro + accel)<br>a `camera_info` beside each |
-
-Two flags are load-bearing and must not be "tidied": `enable_sync:=false` and
-`depth_module.emitter_enabled:=0`. See `FACTS.md §1`.
-
-### `static_transform_publisher` — the tape measure
-
-| | |
-|---|---|
-| **In** | nothing; fixed numbers |
-| **Out** | TF `base_link → camera0_link`, x 0.10, z 0.163 |
-
-### `cuvslam_node.py` — *where am I?*
-
-| | |
-|---|---|
-| **In** | `infra1/image_rect_raw` + `infra2/image_rect_raw` — the **stereo IR pair**<br>`infra1/camera_info` + `infra2/camera_info` |
-| **Out** | `/odom` — position and orientation<br>`/visual_slam/tracking/odometry` — same data<br>`/slam/status` — includes `slam_pose_ok`<br>TF `map → odom`<br>TF `odom → base_link` *only if* `publish_odom_tf:=true` |
-
-Finds features in the left image, matches them to the right to get depth by
-triangulation, then tracks them over time — feature motion becomes camera
-motion. Keeps up to 300 keyframes so it can recognise a place and correct drift.
-
-**It uses IR, not colour, and not the depth image.**
-
-At L3 it is relaunched with `publish_odom_tf:=false`, because the EKF takes over
-`odom → base_link`. Two publishers of one transform fight and neither wins.
-
-### `imu_to_base.py` — rotate the gyro
-
-| | |
-|---|---|
-| **In** | `/camera/camera0/motion/*` — gyro in the camera's frame |
-| **Out** | `/imu/base` — the same gyro expressed in `base_link` |
-
-### `ekf_filter_node` (robot_localization) — the pose in charge
-
-| Input | Topic | What is actually taken |
+| transform | owner | why |
 |---|---|---|
-| `odom0` | `/odom` (cuVSLAM) | **x, y, yaw** |
-| `odom1` | `/wheel_odom` (encoders) | **vx only** |
-| `imu0` | `/imu/base` (gyro) | **yaw rate only** |
+| `odom → base_link` | **`fusion_node`** | the guarded estimate, not the raw one |
+| `base_link → camera0_link` | static publisher | measured: x 0.170, z 0.163, yaw 2.06° |
 
-| | |
-|---|---|
-| **Out** | `/odometry/filtered` and TF `odom → base_link` |
+**`vo_node` runs with `publish_tf:=false`.** Only one thing may publish a
+transform. The raw cuVSLAM pose is the one that teleports — 12 in a single
+drive, one of them 651 cm in a frame — and nav2 consuming that would react
+violently to a position the rover was never in. That is a **safety** issue, not
+an accuracy one.
 
-Three deliberate choices:
+Two publishers of the same transform make TF non-deterministic, and the symptom
+is a robot jittering between two poses with nothing in any log.
 
-- **`two_d_mode: true`** pins z, roll, pitch to zero. Without it cuVSLAM reported
-  `z = -0.272 m` and the map smeared.
-- **The accelerometer is not fused at all** — it diverges by hundreds of metres.
-- **Wheels give speed, not heading** — wheels slip in pivots; the gyro is trusted
-  for rotation.
+### Optical vs ROS axes
 
-### `nvblox_node` — *what does the world look like?*
-
-| | |
-|---|---|
-| **In** | `/camera/camera0/depth/image_rect_raw` + `camera_info`<br>**TF `odom → base_link`** ← the dependency that matters |
-| **Out** | `/nvblox_node/static_occupancy_grid` — what RViz draws<br>`/nvblox_node/static_map_slice` — what nav2's costmap eats<br>`/nvblox_node/static_esdf_pointcloud`<br>`/nvblox_node/mesh` |
-
-Three steps:
-
-1. **TSDF** — each depth pixel becomes a 3D point *using the pose*, written into
-   5 cm voxels storing "how far to the nearest surface".
-2. **ESDF** — a second grid storing *distance to nearest obstacle*, far cheaper
-   for a planner to query than raw geometry.
-3. **2D slice** — nav2 cannot use 3D, so a horizontal band (0.12–0.40 m) is
-   flattened to a 2D grid.
-
-**This block inherits every pose error.** It does not see a room; it writes depth
-wherever the pose claims the robot is.
-
-### nav2 — decide and move
+cuVSLAM reports the *camera* in *optical* axes (x right, y down, z forward). ROS
+wants `base_link` in REP-103 (x forward, y left, z up). Both the axes and the
+origin move, so the transform applies on **both sides**:
 
 ```
-goal (RViz "2D Goal Pose", in the map frame)
-   │
-   ▼  bt_navigator            global_frame: map
-   ▼  planner_server          NavfnPlanner  ──> /plan   (the green line)
-   ▼  controller_server       MPPI: samples many candidate futures, scores them
-   │                          vx_max 0.30 m/s, wz_max 1.0 rad/s
-   │                          ──> /cmd_vel_nav
-   ▼  velocity_smoother       caps acceleration ──> /cmd_vel_smoothed
-   ▼  collision_monitor       watches /perception/depth_points ──> /cmd_vel_shim
-   ▼  safety_guard            final veto ──> /cmd_vel ──> ESP32 ──> wheels
+odom_from_base(t) = B · world_from_rig(t) · B⁻¹      B = base_link ← left_optical
 ```
 
-Both costmaps take obstacles from `NvbloxCostmapLayer` + `InflationLayer` at
-5 cm resolution, in `global_frame: odom`.
+A single multiply instead of a conjugation makes the rover appear to swing around
+a point 17 cm in front of itself.
 
-The behaviour tree deliberately **omits Spin and BackUp**. The plugins are still
-loaded in `nav2.yaml`, but the BT never calls them — blind recovery moves on a
-tethered rover with a forward-only camera drive it into things it cannot see.
+---
 
-The monitor's obstacle source is `/perception/depth_points`, published by
-`nodes/depth_to_cloud.py` — a strided deprojection of the depth image, started at
-**L4 beside nvblox** rather than at L5 with the rest of nav2 (`TODO.md §14`: it is
-a second subscriber on the fragile depth stream, so it is attached once and never
-cycled). Its rate has never been measured on this rig; if it falls under the
-1.5 s `source_timeout` the monitor **holds the robot at zero** — fail-safe, but it
-looks exactly like nav2 being unable to plan. `TODO.md §3`.
+## 4. The nodes
 
-### Visualization and monitoring
+| file | job |
+|---|---|
+| `phase1/nodes/vo_node.py` | stereo IR → cuVSLAM → `/vo/odom`, `/vo/status`. Owns the frame conjugation |
+| `phase1/nodes/gyro_node.py` | D555 IMU → re-framed into `base_link` → `/gyro/base` |
+| **`phase1/nodes/fusion.py`** | **the estimator, with no ROS in it** |
+| `phase1/nodes/fusion_node.py` | wraps `fusion.py` → `/odom`, TF, `/fusion/status` |
+| `phase1/nodes/compare.py` | the measurement instrument: side-by-side rows, gates, CSV |
+| `phase1/nodes/values.py` | one-shot readout of every sensor |
+| `phase1/firmware/rover_firmware_v2.ino` | ESP32: PID, encoders, telemetry |
 
-| Node | In | Out |
+### Why `fusion.py` is separate from `fusion_node.py`
+
+The estimator was validated over two days of tape-measured runs **inside
+`compare.py`**. If the shipping node re-implemented it, that validation would
+apply to nothing.
+
+So the algorithm lives in one plain module with no ROS imports. `compare.py`
+grades it; `fusion_node.py` publishes it. They cannot drift into two
+implementations where only one was ever measured.
+
+It was extracted **programmatically** — the method bodies are the same source
+text, not retyped — and then verified by running both at once and driving:
+0.6 cm and 0.47° apart.
+
+---
+
+## 5. The estimator
+
+Fusion here is **assignment plus fallback**, not averaging. No sensor is good at
+everything, and one that is bad at a job does not get that job.
+
+| job | primary | measured justification |
 |---|---|---|
-| `rover_marker.py` | TF only | `/rover/model` — body, nose arrow, camera, FOV wedge |
-| `rover_trail.py` | `/odometry/filtered` | `/rover/trail` — the driven line |
-| `odom_health.py` | `/odom`, `/cmd_vel`, `/wheel_odom` | `/odom/health` — catches cuVSLAM lying |
-| `stack_status.py` | everything | the `status` table |
+| **heading** | gyro | −0.2% to −0.9% across five turns; cuVSLAM was +11% on one |
+| **distance** | encoder ticks | texture- and direction-independent |
+| **direction** | cuVSLAM | does not drift; re-measured against the world each frame |
+| **tilt** | accelerometer (gravity) | absolute, never drifts |
 
-`rover_trail.py` reads the **fused** pose, never `/odom` — the raw one is the
-drifting one.
+### Every sensor is covered
+
+| when this fails | this carries it |
+|---|---|
+| cuVSLAM blind (<30 landmarks) | wheels + gyro |
+| cuVSLAM teleports | wheels + gyro |
+| cuVSLAM silent | wheels + gyro, via the independent 20 Hz pulse |
+| wheels slip in a turn | gyro heading |
+| wheels stale | cuVSLAM distance, last good scale |
+| gyro stale | cuVSLAM heading |
+| gyro drifts long-term | cuVSLAM, straight-line only |
+
+**FUSED has its own heartbeat.** Until that was added, both the fusion and its
+fallback ran from cuVSLAM's callback — so cuVSLAM was still the heartbeat, and
+if it went silent the pose froze while the other two sensors were healthy.
+
+### Two rules that cost the most to learn
+
+**Refusing bad messages is not enough — you must refuse a bad sensor.**
+Rejecting individual teleports left cuVSLAM publishing at a confident 30 Hz
+between them with an equally corrupted *direction*. With 4 landmarks, FUSED took
+its heading from it and finished 42.4 cm from the start while the wheels *alone*
+managed 17.4 cm. Fusion did worse than its own worst input.
+
+**Do not calibrate during the manoeuvre that breaks your reference.** The
+encoder/cuVSLAM scale ratio freezes while turning, because the wheels scrub 1.60×
+front-to-rear in a pivot and would drag a good calibration off with distance the
+rover never went.
 
 ---
 
-## 3. The drivetrain (other machines)
+## 6. Design decisions, and what forced them
 
-```
-ESP32 firmware ──/wheel_state──> Pi5 relay ──/wheel_odom──> EKF
-     ▲
-     └── /cmd_vel   (subscribes; 50 Hz PID onto BTS7960 drivers)
-```
-
-`/wheel_state` is a `Vector3`: left velocity, right velocity, commanded vx. The
-relay converts it to Odometry using `WHEEL_BASE_M = 0.34`.
-
-Currently dead — `TODO.md §2`.
+| decision | why |
+|---|---|
+| **Sources shown separately, not just fused** | a single number cannot tell you which sensor is lying. cuVSLAM once under-read a 100 cm push as 26 cm — a fused value would have looked plausible; two rows disagreeing would not |
+| **Layered bring-up, one command per layer** | each layer checks the one beneath it, so a failure names its own layer instead of hiding in a wall of log |
+| **Emitter set at runtime and read back** | `emitter_enabled:=0` is a no-op for a Boolean. The projector is bolted to the camera, so its dots move *with* the rig and a 60 cm push read 1.1 cm |
+| **Loop closure OFF in Phase 1** | we are measuring raw drift; loop closure would mask exactly that |
+| **Depth unused in Phase 1** | it is derived from the same stereo pair cuVSLAM consumes — not an independent witness |
+| **Accelerometer never integrated for position** | error grows as t², 180 m in a minute. Its signal is gravity |
+| **Distance from cumulative ticks, not velocity** | velocity must be integrated, so a dropped message loses that travel permanently |
+| **Covariance from the gates** | nav2 weights poses by covariance; a confident wrong pose is worse than an honest uncertain one |
+| **Twist from sensors, not by differencing the pose** | differencing a filtered pose feeds the filter's own lag back into control |
+| **Health logged only on change** | a line every second is noise nobody reads; a line the moment a sensor drops out is the one worth finding |
 
 ---
 
-## 4. Where things live
+## 7. Environment
 
-```
-rover/
-  PRD.md            what we are building, and what we are NOT
-  FACTS.md          measured truths — the most valuable file here
-  ARCHITECTURE.md   this file
-  TODO.md           every known bug and open question
-  rover.sh          the one command; brings the stack up in LAYERS
-  tasks/            one file per layer: learn, build, test, commit
-  src/
-    nodes/          long-running nodes the stack needs
-    tools/          diagnostics you run by hand during a gate
-    config/         ekf, nvblox, nav2, behaviour tree, rviz layouts
-```
+**The container `orin-nav:1.1` has no build recipe.** It was made by
+`docker commit`, not from a Dockerfile, and neither it nor its 57.8 GB base can
+be reproduced. **Never install into it; never delete it.** `phase1/` is mounted
+read-only, so nodes are edited on the host and the layer restarted — no rebuild.
 
-`src/` is mounted **read-only** at `/opt/rover` inside the container. Edit on the
-host, restart the layer, done — no image rebuild.
+`ROS_DISCOVERY_SERVER` is unset on every command. A stale one makes nodes
+silently invisible to each other, which looks exactly like a crashed node.
 
-The old repo at `langrobo_perception/` is the **parts bin**: read it, never edit
-it. `$HOME/orin-nav-stack` is a symlink into it and must not be deleted.
+The cuVSLAM wheel ships its own `libcuvslam.so` and CUDA-12 userspace libs, and
+they must precede Isaac ROS's own build in `/opt/ros/jazzy` — that one is
+compiled for Thor and will not run on this Orin.
+
+---
+
+## 8. Constraints that propagate to nav2
+
+- **`vx_max` ≤ 25 cm/s** — above it cuVSLAM teleports
+- **Pivots cost tracking** — 2.0 rad/s swings the camera at 34 cm/s, past its
+  limit. Prefer plans that turn and drive forward over spinning in place or
+  reversing (cuVSLAM under-reads reverse by ~6%)
+- **The D555 drops out** in three distinct ways — see [TODO.md](TODO.md) §7. The
+  fusion survives it; a robot needing a human to reseat a cable does not
+  autonomously

@@ -1,7 +1,7 @@
 # Sensor fusion and the EKF
 
 **Used by:** task 03, and everything that reads `/odometry/filtered` after it.
-**Code:** `config/ekf.yaml`, `src/nodes/imu_to_base.py`
+**Code:** `phase1/nodes/fusion.py`, `phase1/nodes/gyro_node.py`  ·  **What we built instead of an EKF:** [ARCHITECTURE.md](../ARCHITECTURE.md) §5
 
 ---
 

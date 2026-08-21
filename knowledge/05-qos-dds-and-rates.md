@@ -42,7 +42,7 @@ in `config/nvblox.yaml`.
 | `TRANSIENT_LOCAL` | the publisher keeps the last message and **replays it to late joiners** |
 
 `TRANSIENT_LOCAL` is for things published rarely that a late subscriber still
-needs — a map, a marker, the rover's body. `src/nodes/rover_marker.py` and
+needs — a map, a marker, the rover's body. A marker publisher and
 `rover_trail.py` both use it, which is why RViz shows the rover immediately on
 connect instead of after the next publish.
 
@@ -125,7 +125,7 @@ while the stack is happily measuring 20 Hz through it. **Not a fault.**
 Put together: a topic can exist and deliver nothing (QoS), a node can be alive
 and frozen (cuVSLAM), and a sensor can answer ping while dead (D555).
 
-So `src/nodes/stack_status.py` measures **rates** against thresholds. Its own
+So `./rover status` measures **rates** against thresholds. Its own
 header says the old version printed publisher counts and never once caught a real
 failure.
 

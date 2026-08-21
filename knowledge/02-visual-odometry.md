@@ -1,7 +1,7 @@
 # Visual odometry and SLAM (cuVSLAM)
 
 **Used by:** tasks 02, 03, 04, 08.
-**Code:** `src/nodes/cuvslam_node.py`
+**Code:** `phase1/nodes/vo_node.py`  ·  **What we measured:** [PHASE1.md](../PHASE1.md) §3, §5
 
 ---
 
@@ -106,7 +106,7 @@ a pose that stopped updating.
 This is why:
 
 - `./rover.sh status` measures **rates**, not whether a topic exists
-- `src/nodes/odom_health.py` exists at all — it cross-checks cuVSLAM against
+- `/vo/status` reports landmarks at all — it cross-checks cuVSLAM against
   `/cmd_vel` and `/wheel_odom` and publishes `/odom/health`
 - task 02's gate is a **tape measure**, not "is it publishing"
 
