@@ -166,7 +166,27 @@ All four agree within 3%. **No firmware change needed.**
 | **drift** | ≤10 cm out-and-back | ✅ **2.5 cm** (was 12.2 cm) |
 | **stationary stability** | no phantom motion | ✅ **0.08° over 161 s** (was −9.52°) |
 | **heading / 360° spin** | ≤10° | ⏳ **not yet run** |
-| teleop | `/cmd_vel` moves and stops wheels | ⏳ **not yet proven** |
+| **teleop** | `/cmd_vel` moves and stops wheels | ✅ **balance 1.00, 0.197 of 0.200 m/s** |
+
+### Teleop — proven 2026-08-21
+
+Driven from a phone at `http://192.168.1.16:8091` (hold-to-move, 10 Hz, 0.4 s
+dead-man release backed by the ESP32's own 500 ms watchdog).
+
+| check | result |
+|---|---|
+| command reaches the wheels | ✅ phone → Pi 5 → `/cmd_vel` → WiFi → ESP32 → PID → motors |
+| both sides drive | ✅ balance **1.00** — it goes straight, so the DIR constants are right |
+| PID tracking | ✅ 0.197 m/s measured against 0.200 commanded (1.5%) |
+| release stops it | ✅ decays 0.197 → 0.043 → 0.004 — a coast, as the firmware intends |
+
+`velL`/`velR` here are **measured from the encoders**, not echoed from the
+command, so they are real evidence the wheels turned.
+
+**The page defaults to AUTO and the buttons do nothing until it is flipped to
+MANUAL** — that is nav2/the brain owning `/cmd_vel`, not a fault. In MANUAL it
+publishes at 10 Hz whether or not a button is held, so `/cmd_vel` traffic alone
+proves nothing; only a non-zero velocity does.
 
 ### The two headline improvements
 
