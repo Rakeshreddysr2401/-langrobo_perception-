@@ -7,7 +7,8 @@
 #   ./rover compare    the side-by-side readout — the Phase 1 instrument
 #   ./rover values     every sensor's current reading, in one place
 #   ./rover status     what is alive right now
-#   ./rover logs <n>   tail a layer's log (camera|vo|gyro)
+#   ./rover fused      the fused pose -> /odom + TF, what nav2 consumes
+#   ./rover logs <n>   tail a layer's log (camera|vo|gyro|fused)
 #   ./rover stop       tear the container down
 #
 # WHY LAYERS. Four machines and a camera that can be knocked offline by being
@@ -154,7 +155,7 @@ pose)
 
   echo "[pose] visual odometry  (stereo IR -> /vo/odom, TF odom -> base_link)"
   kill_match "[v]o_node.py"
-  dexec "export LD_LIBRARY_PATH=$CU12:\$LD_LIBRARY_PATH; exec python3 $SRC/nodes/vo_node.py > /tmp/vo.log 2>&1"
+  dexec "export LD_LIBRARY_PATH=$CU12:\$LD_LIBRARY_PATH; exec python3 $SRC/nodes/vo_node.py --ros-args -p publish_tf:=false > /tmp/vo.log 2>&1"
 
   echo "[pose] gyro  (D555 IMU, re-framed into base_link -> /gyro/base)"
   kill_match "[g]yro_node.py"
@@ -193,6 +194,25 @@ wheels)
   echo "    the board is now at 192.168.1.3 (it moved off .12)."
   echo
   echo "    compare still runs without it — the wheels row just stays empty."
+  ;;
+
+# ── fused ───────────────────────────────────────────────────────────────────
+fused)
+  need_container
+  echo "  checking the pose layer is up before building on it..."
+  assert_rate /vo/odom 10 "visual odometry" || die "no pose — run ./rover pose first"
+  kill_match 'fusion_node.py'
+  echo "[fused] PoseFusion -> /odom, and TF odom -> base_link"
+  echo "        vo_node runs with publish_tf:=false; only one thing may own a"
+  echo "        transform, and the raw cuvslam pose is the one that teleports."
+  dexec "python3 $SRC/nodes/fusion_node.py > /tmp/fused.log 2>&1"
+  sleep 4
+  echo
+  echo "  GATE fused:"
+  assert_rate /odom 15 "fused odom" || true
+  echo
+  echo "  Health, live:  ./rover compare"
+  echo "  Raw status:    ros2 topic echo /fusion/status"
   ;;
 
 # ── compare ─────────────────────────────────────────────────────────────────
