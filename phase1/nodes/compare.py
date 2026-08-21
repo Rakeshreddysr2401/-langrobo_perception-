@@ -87,8 +87,9 @@ WHEEL_BASE_M = 0.34    # rover_firmware_v2.ino:100 — 34 cm between L/R wheel c
 #     360 left      556.49      360     1.546      0.5256 m     21.4 deg/s
 #     360 left      548.34      360     1.523      0.5179 m     76.2 deg/s
 #     360 left      553.08      360     1.536      0.5224 m     74.3 deg/s
+#     360 left      551.49      360     1.532      0.5209 m     75.1 deg/s
 #
-# The three 360s span 1.5% and their mean is what is used -- four times the
+# The four 360s span 1.5% and their mean is what is used -- four times the
 # signal of a 90, and returning to the same floor line is far easier to judge
 # than a right angle.
 #
@@ -97,7 +98,7 @@ WHEEL_BASE_M = 0.34    # rover_firmware_v2.ino:100 — 34 cm between L/R wheel c
 # Re-measure on carpet.
 #
 # Using the physical 0.34 m made the wheels 63% wrong on every turn.
-WHEEL_BASE_ROT_M = 0.5219
+WHEEL_BASE_ROT_M = 0.5216
 STALE_S = 1.0          # a source with no message for this long is shown as stale
 
 # Path is accumulated in CHORDS of at least this length, not per frame.

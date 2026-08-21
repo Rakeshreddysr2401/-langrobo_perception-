@@ -236,8 +236,9 @@ effective width that includes the scrub:
 | 360 left | 556.49 | 360 | 1.546 | 0.5256 m | 21.4 °/s |
 | 360 left | 548.34 | 360 | 1.523 | 0.5179 m | 76.2 °/s |
 | 360 left | 553.08 | 360 | 1.536 | 0.5224 m | 74.3 °/s |
+| 360 left | 551.49 | 360 | 1.532 | 0.5209 m | 75.1 °/s |
 
-`WHEEL_BASE_ROT_M = 0.5219`, the mean of the three 360s. Using the physical
+`WHEEL_BASE_ROT_M = 0.5216`, the mean of the four 360s. Using the physical
 0.34 m made the wheels **63% wrong on every turn**. Note the faster turns
 over-read slightly less — scrub is not a constant, so re-measure on carpet.
 
@@ -248,6 +249,11 @@ same side, same BTS7960, mechanically obliged to sweep the same arc:
 |---|---|---|
 | straight (200 cm) | 1.00× | 1.03× |
 | turning (360°) | **1.60×** | **1.29×** |
+
+Repeated on the next run: LEFT 37.5%, RIGHT 23.0% against 37.6% and 22.5%. The
+scrub is **reproducible to half a percent**, so it is a deterministic property of
+this chassis and loading, not random slip. That is what makes it safe to freeze
+the calibration through turns rather than trying to filter it.
 
 So encoder distance is an excellent reference straight and a poor one mid-turn.
 `compare.py` now **freezes the encoder/cuVSLAM scale calibration while turning**,
