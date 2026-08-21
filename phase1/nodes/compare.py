@@ -272,6 +272,9 @@ class Compare(Node):
         self.enc_path_prev = 0.0
         self.vo_path_raw = 0.0       # cuVSLAM path before any encoder rescale
         self.enc_scale = 1.0         # encoder/cuVSLAM distance ratio, from totals
+        self.enc_path_at_fuse = 0.0  # wheels path at the last FUSED advance
+        self.enc_path_dr = 0.0       # wheels path spent dead-reckoning, excluded from the ratio
+        self.dr_steps = 0            # frames carried without cuVSLAM
         self.enc_corrections = 0     # how many steps the encoders actually rescaled
         self.accel = (0.0, 0.0, 0.0)      # raw, base_link frame
         self.gyro_xyz = (0.0, 0.0, 0.0)   # raw rates, all three axes
@@ -309,6 +312,11 @@ class Compare(Node):
             # than MAX_PUSH_MS is a teleport whatever its size.
             if step > JUMP_M or speed > MAX_PUSH_MS:
                 self.jumps.append((now - self.t0, step, self.landmarks))
+                # Refusing the false step is only half the job. The rover was
+                # probably still moving through that frame, and dropping it
+                # loses real travel permanently. The encoders and the gyro did
+                # not fail, so carry FUSED forward on those alone.
+                self._deadreckon()
             else:
                 self.vo_speed = speed
                 self.vo_peak = max(self.vo_peak, speed)
@@ -335,6 +343,44 @@ class Compare(Node):
             self.landmarks = int(n)
             if self.landmarks_min is None or self.landmarks < self.landmarks_min:
                 self.landmarks_min = self.landmarks
+
+    def _deadreckon(self):
+        """cuVSLAM teleported — advance FUSED on wheels and gyro alone.
+
+        This is what makes the fused pose survive the failure that Phase 1 keeps
+        hitting: a sudden stop or a reversal starves the tracker, it
+        re-initialises, and its position becomes meaningless. Encoders measure
+        distance from the axles and a gyro measures rotation from angular
+        momentum; neither cares what the camera can see. So the estimate keeps
+        running with the two sensors that are still telling the truth.
+
+        Direction of travel comes from the SIGN of the measured wheel velocity,
+        because encoder path is unsigned distance and reversing must not be
+        integrated as forward motion.
+        """
+        if self.gyro_bias is None:
+            return
+        w = self.src['wheels']
+        gained = w.path - self.enc_path_at_fuse
+        self.enc_path_at_fuse = w.path
+        # This travel is NOT witnessed by cuVSLAM, so it must not enter the
+        # encoder/cuVSLAM scale ratio -- that would inflate the calibration by
+        # exactly the distance the camera failed to see.
+        self.enc_path_dr += max(0.0, gained)
+        if gained <= 0:
+            return
+        velL, velR = self.wheel_prev
+        vx = (velL + velR) / 2.0
+        if abs(vx) < 1e-6:
+            return
+
+        self.fused_yaw = wrap(self.fused_yaw
+                              + wrap(self.gyro_yaw - self.gyro_prev_yaw))
+        self.gyro_prev_yaw = self.gyro_yaw
+        f = self.src['FUSED']
+        f.seen()
+        f.step_body(gained if vx > 0 else -gained, 0.0, self.fused_yaw)
+        self.dr_steps += 1
 
     def _fuse(self, px, py, pth):
         """Distance from cuVSLAM, heading from the gyro.
@@ -405,8 +451,9 @@ class Compare(Node):
         w = self.src['wheels']
         enc_ok = (self.wheel_dead_side is None and self.wheel_moved_l
                   and self.wheel_moved_r)
+        self.enc_path_at_fuse = w.path
         if enc_ok and self.vo_path_raw > SCALE_MIN_TRAVEL:
-            ratio = w.path / self.vo_path_raw
+            ratio = (w.path - self.enc_path_dr) / self.vo_path_raw
             # cuVSLAM reads ~2% under, so ~1.02 is expected. Anything outside
             # this band is wheel slip or a tracking failure, not calibration.
             if SCALE_LO < ratio < SCALE_HI:
@@ -613,8 +660,9 @@ class Compare(Node):
         out.append('')
 
         if self.jumps:
-            out.append(f'  ⚠ {len(self.jumps)} POSE JUMP(S) — tracking was lost. '
-                       f'THIS RUN IS INVALID, restart it.')
+            out.append(f'  ⚠ {len(self.jumps)} POSE JUMP(S) — cuvslam lost tracking. '
+                       f'FUSED carried {self.dr_steps} frames on wheels+gyro '
+                       f'({self.enc_path_dr * 100:.1f} cm).')
         if self.vo_peak > 0.25:
             out.append(f'  ⚠ peak speed {self.vo_peak * 100:.0f} cm/s — too fast, '
                        f'keep it under 25 cm/s or the tracker loses features')
@@ -715,7 +763,13 @@ class Compare(Node):
         print()
         vo = self.src['cuvslam']
         if self.jumps:
-            print(f'  ✗ RUN INVALID — {len(self.jumps)} pose jump(s), tracking was lost:')
+            print(f'  cuvslam lost tracking {len(self.jumps)} time(s). FUSED carried '
+                  f'{self.dr_steps} frames on wheels+gyro alone '
+                  f'({self.enc_path_dr * 100:.1f} cm of travel cuvslam never saw).')
+            print(f'  The cuvslam row below is measured from a corrupted origin and')
+            print(f'  is NOT graded. FUSED is still graded — surviving this is its job.')
+            print()
+            print(f'  ✗ cuvslam INVALID — {len(self.jumps)} pose jump(s):')
             for t, d, lm in self.jumps[:5]:
                 lmtxt = '' if lm < 0 else f'   landmarks {lm}'
                 print(f'      t={t:.1f}s   the pose teleported {d * 100:.0f} cm '
@@ -743,7 +797,9 @@ class Compare(Node):
             else:
                 print('    => Neither speed nor landmark starvation stands out. Suspect')
                 print('       reversing (measured much worse than forward) or motion blur.')
-            print('    NOT GRADED. Fix the above and run it again.')
+            print('    cuvslam NOT GRADED. Fix the above for a clean cuvslam number.')
+            print()
+            self._grade_fused()
             self._write_csv()
             return
         if vo.n == 0:
@@ -780,7 +836,22 @@ class Compare(Node):
                 print(f'    gyro independently read {math.degrees(g.th):+.2f} deg — '
                       'if these disagree, believe the gyro.')
 
-        # The fused answer, graded on the same bar as cuvslam alone.
+        self._grade_fused()
+
+        path = self._write_csv()
+        print(f'\n  log: {path}\n')
+
+    def _grade_fused(self):
+        """Grade FUSED on the same bar as cuvslam, INCLUDING after a teleport.
+
+        A jump invalidates cuvslam's number -- everything after it is measured
+        from a corrupted origin. It does not invalidate FUSED, which refused the
+        false step and carried on with the encoders and the gyro. Surviving that
+        is the whole point of fusing, so a run containing a teleport is exactly
+        the run where the fused answer is most worth reading.
+        """
+        a = self.args
+        vo = self.src['cuvslam']
         fu = self.src['FUSED']
         if fu.n or fu.path > 0:
             print()
@@ -802,9 +873,9 @@ class Compare(Node):
                       f'{better:.1f}x better than cuvslam alone'
                       if better > 1.05 else
                       f'    distance from cuVSLAM, heading from the gyro')
-
-        path = self._write_csv()
-        print(f'\n  log: {path}\n')
+            if self.dr_steps:
+                print(f'    {self.dr_steps} frames were carried on wheels+gyro '
+                      f'alone while cuvslam was lost')
 
     def _write_csv(self):
         # /logs is bind-mounted to the host's rover/logs, so a run survives the
@@ -846,6 +917,13 @@ def main():
         # ExternalShutdownException. Both must still print the verdict — a run
         # that ends without one has wasted a tape measurement.
         pass
+    except RuntimeError as e:
+        # rclpy can raise "Unable to convert call argument" if the signal lands
+        # while the executor is mid-take on a subscription. The verdict still
+        # prints from the finally block, but the traceback lands underneath it
+        # and buries the numbers the run existed to produce.
+        if 'convert call argument' not in str(e):
+            raise
     finally:
         try:
             node.verdict()

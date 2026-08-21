@@ -1,0 +1,716 @@
+
+  PHASE 1 — where does each sensor think it is?     t+   0.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam       -0.0     -0.0     -0.00          0.0       0.0     0.0
+  wheels         0.0      0.0      0.00          0.0       0.0     0.0
+  gyro                       — no publisher —               
+  FUSED                      — no publisher —               
+
+  push speed peak 0 cm/s — good
+  ⚠ wheels at 0.0 Hz, not 20 — distance is a coarse estimate, treat it as a sanity check not a reference
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   0.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam       -0.0     -0.0     -0.00          0.0       0.0     0.0
+  wheels         0.0      0.0      0.00          0.0       0.0     0.0
+  gyro                       — no publisher —               
+  FUSED                      — no publisher —               
+
+  push speed peak 0 cm/s — good
+  landmarks  151  (lowest seen 151)
+  ⚠ wheels at 0.0 Hz, not 20 — distance is a coarse estimate, treat it as a sanity check not a reference
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   0.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam        0.0     -0.0     -0.00          0.0       0.0     0.0
+  wheels         0.0      0.0      0.00          0.0       0.0     0.0
+  gyro                       — no publisher —               
+  FUSED                      — no publisher —               
+
+  push speed peak 0 cm/s — good
+  landmarks  151  (lowest seen 151)
+  ⚠ wheels at 0.0 Hz, not 20 — distance is a coarse estimate, treat it as a sanity check not a reference
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   1.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam        0.0     -0.0     -0.00          0.0       0.0     0.0
+  wheels         0.0      0.0      0.00          0.0       0.0     0.0
+  gyro                       — no publisher —               
+  FUSED                      — no publisher —               
+
+  push speed peak 0 cm/s — good
+  landmarks  151  (lowest seen 151)
+  ⚠ wheels at 0.0 Hz, not 20 — distance is a coarse estimate, treat it as a sanity check not a reference
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   1.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam        0.0     -0.0     -0.00          0.0       0.0     0.0
+  wheels         0.0      0.0      0.00          0.0       0.0     0.0
+  gyro                       — no publisher —               
+  FUSED                      — no publisher —               
+
+  push speed peak 0 cm/s — good
+  landmarks  151  (lowest seen 151)
+  ⚠ wheels at 0.0 Hz, not 20 — distance is a coarse estimate, treat it as a sanity check not a reference
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   1.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam        0.0     -0.0     -0.00          0.0       0.0    28.0
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.00            —         —     0.8
+  FUSED                      — no publisher —               
+
+  push speed peak 0 cm/s — good
+  landmarks  151  (lowest seen 151)
+  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL (3.5s left)
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   1.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam        0.0     -0.0     -0.00          0.0       0.0    28.0
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.00            —         —     0.8
+  FUSED                      — no publisher —               
+
+  push speed peak 0 cm/s — good
+  landmarks  151  (lowest seen 151)
+  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL (3.2s left)
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   2.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam        0.0     -0.0     -0.00          0.0       0.0    28.0
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.00            —         —     0.8
+  FUSED                      — no publisher —               
+
+  push speed peak 0 cm/s — good
+  landmarks  148  (lowest seen 148)
+  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL (3.0s left)
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   2.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam        0.0     -0.0     -0.00          0.0       0.0    28.0
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.00            —         —     0.8
+  FUSED                      — no publisher —               
+
+  push speed peak 0 cm/s — good
+  landmarks  148  (lowest seen 148)
+  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL (2.7s left)
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   2.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam        0.0     -0.0     -0.00          0.0       0.0    28.0
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.00            —         —     0.8
+  FUSED                      — no publisher —               
+
+  push speed peak 0 cm/s — good
+  landmarks  142  (lowest seen 142)
+  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL (2.5s left)
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   2.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam        0.0     -0.0     -0.00          0.0       0.0    27.2
+  wheels         0.0      0.0      0.00          0.0       0.0    19.2
+  gyro             —        —      0.00            —         —   160.0
+  FUSED                      — no publisher —               
+
+  push speed peak 0 cm/s — good
+  landmarks  142  (lowest seen 142)
+  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL (2.2s left)
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   3.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam        0.0     -0.0     -0.00          0.0       0.0    27.2
+  wheels         0.0      0.0      0.00          0.0       0.0    19.2
+  gyro             —        —      0.00            —         —   160.0
+  FUSED                      — no publisher —               
+
+  push speed peak 0 cm/s — good
+  landmarks  142  (lowest seen 142)
+  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL (2.0s left)
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   3.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam        0.0     -0.0     -0.00          0.0       0.0    27.2
+  wheels         0.0      0.0      0.00          0.0       0.0    19.2
+  gyro             —        —      0.00            —         —   160.0
+  FUSED                      — no publisher —               
+
+  push speed peak 0 cm/s — good
+  landmarks  142  (lowest seen 142)
+  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL (1.7s left)
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   3.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam        0.0     -0.0     -0.00          0.0       0.0    27.2
+  wheels         0.0      0.0      0.00          0.0       0.0    19.2
+  gyro             —        —      0.00            —         —   160.0
+  FUSED                      — no publisher —               
+
+  push speed peak 0 cm/s — good
+  landmarks  137  (lowest seen 137)
+  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL (1.5s left)
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   3.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam        0.0     -0.0     -0.00          0.0       0.0    27.2
+  wheels         0.0      0.0      0.00          0.0       0.0    19.2
+  gyro             —        —      0.00            —         —   160.0
+  FUSED                      — no publisher —               
+
+  push speed peak 0 cm/s — good
+  landmarks  137  (lowest seen 137)
+  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL (1.2s left)
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   4.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam        0.0     -0.0     -0.00          0.0       0.0    28.8
+  wheels         0.0      0.0      0.00          0.0       0.0    20.8
+  gyro             —        —      0.00            —         —   202.3
+  FUSED                      — no publisher —               
+
+  push speed peak 0 cm/s — good
+  landmarks  137  (lowest seen 137)
+  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL (1.0s left)
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   4.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam        0.0     -0.0     -0.00          0.0       0.0    28.8
+  wheels         0.0      0.0      0.00          0.0       0.0    20.8
+  gyro             —        —      0.00            —         —   202.3
+  FUSED                      — no publisher —               
+
+  push speed peak 0 cm/s — good
+  landmarks  137  (lowest seen 137)
+  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL (0.7s left)
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   4.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam        0.0     -0.0     -0.00          0.0       0.0    28.8
+  wheels         0.0      0.0      0.00          0.0       0.0    20.8
+  gyro             —        —      0.00            —         —   202.3
+  FUSED                      — no publisher —               
+
+  push speed peak 0 cm/s — good
+  landmarks  137  (lowest seen 137)
+  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL (0.5s left)
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   4.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam        0.0     -0.0     -0.00          0.0       0.0    28.8
+  wheels         0.0      0.0      0.00          0.0       0.0    20.8
+  gyro             —        —      0.00            —         —   202.3
+  FUSED                      — no publisher —               
+
+  push speed peak 0 cm/s — good
+  landmarks  137  (lowest seen 137)
+  ⏳ CALIBRATING GYRO — KEEP THE ROVER STILL (0.2s left)
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   5.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam        0.0     -0.0     -0.00          0.0       0.0    28.8
+  wheels         0.0      0.0      0.00          0.0       0.0    20.8
+  gyro             —        —      0.00            —         —   202.3
+  FUSED          0.0     -0.0      0.00          0.0       0.0     0.0
+
+  push speed peak 0 cm/s — good
+  landmarks  137  (lowest seen 137)
+  tilt: roll  +0.74 deg   pitch  -1.11 deg
+  gyro bias removed: +0.0849 deg/s (+5.09 deg/min)   5 updates  STILL — retuning bias
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   5.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam        0.0     -0.0     -0.00          0.0       0.0    28.8
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —      0.00            —         —   198.5
+  FUSED         -0.0     -0.0      0.00          0.0       0.0     6.4
+
+  push speed peak 0 cm/s — good
+  landmarks  137  (lowest seen 137)
+  tilt: roll  +0.60 deg   pitch  -1.14 deg
+  gyro bias removed: +0.0849 deg/s (+5.10 deg/min)   53 updates  STILL — retuning bias
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   5.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam       -0.0     -0.0     -0.00          0.0       0.0    28.8
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.01            —         —   198.5
+  FUSED         -0.0     -0.0     -0.01          0.0       0.0     6.4
+
+  push speed peak 0 cm/s — good
+  landmarks  134  (lowest seen 134)
+  tilt: roll  +0.54 deg   pitch  -1.17 deg
+  gyro bias removed: +0.0844 deg/s (+5.06 deg/min)   105 updates  STILL — retuning bias
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   5.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam       -0.0      0.0     -0.01          0.0       0.0    28.8
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.02            —         —   198.5
+  FUSED         -0.0      0.0     -0.02          0.0       0.0     6.4
+
+  push speed peak 0 cm/s — good
+  landmarks  134  (lowest seen 134)
+  tilt: roll  +0.53 deg   pitch  -1.13 deg
+  gyro bias removed: +0.0841 deg/s (+5.05 deg/min)   153 updates  STILL — retuning bias
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   6.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam       -0.0      0.0     -0.02          0.0       0.0    28.8
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.03            —         —   198.5
+  FUSED         -0.0      0.0     -0.02          0.0       0.0     6.4
+
+  push speed peak 0 cm/s — good
+  landmarks  134  (lowest seen 134)
+  tilt: roll  +0.47 deg   pitch  -1.16 deg   camera mount pitch -1.15 deg
+  gyro bias removed: +0.0837 deg/s (+5.02 deg/min)   205 updates  STILL — retuning bias
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   6.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam       -0.0      0.0     -0.02          0.0       0.0    28.8
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.00            —         —   198.5
+  FUSED         -0.0      0.0     -0.00          0.0       0.0     6.4
+
+  push speed peak 0 cm/s — good
+  landmarks  134  (lowest seen 134)
+  tilt: roll  +0.49 deg   pitch  -1.18 deg   camera mount pitch -1.15 deg
+  gyro bias removed: +0.0840 deg/s (+5.04 deg/min)   254 updates  STILL — retuning bias
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   6.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam       -0.0      0.0     -0.02          0.0       0.0    28.8
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.01            —         —   201.6
+  FUSED         -0.0      0.0     -0.01          0.0       0.0    28.8
+
+  push speed peak 0 cm/s — good
+  landmarks  130  (lowest seen 130)
+  tilt: roll  +0.51 deg   pitch  -1.16 deg   camera mount pitch -1.14 deg
+  gyro bias removed: +0.0841 deg/s (+5.04 deg/min)   305 updates  STILL — retuning bias
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   6.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam       -0.0      0.0     -0.02          0.0       0.0    28.8
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.01            —         —   201.6
+  FUSED         -0.0      0.0     -0.00          0.0       0.0    28.8
+
+  push speed peak 0 cm/s — good
+  landmarks  130  (lowest seen 130)
+  tilt: roll  +0.51 deg   pitch  -1.11 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0842 deg/s (+5.05 deg/min)   354 updates  STILL — retuning bias
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   7.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam       -0.0      0.0     -0.03          0.1       0.0    28.8
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.01            —         —   201.6
+  FUSED         -0.0      0.0     -0.01          0.1       0.0    28.8
+
+  push speed peak 0 cm/s — good
+  landmarks  130  (lowest seen 130)
+  tilt: roll  +0.51 deg   pitch  -1.10 deg   camera mount pitch -1.13 deg
+  gyro bias removed: +0.0842 deg/s (+5.05 deg/min)   406 updates  STILL — retuning bias
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   7.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam       -0.0      0.0     -0.01          0.0       0.0    28.8
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.02            —         —   201.6
+  FUSED         -0.0      0.0     -0.02          0.0       0.0    28.8
+
+  push speed peak 0 cm/s — good
+  landmarks  130  (lowest seen 130)
+  tilt: roll  +0.53 deg   pitch  -1.05 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0837 deg/s (+5.02 deg/min)   454 updates  STILL — retuning bias
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   7.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam       -0.0      0.0     -0.01          0.0       0.0    28.8
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.01            —         —   201.6
+  FUSED         -0.0      0.0     -0.01          0.0       0.0    28.8
+
+  push speed peak 0 cm/s — good
+  landmarks  128  (lowest seen 128)
+  tilt: roll  +0.53 deg   pitch  -1.07 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0841 deg/s (+5.05 deg/min)   506 updates  STILL — retuning bias
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   7.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam       -0.0      0.0     -0.02          0.0       0.0    27.2
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.02            —         —   199.2
+  FUSED         -0.0      0.0     -0.02          0.0       0.0    27.2
+
+  push speed peak 0 cm/s — good
+  landmarks  128  (lowest seen 128)
+  tilt: roll  +0.48 deg   pitch  -1.08 deg   camera mount pitch -1.11 deg
+  gyro bias removed: +0.0840 deg/s (+5.04 deg/min)   554 updates  STILL — retuning bias
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   8.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam       -0.0      0.0     -0.02          0.0       0.0    27.2
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.01            —         —   199.2
+  FUSED         -0.0      0.0     -0.01          0.0       0.0    27.2
+
+  push speed peak 0 cm/s — good
+  landmarks  128  (lowest seen 128)
+  tilt: roll  +0.49 deg   pitch  -1.09 deg   camera mount pitch -1.12 deg
+  gyro bias removed: +0.0843 deg/s (+5.06 deg/min)   606 updates  STILL — retuning bias
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   8.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam       -0.0      0.0     -0.02          0.0       0.0    27.2
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.01            —         —   199.2
+  FUSED         -0.0      0.0     -0.01          0.0       0.0    27.2
+
+  push speed peak 0 cm/s — good
+  landmarks  128  (lowest seen 128)
+  tilt: roll  +0.49 deg   pitch  -1.07 deg   camera mount pitch -1.11 deg
+  gyro bias removed: +0.0841 deg/s (+5.05 deg/min)   654 updates  STILL — retuning bias
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   8.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam       -0.0      0.0     -0.01          0.0       0.0    27.2
+  wheels         0.0      0.0      0.00          0.0       0.0    20.0
+  gyro             —        —     -0.03            —         —   199.2
+  FUSED         -0.0      0.0     -0.03          0.0       0.0    27.2
+
+  push speed peak 0 cm/s — good
+  landmarks  126  (lowest seen 126)
+  tilt: roll  +0.49 deg   pitch  -1.10 deg   camera mount pitch -1.11 deg
+  gyro bias removed: +0.0834 deg/s (+5.01 deg/min)   706 updates  STILL — retuning bias
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   8.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam       -0.0     -0.0     -0.00          0.0       0.0    28.0
+  wheels         0.0      0.0      0.00          0.0       0.0    19.0
+  gyro             —        —     -0.01            —         —   200.9
+  FUSED         -0.0     -0.0     -0.01          0.0       0.0    28.0
+
+  push speed peak 0 cm/s — good
+  landmarks  126  (lowest seen 126)
+  tilt: roll  +0.47 deg   pitch  -1.13 deg   camera mount pitch -1.11 deg
+  gyro bias removed: +0.0837 deg/s (+5.02 deg/min)   755 updates  STILL — retuning bias
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   9.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam       -0.0     -0.0      0.00          0.0       0.0    28.0
+  wheels         0.0      0.0      0.00          0.0       0.0    19.0
+  gyro             —        —     -0.01            —         —   200.9
+  FUSED         -0.0     -0.0     -0.02          0.0       0.0    28.0
+
+  push speed peak 0 cm/s — good
+  landmarks  126  (lowest seen 126)
+  tilt: roll  +0.51 deg   pitch  -1.13 deg   camera mount pitch -1.11 deg
+  gyro bias removed: +0.0839 deg/s (+5.03 deg/min)   806 updates  STILL — retuning bias
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   9.3s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam       -0.0     -0.0      0.00          0.1       0.0    28.0
+  wheels         0.0      0.0      0.00          0.0       0.0    19.0
+  gyro             —        —     -0.01            —         —   200.9
+  FUSED         -0.0     -0.0     -0.01          0.1       0.0    28.0
+
+  push speed peak 0 cm/s — good
+  landmarks  126  (lowest seen 126)
+  tilt: roll  +0.49 deg   pitch  -1.15 deg   camera mount pitch -1.11 deg
+  gyro bias removed: +0.0838 deg/s (+5.03 deg/min)   855 updates  STILL — retuning bias
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   9.5s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam       -0.0     -0.0      0.01          0.1       0.0    28.0
+  wheels         0.0      0.0      0.00          0.0       0.0    19.0
+  gyro             —        —     -0.02            —         —   200.9
+  FUSED         -0.0     -0.0     -0.01          0.1       0.0    28.0
+
+  push speed peak 0 cm/s — good
+  landmarks  125  (lowest seen 125)
+  tilt: roll  +0.50 deg   pitch  -1.16 deg   camera mount pitch -1.11 deg
+  gyro bias removed: +0.0836 deg/s (+5.02 deg/min)   907 updates  STILL — retuning bias
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+   9.8s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam       -0.0     -0.0     -0.00          0.0       0.0    28.0
+  wheels         0.0      0.0      0.00          0.0       0.0    19.0
+  gyro             —        —     -0.01            —         —   200.9
+  FUSED         -0.0     -0.0     -0.02          0.0       0.0    28.0
+
+  push speed peak 0 cm/s — good
+  landmarks  125  (lowest seen 125)
+  tilt: roll  +0.50 deg   pitch  -1.11 deg   camera mount pitch -1.11 deg
+  gyro bias removed: +0.0841 deg/s (+5.04 deg/min)   955 updates  STILL — retuning bias
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+  PHASE 1 — where does each sensor think it is?     t+  10.0s
+
+  source        x cm     y cm    th deg   straight cm   path cm      Hz
+  --------------------------------------------------------------------
+  cuvslam       -0.0     -0.0      0.00          0.0       0.0    28.0
+  wheels         0.0      0.0      0.00          0.0       0.0    20.8
+  gyro             —        —     -0.00            —         —   201.8
+  FUSED         -0.0     -0.0     -0.00          0.0       0.0    28.0
+
+  push speed peak 0 cm/s — good
+  landmarks  125  (lowest seen 125)
+  tilt: roll  +0.54 deg   pitch  -1.13 deg   camera mount pitch -1.11 deg
+  gyro bias removed: +0.0843 deg/s (+5.06 deg/min)   1007 updates  STILL — retuning bias
+
+  target: out and back to the SAME mark   pass: straight <= 10.0 cm
+
+  Ctrl-C to finish and grade.
+
+
+  ── result ──────────────────────────────────────────────────────────
+  cuvslam    straight     0.0 cm   path     0.0 cm   heading   +0.00 deg   (282 msgs, 28.0 Hz)
+  wheels     straight     0.0 cm   path     0.0 cm   heading   +0.00 deg   (200 msgs, 20.8 Hz)
+  gyro       heading    -0.01 deg   (1665 msgs, 201.8 Hz)   [bias +0.0842 deg/s removed]
+  FUSED      straight     0.0 cm   path     0.0 cm   heading   -0.00 deg   (142 msgs, 28.0 Hz)
+
+  GATE drift: back at the start, cuvslam is 0.0 cm away -> PASS (want <= 10.0 cm)
+    path travelled 0 cm — should be about twice your leg length.
+
+  FUSED drift: 0.0 cm from the start  ->  PASS (want <= 10.0 cm)
+    distance from cuVSLAM, heading from the gyro
+
+  log: /logs/compare-20260821-161604.csv
+
