@@ -146,5 +146,5 @@ beside the rover and watch it never appear.
 ---
 
 **See also:** [`01-frames-and-tf.md`](01-frames-and-tf.md) (why the slice band is
-height-above-floor), [`06-costmaps-inflation.md`](06-costmaps-inflation.md)
+height-above-floor), [`06-costmaps-and-inflation.md`](06-costmaps-and-inflation.md)
 (what nav2 does with the slice).
