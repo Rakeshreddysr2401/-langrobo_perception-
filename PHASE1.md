@@ -163,7 +163,8 @@ All four agree within 3%. **No firmware change needed.**
 | wheel rate | ≥15 Hz | ✅ 20.0 Hz |
 | all 4 encoders | respond | ✅ verified individually |
 | **scale** | 2.00 m ±5% | ✅ 195.4 cm (−2.3%) |
-| **drift** | ≤10 cm out-and-back | ✅ **2.5 cm** (was 12.2 cm) |
+| **drift** | ≤10 cm out-and-back | ✅ **2.5 cm** hand-pushed (was 12.2 cm) |
+| **drift, driven hard** | ≤10 cm | ✅ **4.9 cm** through 12 teleports |
 | **stationary stability** | no phantom motion | ✅ **0.08° over 161 s** (was −9.52°) |
 | **heading / 360° spin** | ≤10° | ⏳ **not yet run** |
 | **teleop** | `/cmd_vel` moves and stops wheels | ✅ **balance 1.00, 0.197 of 0.200 m/s** |
@@ -187,6 +188,36 @@ command, so they are real evidence the wheels turned.
 MANUAL** — that is nav2/the brain owning `/cmd_vel`, not a fault. In MANUAL it
 publishes at 10 Hz whether or not a button is held, so `/cmd_vel` traffic alone
 proves nothing; only a non-zero velocity does.
+
+### The run that proves fusion works
+
+Driven under teleop with repeated lefts, rights, forwards and reverses, in a
+room where the camera had little to look at. cuVSLAM lost tracking **12 times**
+and landmarks fell to **17** against a healthy 100–200.
+
+| source | endpoint error | heading |
+|---|---|---|
+| cuvslam | 79.6 cm | +6.98° |
+| wheels | 55.7 cm | −31.51° |
+| gyro | — | +1.71° |
+| **FUSED** | **4.9 cm** | **+1.75°** |
+
+**FUSED beat both of its own inputs** — 16× better than cuVSLAM, 11× better than
+the wheels — and its heading landed on the gyro's, which was the only heading
+worth having.
+
+Two mechanisms did it, both visible in the run:
+
+- `cuvslam DROPPED (few landmarks) 501x` — below 30 landmarks cuVSLAM is ignored
+  outright, not merely filtered. Refusing individual teleports is not enough:
+  between them the messages keep arriving at a confident 30 Hz with a corrupted
+  direction in them.
+- `FUSED carried 101 frames on wheels+gyro (65.1 cm)` — travel cuVSLAM never saw,
+  reconstructed from raw encoder ticks and gyro heading.
+
+The previous attempt at the same test gave **42.4 cm and FAILED**, worse than the
+wheels alone at 17.4 cm, because dead reckoning silently measured travel in 5 mm
+chords and reported zero, while FUSED went on trusting a blind tracker's heading.
 
 ### The two headline improvements
 

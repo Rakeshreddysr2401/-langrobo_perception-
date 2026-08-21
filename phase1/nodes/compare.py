@@ -843,10 +843,21 @@ class Compare(Node):
             out.append(f'  tilt: roll {math.degrees(self.roll):+6.2f} deg   '
                        f'pitch {math.degrees(self.pitch):+6.2f} deg{mp}')
         if self.enc_corrections:
+            # Show the numbers the ratio is ACTUALLY computed from. This
+            # printed w.path, which is chord-accumulated and includes travel
+            # dead-reckoned while cuVSLAM was blind -- so on 2026-08-21 it read
+            # "384.5 / 380.4" next to a scale of 0.8506, two numbers that cannot
+            # both be true. The real inputs are raw tick travel minus the
+            # dead-reckoned part, over cuVSLAM's own witnessed path.
+            witnessed = (self.tick_travel - self.enc_path_dr) * 100
+            clamp = ''
+            if self.enc_scale <= SCALE_LO + 1e-6:
+                clamp = '  CLAMPED LOW — cuvslam over-reading'
+            elif self.enc_scale >= SCALE_HI - 1e-6:
+                clamp = '  CLAMPED HIGH — wheels over-reading'
             out.append(f'  encoder scale {self.enc_scale:.4f}  '
-                       f'(wheels {self.src["wheels"].path * 100:.1f} cm / cuvslam '
-                       f'{self.vo_path_raw * 100:.1f} cm) — distance from the '
-                       f'wheels, direction from cuVSLAM')
+                       f'(wheels {witnessed:.1f} cm / cuvslam '
+                       f'{self.vo_path_raw * 100:.1f} cm){clamp}')
 
         w = self.src['wheels']
         if w.n and w.hz > 0 and w.hz < 15:
