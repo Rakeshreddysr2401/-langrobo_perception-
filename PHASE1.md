@@ -166,7 +166,7 @@ All four agree within 3%. **No firmware change needed.**
 | **drift** | ≤10 cm out-and-back | ✅ **2.5 cm** hand-pushed (was 12.2 cm) |
 | **drift, driven hard** | ≤10 cm | ✅ **4.9 cm** through 12 teleports |
 | **stationary stability** | no phantom motion | ✅ **0.08° over 161 s** (was −9.52°) |
-| **heading / 360° spin** | ≤10° | ⏳ **not yet run** |
+| **heading / 360° spin** | ≤10° | ✅ **3.68°** (cuvslam alone 11.15° FAIL) |
 | **teleop** | `/cmd_vel` moves and stops wheels | ✅ **balance 1.00, 0.197 of 0.200 m/s** |
 
 ### Teleop — proven 2026-08-21
@@ -188,6 +188,28 @@ command, so they are real evidence the wheels turned.
 MANUAL** — that is nav2/the brain owning `/cmd_vel`, not a fault. In MANUAL it
 publishes at 10 Hz whether or not a button is held, so `/cmd_vel` traffic alone
 proves nothing; only a non-zero velocity does.
+
+### The 360° spin — the last gate
+
+Rotated a full turn by teleop, back to the same floor line. Headings wrap to
+±180, so these are unwrapped onto 360:
+
+| source | read | error |
+|---|---|---|
+| wheels | 348.65° | −11.35° |
+| **gyro** | **363.57°** | **+3.57°** |
+| cuvslam | 371.15° | +11.15° **FAIL** |
+| **FUSED** | **363.68°** | **+3.68° PASS** |
+
+All four cluster around 360, which is what confirms it was a real full rotation
+rather than a small one passing by accident.
+
+cuVSLAM failing here is expected and is why the gate exists: rotation is visual
+odometry's weakest case, and a pivot swings this camera at ~34 cm/s past its
+~25 cm/s tracking limit.
+
+The wheels are the calibration paying off — **63% error before the skid-steer
+track width was measured, 3.2% after**.
 
 ### The run that proves fusion works
 

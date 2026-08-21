@@ -207,6 +207,11 @@ class Source:
         self.name = name
         self.gives = gives          # 'xyth' or 'th'
         self.x = self.y = self.th = 0.0
+        # th wraps to +/-180, which makes a 360 deg test unreadable: every source
+        # correctly reports "about 0" after a full turn and you cannot tell that
+        # from having barely moved. th_total accumulates the wrapped DELTAS, so a
+        # full turn reads 360 and two turns read 720.
+        self.th_total = 0.0
         self.path = 0.0
         self.n = 0
         self.first = None
@@ -228,12 +233,16 @@ class Source:
         dx, dy = x - fx, y - fy
         c, s = math.cos(-fth), math.sin(-fth)
         self.x, self.y = c * dx - s * dy, s * dx + c * dy
-        self.th = wrap(th - fth)
+        self._set_th(wrap(th - fth))
         self._accumulate_path()
+
+    def _set_th(self, new_th):
+        self.th_total += wrap(new_th - self.th)
+        self.th = new_th
 
     def integrate(self, vx, wz, dt):
         """Dead reckoning for sources that give velocity, not pose."""
-        self.th = wrap(self.th + wz * dt)
+        self._set_th(wrap(self.th + wz * dt))
         d = vx * dt
         self.x += d * math.cos(self.th)
         self.y += d * math.sin(self.th)
@@ -241,7 +250,7 @@ class Source:
 
     def step_body(self, bx, by, th):
         """Add a step already expressed in the body frame, with heading supplied."""
-        self.th = wrap(th)
+        self._set_th(wrap(th))
         c, s = math.cos(self.th), math.sin(self.th)
         self.x += c * bx - s * by
         self.y += s * bx + c * by
@@ -701,7 +710,7 @@ class Compare(Node):
             dt = now - self.gyro_last_t
             if 0 < dt < 0.5:
                 self.gyro_yaw = wrap(self.gyro_yaw + (m.angular_velocity.z - self.gyro_bias) * dt)
-                s.th = self.gyro_yaw
+                s._set_th(self.gyro_yaw)
                 self._attitude(m, dt)
         self.gyro_last_t = now
 
@@ -906,7 +915,9 @@ class Compare(Node):
             + [round(v, 4) for v in self.accel]
             + [round(v, 5) for v in self.gyro_xyz]
             + [round(self.wheel_prev[0], 4), round(self.wheel_prev[1], 4)]
-            + list(self.ticks))
+            # ticks starts as None so the first delta is not computed against a
+            # fake zero; the CSV row can be built before any have arrived.
+            + (list(self.ticks) if self.ticks is not None else ['', '', '', '']))
 
     # ── verdict ────────────────────────────────────────────────────────────
     def verdict(self):
@@ -998,15 +1009,18 @@ class Compare(Node):
                 print('    This is accumulated drift, and it is what smears a map: nvblox writes')
                 print('    depth wherever the pose claims the robot is.')
         elif a.spin:
-            err = abs(wrap(math.radians(a.spin) - self.src['cuvslam'].th))
-            err_d = math.degrees(err)
+            got = math.degrees(self.src['cuvslam'].th_total)
+            err_d = abs(got - a.spin)
             ok = err_d <= 10.0
-            print(f'  GATE heading: rotated {a.spin:.0f} deg, cuvslam heading error '
-                  f'{err_d:.2f} deg -> {"PASS" if ok else "FAIL"} (want <= 10 deg)')
-            g = self.src['gyro']
-            if g.n:
-                print(f'    gyro independently read {math.degrees(g.th):+.2f} deg — '
-                      'if these disagree, believe the gyro.')
+            print(f'  GATE heading: rotated {a.spin:.0f} deg, cuvslam read '
+                  f'{got:+.2f} deg, error {err_d:.2f} deg -> '
+                  f'{"PASS" if ok else "FAIL"} (want <= 10 deg)')
+            for k in ('wheels', 'gyro'):
+                src = self.src[k]
+                if src.n:
+                    t = math.degrees(src.th_total)
+                    print(f'    {k:<8} read {t:+8.2f} deg   '
+                          f'error {abs(t - a.spin):6.2f} deg')
 
         self._grade_fused()
 
@@ -1036,8 +1050,9 @@ class Compare(Node):
                 print(f'  FUSED drift: {fu.straight * 100:.1f} cm from the start  ->  '
                       f'{"PASS" if fu.straight <= 0.10 else "FAIL"} (want <= 10.0 cm)')
             elif a.spin:
-                e = math.degrees(abs(wrap(math.radians(a.spin) - fu.th)))
-                print(f'  FUSED heading: error {e:.2f} deg  ->  '
+                t = math.degrees(fu.th_total)
+                e = abs(t - a.spin)
+                print(f'  FUSED heading: read {t:+.2f} deg, error {e:.2f} deg  ->  '
                       f'{"PASS" if e <= 10.0 else "FAIL"}')
             if vo.straight > 1e-6:
                 better = vo.straight / fu.straight if fu.straight > 1e-6 else float('inf')
