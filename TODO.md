@@ -222,6 +222,55 @@ this needs somewhere else to go.
 
 ---
 
+## 🔴 14. A pivot command drives instead of turning
+
+Measured 2026-08-21 with `logs/turn_diag.py`, rover on the floor:
+
+| commanded | velL | velR | gyro | what happened |
+|---|---|---|---|---|
+| `wz +2.00` (left) | −0.36 | −0.30 | +7.8 °/s | both **backward** |
+| `wz −2.00` (right) | +0.35 | +0.30 | −6.6 °/s | both **forward** |
+
+**Counter-rotating in 0% of samples.** A pivot requires the two sides to turn
+opposite ways; they never do.
+
+The left side tracks its target exactly: `wL = 0 − 2.0 × 0.34/2 = −0.34` against
+−0.36 measured. **The right side is commanded +0.34 and measures −0.30** — it is
+being dragged backward by the chassis rather than driving against it. The small
+residual differential (0.06 m/s) is why the gyro still reads ~7 °/s: the rover
+reverses along a slight curve, which is what the operator saw as "goes front/back
+even when I click right".
+
+### Not the torque theory
+
+The first theory was that the teleop under-commands: it was written for a
+different firmware (`rover_sim contract_bridge.py`) where `wz` is a **PWM
+fraction**, while `rover_firmware_v2.ino` reads it as **rad/s**. So `WZ = 2.0`
+asks for ±0.34 m/s = ~40% duty, not the ~100% its comment claims. **That
+mismatch is real and still worth fixing** — but it is not this fault, because
+40% duty would produce weak counter-rotation, not confident motion the wrong way.
+
+### Candidates, in order
+
+1. **The right side stalls under scrub load and is dragged.** A pivot scrubs all
+   four tyres; if the right motor cannot break loose it gets pushed backward by
+   the left. Fits the measured 1.29–1.60× front/rear scrub (§13).
+2. **Current sag.** Two motors share one BTS7960 per side, and a pivot is the
+   highest-current manoeuvre there is.
+3. **A direction constant that only shows in reverse.** Forward is verified
+   (balance 1.00), so `R_MOTOR_DIR` is right for forward — but `driveSide()`
+   selects a different PWM pin by sign, and the reverse pin has never been
+   exercised on the right side under load.
+
+**Next test:** lift the rover and repeat. Off the ground there is no scrub load
+and no traction, so if the sides counter-rotate when lifted it is (1) or (2); if
+they still both turn the same way it is (3), a wiring or constant fault.
+
+**Consequence:** the rover cannot currently turn in place. Phase 2 mapping works
+with wide arcs, but nav2 will want spot turns.
+
+---
+
 ## ✅ 13. Skid-steer scrub — measured, and it changes what the wheels are for
 
 This rover has four driven wheels and no steering, so a turn drags every tyre
