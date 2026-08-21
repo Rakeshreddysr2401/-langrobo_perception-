@@ -73,6 +73,21 @@ from sensor_msgs.msg import Imu
 from std_msgs.msg import String
 
 WHEEL_BASE_M = 0.34    # rover_firmware_v2.ino:100 — 34 cm between L/R wheel centres
+
+# Rotation needs a DIFFERENT width, and this is not a fudge. This is a four-wheel
+# SKID-STEER rover: it has no steering, so turning drags all four tyres sideways
+# across the floor. The geometry that converts a left/right speed difference into
+# a yaw rate is therefore not the physical 34 cm track -- it is an effective
+# width that includes the scrub, and it is always larger.
+#
+# Measured 2026-08-21 against a hand-set 90 deg turn: wheels read 146.49 deg
+# where the gyro read 89.80. That is 1.63x too much rotation, i.e. the width the
+# wheels behave as if they have is 0.34 * 1.63 = 0.55 m.
+#
+# Using the physical track made the wheels 63% wrong on every turn. This is the
+# single constant that fixes it, and it is worth re-measuring on a different
+# floor surface -- carpet scrubs differently from tile.
+WHEEL_BASE_ROT_M = 0.5546
 STALE_S = 1.0          # a source with no message for this long is shown as stale
 
 # Path is accumulated in CHORDS of at least this length, not per frame.
@@ -118,7 +133,17 @@ ATTITUDE_TAU = 0.25
 # re-measured against the world every frame. At 30 Hz this is a ~30 s time
 # constant: long enough that a teleport cannot yank the heading, short enough to
 # bound gyro drift over a long run.
-YAW_TRUST_VO = 0.001
+YAW_TRUST_VO = 2.0e-5
+
+# Do not accept a heading correction from cuVSLAM WHILE TURNING. Rotation is
+# visual odometry's weakest case -- the scene sweeps, features leave the frame,
+# and on this rig a pivot swings the camera at ~34 cm/s, past its ~25 cm/s
+# tracking limit. Measured 2026-08-21 on a hand-set 90 deg turn: the gyro read
+# 89.80 deg and cuVSLAM read 99.85. Correcting toward cuVSLAM there does not
+# bound drift, it imports an 11% error into a reading that was already right.
+# Below this rate the rover is driving straight or standing still, which is
+# where cuVSLAM's heading is genuinely trustworthy.
+YAW_CORRECT_MAX_RATE = 0.05      # rad/s, about 3 deg/s
 
 # How many samples of one-sided motion before we call the other side dead. At
 # 20 Hz this is ~5 s of one wheel turning while the other reports nothing, which
@@ -284,6 +309,7 @@ class Compare(Node):
         self.cover_vo = 0            # frames the wheels+gyro covered for cuVSLAM
         self.cover_gyro = 0          # frames cuVSLAM covered for the gyro
         self.cover_enc = 0           # frames cuVSLAM covered for the encoders
+        self.yaw_held = 0            # frames the VO heading correction was refused
         self.enc_corrections = 0     # how many steps the encoders actually rescaled
         self.accel = (0.0, 0.0, 0.0)      # raw, base_link frame
         self.gyro_xyz = (0.0, 0.0, 0.0)   # raw rates, all three axes
@@ -471,8 +497,12 @@ class Compare(Node):
         if g.n and (time.time() - g.last_msg) <= COVER_STALE_S:
             self.fused_yaw = wrap(self.fused_yaw
                                   + wrap(self.gyro_yaw - self.gyro_prev_yaw))
-            self.fused_yaw = wrap(self.fused_yaw
-                                  + wrap(vo_th - self.fused_yaw) * YAW_TRUST_VO)
+            turning = abs(self.gyro_xyz[2] - self.gyro_bias) > YAW_CORRECT_MAX_RATE
+            if not turning:
+                self.fused_yaw = wrap(self.fused_yaw
+                                      + wrap(vo_th - self.fused_yaw) * YAW_TRUST_VO)
+            else:
+                self.yaw_held += 1
         else:
             # The gyro has gone quiet. Its step is the thing being integrated, so
             # a stale one would hold the heading frozen through a real turn --
@@ -528,7 +558,7 @@ class Compare(Node):
         s.seen()
         now = time.time()
         vx = (m.x + m.y) / 2.0
-        wz = (m.y - m.x) / WHEEL_BASE_M
+        wz = (m.y - m.x) / WHEEL_BASE_ROT_M
 
         # Watch for one side reading a hard zero while the other moves. Both LEFT
         # encoders died on 2026-08-15 (they worked three hours earlier), and the
