@@ -9,6 +9,7 @@
 #   ./rover status     what is alive right now
 #   ./rover fused      the fused pose -> /odom + TF, what nav2 consumes
 #   ./rover map        nvblox — build the room as it drives (Phase 2)
+#   ./rover nav        nav2 — click a goal, it plans and drives there (Phase 3)
 #   ./rover rviz       view it (prefer a laptop — see phase2/LAPTOP.md)
 #   ./rover logs <n>   tail a layer's log (camera|vo|gyro|fused)
 #   ./rover stop       tear the container down
@@ -25,6 +26,7 @@ SRC=/opt/rover
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOSTSRC="$REPO/phase1"
 SRC2=/opt/rover2
+SRC3=/opt/rover3
 CAM_NS=/camera/camera0
 
 # The cuvslam wheel ships its own libcuvslam.so and CUDA-12 userspace libs, and
@@ -70,6 +72,7 @@ start_container(){
     -e ROS_DOMAIN_ID=0 \
     -v "$HOSTSRC":$SRC:ro \
     -v "$REPO/phase2":$SRC2:ro \
+    -v "$REPO/phase3":$SRC3:ro \
     -v "$REPO/logs":/logs \
     "$IMAGE" -c 'sleep infinity' >/dev/null
   sleep 2
@@ -246,6 +249,29 @@ map)
   echo
   echo "  Drive it and the map grows. In RViz: nvblox mesh, nvblox 2D slice."
   echo "  Log: ./rover logs map"
+  ;;
+
+# ── nav ─────────────────────────────────────────────────────────────────────
+nav)
+  need_container
+  echo "  checking the pose and the map are up before planning on them..."
+  assert_rate /odom 15 "fused odom" || die "no fused pose — run ./rover fused"
+  assert_rate /nvblox_node/static_occupancy_grid 1 "map" || die "no map — run ./rover map"
+  kill_match 'nav2_|lifecycle_manager|controller_server|planner_server|bt_navigator'
+  echo "[nav] nav2 — plan a route on the nvblox map and drive it"
+  echo "      frame is odom, not map: this navigates within one session."
+  echo "      Spin recovery and rotate-to-heading are OFF — see TODO 14, this"
+  echo "      rover cannot turn in place and nav2 would sit still waiting."
+  dexec "ros2 launch $SRC3/launch/nav2.launch.py > /tmp/nav.log 2>&1"
+  sleep 20
+  echo
+  echo "  GATE nav:"
+  assert_rate /global_costmap/costmap 0.5 "global costmap" || true
+  assert_rate /local_costmap/costmap 1 "local costmap" || true
+  echo
+  echo "  Now set a goal: in RViz use the '2D Goal Pose' tool, or"
+  echo "    ros2 topic pub --once /goal_pose geometry_msgs/PoseStamped ..."
+  echo "  Log: ./rover logs nav"
   ;;
 
 # ── rviz ────────────────────────────────────────────────────────────────────
