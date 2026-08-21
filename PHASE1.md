@@ -1,146 +1,228 @@
 # Phase 1 — Perception
 
-**Goal:** know where the rover is. Every later phase stands on this, because a
-map built on a wrong pose is a wrong map, and nav2 plans against `odom → base_link`.
+**Goal: know where the rover is.** Every later phase stands on this. A map built
+on a wrong pose is a wrong map, and nav2 plans against `odom → base_link`.
 
-Everything below was measured on this rig on **2026-08-15**. Nothing is inherited
-from documentation, datasheets, or a previous build.
+**Status: complete.** All gates pass. Measured on this rig, 2026-08-15 and
+2026-08-21. Nothing here is inherited from a datasheet, a tutorial, or a previous
+build — every number was measured against a tape measure or a floor line.
 
 ---
 
-## 1. The sensors, and what each one is honestly good for
+## 1. The rig
 
-| sensor | interface | rate | gives | used for |
-|---|---|---|---|---|
-| D555 stereo IR (`infra1`/`infra2`) | Ethernet/DDS, 896×504 | 30 Hz | image pair | **x, y, θ** via cuVSLAM |
-| D555 IMU (`motion/sample`) | same | 200 Hz | 3 rates + 3 accelerations | **yaw**, **roll/pitch** |
-| 4× wheel encoders | ESP32 → micro-ROS → WiFi | 20 Hz | cumulative counts | **distance** |
-| D555 depth | same | 27 Hz | depth image | *nothing in Phase 1* — see below |
+```
+  D555 depth camera ──Ethernet/DDS──┐
+                                    │
+                              Jetson Orin Nano ── cuVSLAM, gyro re-framing,
+                                    │              fusion, all measurement
+                                    │
+  ESP32 ──WiFi/UDP──► Pi 5 ──DDS────┘
+   │                  (micro-ROS agent, teleop web)
+   └── 4× BTS7960-driven encoder motors
+```
+
+| machine | role |
+|---|---|
+| Jetson Orin Nano | cuVSLAM, pose, fusion. Everything runs in `orin-nav:1.1` |
+| Pi 5 | micro-ROS agent (ESP32 ↔ ROS), teleop web on `:8091` |
+| ESP32 | 50 Hz PID control loop, encoder counting, motor drive |
+| D555 | stereo IR + depth + IMU, over Ethernet, **not USB** |
+
+---
+
+## 2. The four sensors, and what each honestly measures
+
+| sensor | rate | measures | trusted for |
+|---|---|---|---|
+| D555 stereo IR (896×504) | 30 Hz | image pair → cuVSLAM | **direction** |
+| D555 IMU | 200 Hz | 3 rates + 3 accelerations | **heading**, **tilt** |
+| 4× wheel encoders | 20 Hz | cumulative counts | **distance, straight** |
+| D555 depth | 30 Hz | depth image | *nothing in Phase 1* |
 
 ### Why depth is deliberately unused
 
-Depth is **computed from** the same stereo IR pair cuVSLAM already consumes. It
-carries no independent information about where the rover is — using it would be
-asking one witness the same question twice and counting two answers. It is
-Phase 2's input, for building the map.
+Depth is **computed from** the same stereo pair cuVSLAM already consumes. It is
+not an independent witness — using it would be asking one witness the same
+question twice and counting two answers. It is Phase 2's input, for the map.
 
-### Why the accelerometer is not used for position
+### Why the accelerometer is never integrated for position
 
 Integrating acceleration twice makes error grow with **t²**. A 0.01 m/s² bias —
-entirely typical — becomes 0.5 m of error after 10 seconds and **180 m after a
+entirely typical — is 0.5 m of error after ten seconds and **180 m after a
 minute**. No filter fixes this; it is arithmetic.
 
 Its real signal is **gravity**, which never drifts. That gives roll and pitch as
-absolute angles with zero accumulated error — something no other sensor here
-provides. It was being thrown away.
+absolute angles with zero accumulated error — the only drift-free attitude
+reference on the vehicle. It was being thrown away until 2026-08-21.
 
 ---
 
-## 2. Techniques
+## 3. Techniques
 
 ### Stereo visual odometry — cuVSLAM 16.0.0
 
 Tracks features between consecutive stereo frames and solves for the camera
-motion that explains their movement. Scale comes from the **baseline** (the known
-distance between the two lenses), which is why a wrong baseline is a wrong
-distance, and why the error is proportional rather than random.
+motion that explains their movement. **Scale comes from the baseline** — the
+known distance between the two lenses — which is why a wrong baseline gives a
+proportional error, not a random one.
 
-SLAM/loop-closure is **off** in Phase 1, deliberately: we are measuring raw drift.
-Loop closure would mask exactly the error we want to see.
+Loop closure is **off** on purpose. Phase 1 measures raw drift; loop closure
+would mask exactly what we are trying to see.
 
 ### Frame conjugation
 
-cuVSLAM reports the pose of the *camera* in *optical* axes (x right, y down,
-z forward). ROS wants the pose of `base_link` in REP-103 axes (x forward, y left,
-z up). Both the axes and the origin must move:
+cuVSLAM reports the *camera* in *optical* axes (x right, y down, z forward). ROS
+wants `base_link` in REP-103 (x forward, y left, z up). Both the axes and the
+origin move, so the transform applies on **both sides**:
 
 ```
-odom_from_base(t) = B · world_from_rig(t) · B⁻¹        B = base_link ← left_optical
+odom_from_base(t) = B · world_from_rig(t) · B⁻¹      B = base_link ← left_optical
 ```
 
-Conjugation, not a single multiply — the transform is applied on both sides, or
-the rover appears to swing around a point 17 cm in front of itself.
+A single multiply instead of a conjugation makes the rover appear to swing around
+a point 17 cm in front of itself.
 
-### Gyro bias — continuously re-estimated
+### Continuously re-estimated gyro bias
 
-A MEMS gyro reads a non-zero rate while perfectly still. Integrate that and the
-heading walks away linearly.
+A MEMS gyro reads non-zero while perfectly still; integrate that and the heading
+walks away linearly.
 
 **The offset is not constant.** Measured across three runs the same day:
 `+0.0838`, `+0.1050`, `+0.1808 °/s` — over 2× apart, moving as the board warms.
-A startup average therefore goes stale and starts *adding* error: one run
-over-corrected and walked **−9.52° in 107 s with the rover standing still**,
-against a 10° gate.
+A startup average goes stale and starts *adding* error: one run over-corrected
+and walked **−9.52° in 107 s with the rover standing still**, against a 10° gate.
 
-Fix: whenever the rover is definitely still, whatever the gyro reads **is** the
-bias, so it is eased toward that continuously (~25 s time constant).
+Now: whenever the rover is definitely still, whatever the gyro reads **is** the
+bias, and it is eased toward that (~25 s time constant). Result: **+0.08° over
+161 s parked.**
 
-"Definitely still" needs **both** the wheels and cuVSLAM to agree. Either alone
-can be fooled — wheels by a slippery floor, cuVSLAM by a blank wall — and a false
-"still" mid-turn would absorb real rotation into the bias and corrupt heading
-permanently.
+**"Definitely still" requires both the wheels and cuVSLAM to agree.** Either
+alone can be fooled — wheels by a slippery floor, cuVSLAM by a blank wall — and a
+false "still" mid-turn would absorb real rotation into the bias and corrupt the
+heading permanently.
 
 ### Complementary filters
 
 Two sensors, opposite weaknesses, combined by frequency.
 
-**Roll/pitch** — the gyro is smooth and instant but drifts; the accelerometer is
-absolute but noisy and reports fake tilt under acceleration. Integrate the gyro
-short-term, let gravity pull it back long-term. τ = 0.25 s.
+**Roll/pitch** — the gyro is smooth but drifts; the accelerometer is absolute but
+noisy and reports fake tilt under acceleration. Integrate the gyro short-term,
+let gravity pull it back long-term. τ = 0.25 s.
 
-**Yaw** — gyro dominant (it beat cuVSLAM by 7.68° on a return leg), pulled slowly
-onto cuVSLAM's heading, which does not drift because it is re-measured against
-the world every frame. τ ≈ 30 s: long enough that a teleport cannot yank the
-heading, short enough to bound gyro drift.
+**Yaw** — gyro dominant, with cuVSLAM correcting only in a straight line
+(see §4).
 
-> The filter must be **recursive on its own previous value**. Written as
-> `fused = gyro + (vo − gyro)·k` it recomputes from the gyro every message and
-> the correction never accumulates — it was 99.9% gyro no matter how long it ran,
-> and reported −9.51° while cuVSLAM sat at +0.01°.
+> **A complementary filter must be recursive on its own previous value.**
+> Written as `fused = gyro + (vo − gyro)·k` it recomputes from the gyro every
+> message and the correction never accumulates — it stayed 99.9% gyro no matter
+> how long it ran, and reported −9.51° while cuVSLAM sat at +0.01°. It looked
+> like fusion and did nothing.
 
-### Encoder-corrected distance
+### Encoder distance from raw cumulative ticks
 
-cuVSLAM supplies the **direction**, the encoders supply the **magnitude**.
+Distance is integrated from **raw cumulative counts**, not from velocity and not
+from a chord-accumulated path.
 
-cuVSLAM under-reads distance by a systematic **~2.2%**, and under-reads
-*reversing* by ~6%. Being the only translation source, nothing could contradict
-it. Encoders do not care about visual texture or direction of travel — they are
-exactly the missing measurement. Rescale is bounded to 0.5–2.0× so a bad sample
-cannot run away.
+- **Velocity would have to be integrated**, so a dropped message loses that
+  travel permanently. Counts are cumulative: however many messages go missing,
+  the next one carries the exact total.
+- **Chord accumulation has a 5 mm floor.** At 30 Hz the increment is usually
+  exactly zero, which silently made dead reckoning report *"carried 0 frames"*
+  through 32 teleports while the rover was moving the whole time.
+
+Four separate wheel values also expose one wheel slipping, which a per-side
+average hides.
 
 ### Chord-based path accumulation
 
 Summing per-frame `|Δposition|` adds a magnitude that can never cancel, so `path`
-ratcheted up **9.0 cm while the rover sat still** (position noise is ~26 µm/frame).
-Travel is now accumulated only once the pose has moved 5 mm from the last anchor.
+ratcheted up **9.0 cm while the rover sat still** (position noise ≈ 26 µm/frame).
+Travel accumulates only once the pose has moved 5 mm from the last anchor.
 
 ### Teleport rejection
 
-A step is a teleport if it exceeds **15 cm** *or* implies over **1 m/s** — no one
-hand-pushes a rover at 4.4 m/s, so a 14.7 cm hop in one 33 ms frame is the tracker
-re-initialising, not motion. Every number after a teleport is measured from a
-corrupted origin, so a run containing one is **thrown away, not graded**.
+A step is a teleport if it exceeds **15 cm** *or* implies over **1 m/s** — nobody
+hand-pushes a rover at 4.4 m/s, so a 14.7 cm hop in one 33 ms frame is the
+tracker re-initialising, not motion.
+
+### Skid-steer effective track width
+
+This rover has four driven wheels and **no steering**, so turning drags every
+tyre sideways. The geometry converting a left/right speed difference into a yaw
+rate is **not** the physical track — it is an effective width including the
+scrub, and it is always larger.
+
+Using the physical 0.34 m made the wheels **63% wrong on every turn**.
 
 ---
 
-## 3. Measured facts about this rig
+## 4. The fusion — how the three sensors cover for each other
 
-| quantity | value | how |
+No sensor is good at everything, and **a sensor that is bad at a job does not get
+that job**. Fusion here is not averaging; it is assignment plus fallback.
+
+| job | primary | why |
 |---|---|---|
-| camera x offset | **0.170 m** | tape (4.5 cm + 25.0/2) |
-| camera z offset | **0.163 m** | tape |
-| camera mount yaw | **2.06°** | tape |
-| camera mount pitch | **−1.63°** | **gravity vector** — never previously measured |
-| stereo baseline | 9.49 cm reported | `−P[3]/P[0]`; ~9.70 cm would fix the scale error |
-| wheel diameter | 0.085 m | tape |
-| wheel base | 0.34 m | tape |
-| encoder CPR | **1560, verified** | 200 cm tape push |
-| cuVSLAM scale error | **−2.2%, systematic** | four tape measurements |
-| cuVSLAM speed limit | **~25 cm/s** | teleports correlate with peak speed |
-| gyro bias | 0.084–0.181 °/s, **varies** | three runs |
-| healthy landmarks | 100–200; **<30 is fragile** | recorded at every teleport |
+| **heading** | gyro | −0.2% to −0.9% across five measured turns |
+| **distance** | encoders, straight only | front/rear agree 1.00× straight |
+| **direction** | cuVSLAM | does not drift; re-measured against the world each frame |
+| **tilt** | accelerometer (gravity) | absolute, never drifts |
 
-### Encoder calibration, 200 cm by tape
+### Every failure has a cover
+
+| when this fails | this carries it | proven by |
+|---|---|---|
+| cuVSLAM goes blind (<30 landmarks) | wheels + gyro | dropped 501 frames in one run |
+| cuVSLAM teleports | wheels + gyro | 101 frames, 65.1 cm dead-reckoned |
+| cuVSLAM stops publishing entirely | wheels + gyro | killed `vo_node`; FUSED held 20 Hz |
+| wheels slip in a turn | gyro heading | wheels said −31.51°, gyro +1.71° |
+| wheels go stale | cuVSLAM distance | last good scale retained |
+| gyro goes stale | cuVSLAM heading | a *frozen* gyro step is worse than none |
+| gyro drifts long-term | cuVSLAM, straight-line only | bias also re-estimated continuously |
+
+**FUSED has its own 20 Hz pulse**, independent of any single sensor. Until this
+was added, both the fusion and its fallback were driven by cuVSLAM's callback —
+so cuVSLAM was still the heartbeat, and if it went silent the pose simply froze.
+
+### Two rules that matter more than they look
+
+**Refusing bad messages is not enough — you must refuse a bad *sensor*.**
+Rejecting individual teleports left cuVSLAM publishing at a confident 30 Hz
+between them with an equally corrupted *direction*. With landmarks at 4, FUSED
+took its heading from it and finished **42.4 cm** from the start while the wheels
+**alone** managed 17.4 cm. Fusion did worse than its own worst input because it
+was still listening to the broken one. Landmarks are the honest health signal —
+a dead tracker still emits a perfect pose at a perfect rate.
+
+**Do not calibrate during the manoeuvre that breaks your reference.** The
+encoder/cuVSLAM scale ratio freezes while turning, because the wheels are
+scrubbing and would drag a good calibration off with distance the rover never
+went.
+
+---
+
+## 5. Measured facts about this rig
+
+| quantity | value | how measured |
+|---|---|---|
+| camera x offset | 0.170 m | tape |
+| camera z offset | 0.163 m | tape |
+| camera mount yaw | 2.06° | tape |
+| **camera mount pitch** | **−1.3°** | **gravity vector** — never previously known |
+| stereo baseline | 9.49 cm reported | `−P[3]/P[0]`; ~9.70 would fix the scale error |
+| wheel diameter | 0.085 m | tape |
+| wheel base (physical) | 0.34 m | tape |
+| **effective track width (turning)** | **0.5216 m** | four 360° runs, 1.5% spread |
+| encoder CPR | **1560, verified** | 200 cm tape push, all four within 3% |
+| cuVSLAM scale error | **−2.2%, systematic** | four tape measurements |
+| cuVSLAM path over-read | ~19% | encoder cross-check between teleports |
+| cuVSLAM speed limit | ~25 cm/s | teleports correlate with peak speed |
+| gyro bias | 0.084–0.181 °/s, **varies** | three runs, moves with temperature |
+| healthy landmarks | 100–200; **<30 is fragile** | recorded at every teleport |
+| yaw sign | **+z = left, REP-103 correct** | commanded-vs-measured check |
+
+### Encoder calibration — 200 cm by tape
 
 | wheel | counts | implied CPR | vs configured 1560 |
 |---|---|---|---|
@@ -149,73 +231,55 @@ corrupted origin, so a run containing one is **thrown away, not graded**.
 | RF | 11623 | 1551.9 | 0.99× |
 | RR | 11275 | 1505.4 | 0.97× |
 
-All four agree within 3%. **No firmware change needed.**
+### Rotation calibration — four full turns
+
+| turn | wheels read | truth | ratio | implied width | peak rate |
+|---|---|---|---|---|---|
+| 90 left | 146.49 | 90 | 1.628 | 0.5534 m | — |
+| 360 left | 556.49 | 360 | 1.546 | 0.5256 m | 21.4 °/s |
+| 360 left | 548.34 | 360 | 1.523 | 0.5179 m | 76.2 °/s |
+| 360 left | 551.49 | 360 | 1.532 | 0.5209 m | 75.1 °/s |
+
+Faster turns over-read slightly **less** — scrub is not a chassis dimension, it
+is a calibrated average. Re-measure on carpet.
+
+### Wheel scrub — the wheels only agree in a straight line
+
+Two wheels on the same side, bolted to the same chassis, driven by the same
+BTS7960, are mechanically obliged to sweep the same arc:
+
+| | LEFT front/rear | RIGHT front/rear |
+|---|---|---|
+| straight (200 cm) | 1.00× | 1.03× |
+| **turning (360°)** | **1.60×** | **1.29×** |
+
+Repeated next run: 37.5% and 23.0% against 37.6% and 22.5% — **reproducible to
+half a percent**, so it is deterministic, not random slip. The rover pivots about
+a point behind its geometric centre and does so consistently.
 
 ---
 
-## 4. What was achieved
+## 6. Results
 
-| check | target | result |
+| gate | target | result |
 |---|---|---|
 | camera rate | ≥15 Hz | ✅ 30.0 Hz, emitter verified OFF |
-| cuVSLAM rate | ≥10 Hz | ✅ 30.0 Hz, 116 landmarks |
+| cuVSLAM rate | ≥10 Hz | ✅ 30.0 Hz |
 | gyro rate | ≥50 Hz | ✅ 200.9 Hz |
 | wheel rate | ≥15 Hz | ✅ 20.0 Hz |
 | all 4 encoders | respond | ✅ verified individually |
 | **scale** | 2.00 m ±5% | ✅ 195.4 cm (−2.3%) |
-| **drift** | ≤10 cm out-and-back | ✅ **2.5 cm** hand-pushed (was 12.2 cm) |
+| **drift, hand-pushed** | ≤10 cm | ✅ 2.5 cm |
 | **drift, driven hard** | ≤10 cm | ✅ **4.9 cm** through 12 teleports |
-| **stationary stability** | no phantom motion | ✅ **0.08° over 161 s** (was −9.52°) |
-| **heading / 360° spin** | ≤10° | ✅ **3.68°** (cuvslam alone 11.15° FAIL) |
-| **teleop** | `/cmd_vel` moves and stops wheels | ✅ **balance 1.00, 0.197 of 0.200 m/s** |
-
-### Teleop — proven 2026-08-21
-
-Driven from a phone at `http://192.168.1.16:8091` (hold-to-move, 10 Hz, 0.4 s
-dead-man release backed by the ESP32's own 500 ms watchdog).
-
-| check | result |
-|---|---|
-| command reaches the wheels | ✅ phone → Pi 5 → `/cmd_vel` → WiFi → ESP32 → PID → motors |
-| both sides drive | ✅ balance **1.00** — it goes straight, so the DIR constants are right |
-| PID tracking | ✅ 0.197 m/s measured against 0.200 commanded (1.5%) |
-| release stops it | ✅ decays 0.197 → 0.043 → 0.004 — a coast, as the firmware intends |
-
-`velL`/`velR` here are **measured from the encoders**, not echoed from the
-command, so they are real evidence the wheels turned.
-
-**The page defaults to AUTO and the buttons do nothing until it is flipped to
-MANUAL** — that is nav2/the brain owning `/cmd_vel`, not a fault. In MANUAL it
-publishes at 10 Hz whether or not a button is held, so `/cmd_vel` traffic alone
-proves nothing; only a non-zero velocity does.
-
-### The 360° spin — the last gate
-
-Rotated a full turn by teleop, back to the same floor line. Headings wrap to
-±180, so these are unwrapped onto 360:
-
-| source | read | error |
-|---|---|---|
-| wheels | 348.65° | −11.35° |
-| **gyro** | **363.57°** | **+3.57°** |
-| cuvslam | 371.15° | +11.15° **FAIL** |
-| **FUSED** | **363.68°** | **+3.68° PASS** |
-
-All four cluster around 360, which is what confirms it was a real full rotation
-rather than a small one passing by accident.
-
-cuVSLAM failing here is expected and is why the gate exists: rotation is visual
-odometry's weakest case, and a pivot swings this camera at ~34 cm/s past its
-~25 cm/s tracking limit.
-
-The wheels are the calibration paying off — **63% error before the skid-steer
-track width was measured, 3.2% after**.
+| **stationary stability** | no phantom motion | ✅ 0.08° over 161 s |
+| **heading, 360° spin** | ≤10° | ✅ **3.68°** |
+| **teleop** | moves and stops | ✅ balance 1.00 |
 
 ### The run that proves fusion works
 
-Driven under teleop with repeated lefts, rights, forwards and reverses, in a
-room where the camera had little to look at. cuVSLAM lost tracking **12 times**
-and landmarks fell to **17** against a healthy 100–200.
+Driven under teleop with repeated lefts, rights, forwards and reverses, in a room
+with little for the camera to see. cuVSLAM lost tracking **12 times**, landmarks
+fell to **17**.
 
 | source | endpoint error | heading |
 |---|---|---|
@@ -225,46 +289,80 @@ and landmarks fell to **17** against a healthy 100–200.
 | **FUSED** | **4.9 cm** | **+1.75°** |
 
 **FUSED beat both of its own inputs** — 16× better than cuVSLAM, 11× better than
-the wheels — and its heading landed on the gyro's, which was the only heading
-worth having.
+the wheels — and its heading landed on the gyro's, the only one worth having.
 
-Two mechanisms did it, both visible in the run:
+The same test one iteration earlier gave **42.4 cm and FAILED**, worse than the
+wheels alone.
 
-- `cuvslam DROPPED (few landmarks) 501x` — below 30 landmarks cuVSLAM is ignored
-  outright, not merely filtered. Refusing individual teleports is not enough:
-  between them the messages keep arriving at a confident 30 Hz with a corrupted
-  direction in them.
-- `FUSED carried 101 frames on wheels+gyro (65.1 cm)` — travel cuVSLAM never saw,
-  reconstructed from raw encoder ticks and gyro heading.
+### The 360° spin
 
-The previous attempt at the same test gave **42.4 cm and FAILED**, worse than the
-wheels alone at 17.4 cm, because dead reckoning silently measured travel in 5 mm
-chords and reported zero, while FUSED went on trusting a blind tracker's heading.
+Headings wrap to ±180, so unwrapped onto 360:
 
-### The two headline improvements
+| source | read | error |
+|---|---|---|
+| wheels | 348.65° | −11.35° |
+| **gyro** | **363.57°** | **+3.57°** |
+| cuvslam | 371.15° | +11.15° **FAIL** |
+| **FUSED** | **363.68°** | **+3.68° PASS** |
 
-**Drift: 12.2 cm → 2.5 cm.** Gyro heading plus encoder-corrected distance.
+All four cluster around 360, confirming a real full rotation rather than a small
+one passing by accident. The wheels at 3.2% error are the track-width calibration
+paying off — they were 63% wrong before it.
 
-**Stationary heading: −9.52° → +0.08°.** Continuous bias tracking plus a yaw
-filter that actually filters.
+### Teleop
 
-### Faults found and fixed along the way
+Phone at `http://192.168.1.16:8091`, hold-to-move, 10 Hz, 0.4 s dead-man backed by
+the ESP32's 500 ms watchdog.
 
-| fault | why it mattered |
+| check | result |
 |---|---|
-| IR emitter silently ON (`:=0` is a no-op for a Boolean) | projector dots move *with* the rig; a 60 cm push read 1.1 cm |
-| `docker exec` without a TTY | Ctrl-C never proxied — every run's verdict and CSV was lost |
-| `/wheel_state` at 1.000 Hz | `loop()` blocked in `rclc_executor_spin_some`; fixed with timeout 0 → 20 Hz |
-| yaw filter not recursive | fusion was doing nothing at all |
-| gyro bias assumed constant | −9.52° of phantom rotation while parked |
-| `path` ratcheting | 9.0 cm of travel accumulated while stationary |
-| camera "half-alive" | streams at 30 Hz but refuses option changes — emitter stuck on, everything else green |
+| command reaches the wheels | ✅ phone → Pi 5 → `/cmd_vel` → WiFi → ESP32 → PID → motors |
+| both sides drive | ✅ balance **1.00** — goes straight, DIR constants correct |
+| PID tracking | ✅ 0.197 m/s measured against 0.200 commanded |
+| release stops it | ✅ 0.197 → 0.043 → 0.004, a coast as the firmware intends |
+
+**The page defaults to AUTO and the buttons do nothing until flipped to MANUAL.**
+In MANUAL it publishes at 10 Hz whether or not a button is held, so `/cmd_vel`
+traffic alone proves nothing — only a non-zero velocity does.
 
 ---
 
-## 5. Commands
+## 7. Faults found — and what each one teaches
 
-### Bring-up — one layer at a time, each with its own PASS/FAIL
+Most of these presented as **healthy**. That is the lesson.
+
+| fault | why it mattered | the general lesson |
+|---|---|---|
+| IR emitter silently ON (`:=0` is a no-op for a Boolean) | projector dots move *with* the rig; a 60 cm push read **1.1 cm** | set it at runtime and **read it back** |
+| `/wheel_state` at 1.000 Hz | `loop()` blocked in `rclc_executor_spin_some`; two pointless reflashes chased the wrong theory | the mechanism was in a library nobody read |
+| `docker exec` without a TTY | Ctrl-C never proxied — **every run's verdict and CSV was lost** | a test that cannot report is not a test |
+| yaw filter not recursive | fusion appeared to work and did **nothing** | verify a filter changes the answer |
+| gyro bias assumed constant | −9.52° phantom rotation while parked | a calibration can go stale |
+| per-step scale ratio | could only ever inflate; path +28% | quantised inputs break per-step ratios |
+| dead reckoning on chord path | reported "carried 0 frames" through 32 teleports | same trap, different place |
+| trusting a degraded sensor | FUSED **worse** than its own worst input | refuse the sensor, not just the message |
+| wheels using physical track | 63% heading error on every turn | skid-steer ≠ differential drive |
+| camera "half-alive" | streams at 30 Hz but refuses option changes | a live stream is not a health check |
+| `path` ratcheting | 9.0 cm accumulated while stationary | noise that cannot cancel accumulates |
+| `ros2 topic hz` default QoS | silently receives nothing from a best-effort publisher | match QoS or measure nothing |
+
+### Two false alarms worth remembering
+
+**"Both LEFT encoders are dead."** The four-wheel test printed prompts through a
+buffered pipe, so the operator never saw them and nothing was spun at the right
+moment. *A test requiring the human and the script to agree on **when** is
+fragile.*
+
+**"Encoders are 2× out, rear reads 25% more than front."** That compared
+cumulative counts — **arc length** — against cuVSLAM's `straight` — **displacement**.
+On a path that curves or doubles back those are different quantities. *Calibrate
+against a tape on a straight forward push, and against nothing else.*
+
+---
+
+## 8. Commands
+
+### Bring-up — layered, each with its own PASS/FAIL
 
 ```bash
 ./rover camera      # D555 alone; verifies emitter OFF by read-back
@@ -275,64 +373,79 @@ filter that actually filters.
 ./rover stop        # tear down
 ```
 
-Order matters. Each layer checks the one beneath it, so a failure names its own
+Order matters — each layer checks the one beneath it, so a failure names its own
 layer instead of hiding in a wall of log.
 
-### The Phase 1 gates
+### The gates
 
 ```bash
-./rover compare --expect 2.00    # push 2.00 m straight  -> want 190-210 cm
-./rover compare --return         # out 2.00 m and back   -> want straight <= 10 cm
-./rover compare --spin 360       # rotate 360 deg by hand -> want error <= 10 deg
-./rover compare                  # no gate: just watch every sensor live
+./rover compare --expect 2.00    # push 2.00 m straight  -> want 190–210 cm
+./rover compare --return         # out and back          -> want ≤ 10 cm
+./rover compare --spin 360       # rotate 360°           -> want ≤ 10°
+./rover compare                  # no gate: watch every sensor live
 ```
 
-Keep still for the first **5 seconds** (gyro calibration), push, then **Ctrl-C**
-to grade and write the CSV.
+Keep still **5 seconds** (gyro calibration), drive, then **Ctrl-C** to grade and
+write the CSV. Keep clutter in view — a bare wall starves the tracker.
 
-**Push under 25 cm/s**, and keep clutter in view — a bare wall starves the tracker.
+### Teleop
+
+`http://192.168.1.16:8091` on a phone. **Flip to MANUAL.**
+
+| button | commanded | speed at the camera |
+|---|---|---|
+| forward / back | 0.20 m/s | 20 cm/s ✅ |
+| left / right pivot | 2.0 rad/s | **34 cm/s** ⚠ over the tracking limit |
+
+### Calibration and diagnostics
+
+```bash
+# all six streams + the ESP32's own report of its loop rate
+python3 -u /logs/check_rates.py
+
+# per-wheel encoder calibration against a tape
+python3 -u /logs/calibrate_encoders.py 200
+
+# effective track width, and per-wheel slip through a turn
+python3 -u /logs/calibrate_rotation.py 360
+
+# are all four encoders alive? rover lifted, spin each wheel, any order
+python3 -u /logs/wheels_selfpaced.py 60
+
+# does a LEFT command produce a POSITIVE yaw rate? (REP-103)
+python3 -u /logs/check_yaw_sign.py 25
+
+# watch a teleop button press travel all the way to the wheels
+python3 -u /logs/watch_teleop.py 25
+```
+
+Each runs inside the container after
+`source /opt/ros/jazzy/setup.bash; export ROS_DOMAIN_ID=0`.
 
 ### Logs
 
-Every run writes a timestamped CSV to `logs/`, on the host, surviving container
-teardown:
-
 ```bash
-ls -lt logs/compare-*.csv | head        # most recent runs
+ls -lt logs/compare-*.csv | head
 ```
 
-Columns: per-source `x, y, th_deg, straight, path, hz` for **cuvslam / wheels /
-gyro / FUSED**, plus the raw sensor values — `roll_deg`, `pitch_deg`,
-`landmarks`, `accel_x/y/z`, `gyro_x/y/z`, `velL`, `velR`, and all four cumulative
-tick counts. A surprising result is worth re-reading, and you cannot re-read what
-was never written down.
-
-### Diagnostics
-
-```bash
-# all six streams, plus the ESP32's own report of its loop rate
-docker exec rover bash -lc 'source /opt/ros/jazzy/setup.bash; \
-  export ROS_DOMAIN_ID=0; python3 -u /logs/check_rates.py'
-
-# per-wheel encoder calibration against a tape
-docker exec -it rover bash -lc 'source /opt/ros/jazzy/setup.bash; \
-  export ROS_DOMAIN_ID=0; python3 -u /logs/calibrate_encoders.py 200'
-
-# are all four encoders alive? spin each wheel, any order, rover lifted
-docker exec rover bash -lc 'source /opt/ros/jazzy/setup.bash; \
-  export ROS_DOMAIN_ID=0; python3 -u /logs/wheels_selfpaced.py 60'
-```
+Per-source `x, y, th_deg, straight, path, hz` for cuvslam / wheels / gyro /
+FUSED, plus the raw values: `roll_deg`, `pitch_deg`, `landmarks`,
+`accel_x/y/z`, `gyro_x/y/z`, `velL`, `velR`, and all four tick counts. *A
+surprising result is worth re-reading, and you cannot re-read what was never
+written down.*
 
 ---
 
-## 6. Reading the output
+## 9. Reading the output
 
 ```
   source        x cm     y cm    th deg   straight cm   path cm      Hz
   cuvslam       -0.1      0.0     -0.00          0.1       0.0    30.0
   wheels         0.0      0.0      0.00          0.0       0.0    20.0
   gyro             —        —      0.07            —         —   200.9
-  FUSED         -0.1      0.0      0.03          0.1       0.0    30.0
+  FUSED         -0.1      0.0      0.03          0.1       0.0    29.0
+
+  health: cuvslam OK  wheels OK  gyro OK   |  all three contributing
 ```
 
 | column | meaning |
@@ -341,32 +454,43 @@ docker exec rover bash -lc 'source /opt/ros/jazzy/setup.bash; \
 | `th` | heading change since the start, degrees |
 | `straight` | straight-line distance from the start — **what a tape measures** |
 | `path` | total distance travelled — larger if it wandered or reversed |
-| `Hz` | publish rate. **Every failure on this rig began as a rate collapse.** |
+| `Hz` | publish rate. **Every failure here began as a rate collapse.** |
 
-Sources are shown **separately on purpose**. A single fused number cannot tell
+**Sources are shown separately on purpose.** A single fused number cannot tell
 you which sensor is lying: when cuVSLAM under-read a 100 cm push as 26 cm, a
 fused value would have looked entirely plausible. Two rows disagreeing would not.
-
-`FUSED` is the row to navigate on. The others are how you know it is honest.
+`FUSED` is the row to navigate on; the others are how you know it is honest.
 
 Also watch:
 
-- **`landmarks`** — under 30 and a teleport is coming
-- **`gyro bias removed … STILL — retuning bias`** — the bias tracker working
+- **`landmarks`** — under 30 and cuVSLAM is dropped from the fusion
+- **`health:`** — who is covering for whom, right now
+- **`STILL — retuning bias`** — the gyro bias tracker working
+- **`encoder scale`** — the measured wheels/cuVSLAM ratio, and whether it clamped
 - **`tilt:`** — roll, pitch, and the camera's measured mount pitch
 
 ---
 
-## 7. What Phase 1 does **not** yet do
+## 10. What Phase 1 does **not** do
 
 - **No runtime fused pose.** `FUSED` lives inside `compare.py`, a measurement
-  tool. Nothing publishes it for nav2. This is Phase 1b and it is the critical path.
-- **No teleport guard at runtime.** `compare.py` refuses to grade a run containing
-  one; the live pose has no such protection. During autonomous navigation a 2 m
-  teleport would make nav2 react violently to a position the rover was never in.
-  This is a **safety** issue, not an accuracy one.
+  tool. Nothing publishes it for nav2. **This is Phase 1b and it is the critical
+  path** — the algorithm is proven; it needs to become a node publishing
+  `odom → base_link`.
+- **No teleport guard on the published pose.** `compare.py` protects its own
+  estimate; `/vo/odom` is still raw. During autonomous navigation a 2 m teleport
+  would make nav2 react violently to a position the rover was never in. That is a
+  **safety** issue, not an accuracy one.
 - **No `nav_msgs/Odometry` from the wheels.** `/wheel_odom` carries three numbers;
   something must wrap them properly.
 - **No footprint.** nav2 needs the chassis outline to plan clearances.
+
+### Constraints nav2 will inherit
+
+- **`vx_max` ≤ 25 cm/s** — above it cuVSLAM teleports
+- **Pivots cost tracking** — 2.0 rad/s swings the camera at 34 cm/s. Prefer plans
+  that turn and drive forward over plans that reverse or spin in place
+- **The D555 drops out** — three distinct failure modes, see `TODO.md` §7. A robot
+  needing a human to reseat a cable is not autonomous
 
 Open faults are tracked in `TODO.md`.
