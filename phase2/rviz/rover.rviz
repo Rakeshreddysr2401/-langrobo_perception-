@@ -1,0 +1,122 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+    Property Tree Widget:
+      Expanded: ~
+    Tree Height: 700
+Visualization Manager:
+  Class: ""
+  Global Options:
+    Background Color: 34; 38; 40
+    Fixed Frame: odom
+    Frame Rate: 20
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 0.5
+      Plane Cell Count: 20
+      Color: 70; 78; 80
+      Reference Frame: odom
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: true
+      Show Names: true
+      Show Axes: true
+      Show Arrows: false
+      Marker Scale: 0.4
+    - Class: rviz_default_plugins/Odometry
+      Name: Fused pose (/odom)
+      Enabled: true
+      Topic:
+        Value: /odom
+        Depth: 20
+        Reliability Policy: Best Effort
+      Keep: 1
+      Shape:
+        Value: Arrow
+        Color: 72; 185; 194
+        Alpha: 1
+        Shaft Length: 0.25
+        Shaft Radius: 0.04
+        Head Length: 0.12
+        Head Radius: 0.09
+      Covariance:
+        Value: true
+        Position:
+          Alpha: 0.25
+          Color: 72; 185; 194
+        Orientation:
+          Alpha: 0.4
+          Color: 255; 255; 127
+    - Class: rviz_default_plugins/Path
+      Name: Where it has been (/fusion/path)
+      Enabled: true
+      Topic:
+        Value: /fusion/path
+        Depth: 5
+        Reliability Policy: Reliable
+      Color: 85; 179; 126
+      Line Style: Lines
+      Alpha: 1
+    - Class: rviz_default_plugins/Odometry
+      Name: Raw cuVSLAM (/vo/odom)
+      Enabled: false
+      Topic:
+        Value: /vo/odom
+        Depth: 20
+        Reliability Policy: Best Effort
+      Keep: 1
+      Shape:
+        Value: Arrow
+        Color: 217; 122; 108
+        Alpha: 0.6
+        Shaft Length: 0.2
+        Shaft Radius: 0.03
+        Head Length: 0.1
+        Head Radius: 0.07
+    - Class: rviz_default_plugins/Image
+      Name: IR left
+      Enabled: false
+      Topic:
+        Value: /camera/camera0/infra1/image_rect_raw
+        Reliability Policy: Best Effort
+    - Class: rviz_default_plugins/MarkerArray
+      Name: nvblox mesh
+      Enabled: true
+      Topic:
+        Value: /nvblox_node/mesh
+        Depth: 5
+        Reliability Policy: Reliable
+    - Class: rviz_default_plugins/Map
+      Name: nvblox 2D slice
+      Enabled: true
+      Topic:
+        Value: /nvblox_node/static_map_slice
+        Depth: 1
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+      Color Scheme: costmap
+      Alpha: 0.7
+  Global Options:
+    Fixed Frame: odom
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/SetGoal
+      Topic:
+        Value: /goal_pose
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Name: Current View
+      Distance: 8
+      Pitch: 1.0
+      Yaw: 3.9
+      Focal Point:
+        X: 0
+        Y: 0
+        Z: 0
+Window Geometry:
+  Height: 900
+  Width: 1400

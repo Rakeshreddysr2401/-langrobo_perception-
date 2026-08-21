@@ -8,6 +8,7 @@
 #   ./rover values     every sensor's current reading, in one place
 #   ./rover status     what is alive right now
 #   ./rover fused      the fused pose -> /odom + TF, what nav2 consumes
+#   ./rover rviz       view it (prefer a laptop — see phase2/LAPTOP.md)
 #   ./rover logs <n>   tail a layer's log (camera|vo|gyro|fused)
 #   ./rover stop       tear the container down
 #
@@ -20,7 +21,9 @@ set -eo pipefail
 IMAGE=${IMAGE:-orin-nav:1.1}
 NAME=${NAME:-rover}
 SRC=/opt/rover
-HOSTSRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/phase1"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HOSTSRC="$REPO/phase1"
+SRC2=/opt/rover2
 CAM_NS=/camera/camera0
 
 # The cuvslam wheel ships its own libcuvslam.so and CUDA-12 userspace libs, and
@@ -57,7 +60,7 @@ assert_rate(){ # topic  min_hz  label
 
 start_container(){
   docker rm -f "$NAME" >/dev/null 2>&1 || true
-  mkdir -p "$(dirname "$HOSTSRC")/logs"
+  mkdir -p "$REPO/logs"
   # phase1/ is mounted READ-ONLY: edit a node on the host, restart the layer,
   # no rebuild. The image has no build recipe, so it must never be modified.
   docker run -d --name "$NAME" --entrypoint /bin/bash \
@@ -65,7 +68,8 @@ start_container(){
     -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all -e NVIDIA_DISABLE_REQUIRE=1 \
     -e ROS_DOMAIN_ID=0 \
     -v "$HOSTSRC":$SRC:ro \
-    -v "$(dirname "$HOSTSRC")/logs":/logs \
+    -v "$REPO/phase2":$SRC2:ro \
+    -v "$REPO/logs":/logs \
     "$IMAGE" -c 'sleep infinity' >/dev/null
   sleep 2
 }
@@ -213,6 +217,16 @@ fused)
   echo
   echo "  Health, live:  ./rover compare"
   echo "  Raw status:    ros2 topic echo /fusion/status"
+  ;;
+
+# ── rviz ────────────────────────────────────────────────────────────────────
+rviz)
+  need_container
+  echo "[rviz] on the Jetson's own display. Prefer the laptop — see phase2/LAPTOP.md;"
+  echo "       rviz2 here competes with cuVSLAM for the GPU and the pose rate dips."
+  xhost +local:docker >/dev/null 2>&1 || true
+  docker exec -it -e DISPLAY=:0 "$NAME" bash -lc \
+    "$ENVSET rviz2 -d $SRC2/rviz/rover.rviz"
   ;;
 
 # ── compare ─────────────────────────────────────────────────────────────────

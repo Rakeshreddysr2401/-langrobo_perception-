@@ -4,6 +4,7 @@
 WHAT IT OWNS
     /odom            nav_msgs/Odometry   the fused pose, with covariance
     TF odom -> base_link                 taken over from vo_node
+    /fusion/path     nav_msgs/Path       where it has been -- the line in RViz
     /fusion/status   std_msgs/String     JSON health, for humans and for logging
 
 WHY IT TAKES THE TF FROM vo_node
@@ -44,7 +45,8 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from geometry_msgs.msg import Vector3, Quaternion, TransformStamped
-from nav_msgs.msg import Odometry
+from nav_msgs.msg import Odometry, Path
+from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import Imu
 from std_msgs.msg import String
 from tf2_ros import TransformBroadcaster
@@ -54,6 +56,13 @@ from fusion import PoseFusion, LOW_LANDMARKS          # noqa: E402
 
 PULSE_HZ = 20.0        # independent of any sensor; see PoseFusion.pulse
 STATUS_HZ = 1.0
+
+# The travelled path, for RViz. Appended in CHORDS, not per pulse: at 20 Hz a
+# stationary rover would otherwise add 20 identical poses a second until the
+# message is megabytes and RViz stutters. 2 cm is fine enough to see the shape
+# of a room-sized drive and coarse enough that standing still costs nothing.
+PATH_CHORD_M = 0.02
+PATH_MAX = 5000        # ~100 m of travel at 2 cm; oldest dropped after that
 
 # (position sigma, yaw sigma) per health state -- see the module docstring
 COV_HEALTHY = (0.02, math.radians(1.0))
@@ -82,6 +91,10 @@ class FusionNode(Node):
         self.tf = TransformBroadcaster(self) if self.publish_tf else None
         self.pub = self.create_publisher(Odometry, topic, 10)
         self.pub_status = self.create_publisher(String, '/fusion/status', 10)
+        self.pub_path = self.create_publisher(Path, '/fusion/path', 10)
+        self.path = Path()
+        self.path.header.frame_id = 'odom'
+        self._path_anchor = None
 
         self.create_subscription(Odometry, '/vo/odom', self._vo, qos_profile_sensor_data)
         self.create_subscription(Imu, '/gyro/base', self._gyro, qos_profile_sensor_data)
@@ -187,6 +200,9 @@ class FusionNode(Node):
         od.twist.covariance = tw
         self.pub.publish(od)
 
+        if h['ready']:
+            self._append_path(od)
+
         if self.tf and h['ready']:
             tf = TransformStamped()
             tf.header = od.header
@@ -196,6 +212,24 @@ class FusionNode(Node):
             tf.transform.translation.z = 0.0
             tf.transform.rotation = od.pose.pose.orientation
             self.tf.sendTransform(tf)
+
+    def _append_path(self, od):
+        """Extend the travelled line, in chords so standing still costs nothing."""
+        x, y = od.pose.pose.position.x, od.pose.pose.position.y
+        if self._path_anchor is not None:
+            ax, ay = self._path_anchor
+            if math.hypot(x - ax, y - ay) < PATH_CHORD_M:
+                return
+        self._path_anchor = (x, y)
+
+        ps = PoseStamped()
+        ps.header = od.header
+        ps.pose = od.pose.pose
+        self.path.poses.append(ps)
+        if len(self.path.poses) > PATH_MAX:
+            self.path.poses.pop(0)
+        self.path.header.stamp = od.header.stamp
+        self.pub_path.publish(self.path)
 
     def _report(self):
         h = self.f.health()
