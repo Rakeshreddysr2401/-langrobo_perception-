@@ -72,6 +72,10 @@ from geometry_msgs.msg import Vector3, Quaternion
 from sensor_msgs.msg import Imu
 from std_msgs.msg import String
 
+# Verified against a 200 cm tape push 2026-08-15: all four wheels within 3% of
+# this, so ENCODER_CPR 1560 is correct and no per-wheel constant is needed.
+METRES_PER_COUNT = math.pi * 0.085 / 1560.0
+
 WHEEL_BASE_M = 0.34    # rover_firmware_v2.ino:100 — 34 cm between L/R wheel centres
 
 # Rotation needs a DIFFERENT width, and this is not a fudge. This is a four-wheel
@@ -325,7 +329,11 @@ class Compare(Node):
         self.enc_corrections = 0     # how many steps the encoders actually rescaled
         self.accel = (0.0, 0.0, 0.0)      # raw, base_link frame
         self.gyro_xyz = (0.0, 0.0, 0.0)   # raw rates, all three axes
-        self.ticks = (0, 0, 0, 0)         # LF, LR, RF, RR cumulative counts
+        self.ticks = None                 # LF, LR, RF, RR cumulative counts
+        self.tick_path = 0.0              # signed body distance from raw ticks
+        self.tick_travel = 0.0            # unsigned arc length from raw ticks
+        self.tick_at_fuse = 0.0           # tick_path at the last FUSED advance
+        self.vo_unhealthy = 0             # frames cuVSLAM was ignored outright
 
         self.create_subscription(Odometry, '/vo/odom', self._vo, qos_profile_sensor_data)
         self.create_subscription(Vector3, '/wheel_state', self._wheels, qos_profile_sensor_data)
@@ -416,48 +424,36 @@ class Compare(Node):
             self.cover_vo += 1
 
     def _deadreckon(self):
-        """cuVSLAM teleported — advance FUSED on wheels and gyro alone.
+        """Advance FUSED on wheels and gyro alone — no cuVSLAM at all.
 
-        This is what makes the fused pose survive the failure that Phase 1 keeps
-        hitting: a sudden stop or a reversal starves the tracker, it
-        re-initialises, and its position becomes meaningless. Encoders measure
-        distance from the axles and a gyro measures rotation from angular
-        momentum; neither cares what the camera can see. So the estimate keeps
-        running with the two sensors that are still telling the truth.
+        Used for two different failures. A teleport, where a message arrives and
+        is nonsense; and cuVSLAM being unhealthy for a stretch, where the
+        messages keep coming and the DIRECTION in them is untrustworthy. The
+        second is the one that hurt: on 2026-08-21, with landmarks down to 4,
+        FUSED kept taking its heading from cuVSLAM and finished 42.4 cm from the
+        start while the wheels alone managed 17.4 cm. Fusion did worse than its
+        own worst input, because it was still listening to the broken one.
 
-        Direction of travel comes from the SIGN of the measured wheel velocity,
-        because encoder path is unsigned distance and reversing must not be
-        integrated as forward motion.
+        Distance comes from raw cumulative ticks, which are signed, so reversing
+        subtracts instead of adding. Heading comes from the gyro, integrated onto
+        the filter's own value with no cuVSLAM correction.
         """
         if self.gyro_bias is None:
             return
-        w = self.src['wheels']
-        gained = w.path - self.enc_path_at_fuse
-        self.enc_path_at_fuse = w.path
-        # This travel is NOT witnessed by cuVSLAM, so it must not enter the
-        # encoder/cuVSLAM scale ratio -- that would inflate the calibration by
-        # exactly the distance the camera failed to see.
-        self.enc_path_dr += max(0.0, gained)
+        step = self.tick_path - self.tick_at_fuse
+        self.tick_at_fuse = self.tick_path
 
-        # Mark FUSED alive BEFORE the early returns. Standing still with cuVSLAM
-        # dead is a perfectly good estimate -- the rover is exactly where it was
-        # -- but without this the row went stale and printed "no publisher",
-        # which reads as the fused pose having died at precisely the moment it
-        # was doing its job.
         f = self.src['FUSED']
-        f.seen()
-
-        if gained <= 0:
-            return
-        velL, velR = self.wheel_prev
-        vx = (velL + velR) / 2.0
-        if abs(vx) < 1e-6:
-            return
+        f.seen()          # alive even when standing still; see the note below
 
         self.fused_yaw = wrap(self.fused_yaw
                               + wrap(self.gyro_yaw - self.gyro_prev_yaw))
         self.gyro_prev_yaw = self.gyro_yaw
-        f.step_body(gained if vx > 0 else -gained, 0.0, self.fused_yaw)
+
+        if abs(step) < 1e-9:
+            return
+        self.enc_path_dr += abs(step)
+        f.step_body(step, 0.0, self.fused_yaw)
         self.dr_steps += 1
 
     def _fuse(self, px, py, pth):
@@ -490,6 +486,24 @@ class Compare(Node):
         """
         if self.gyro_bias is None:
             return                      # gyro not calibrated yet; nothing to fuse
+
+        # Is cuVSLAM worth listening to at all? Refusing individual teleports is
+        # not enough: between them the messages keep arriving and the DIRECTION
+        # in them is just as corrupted. Measured 2026-08-21 with landmarks down
+        # to 4, FUSED took its heading from cuVSLAM throughout and landed 42.4 cm
+        # from the start, while the wheels ALONE managed 17.4 cm. Fusion did
+        # worse than its own worst input because it was still listening to the
+        # broken one.
+        #
+        # Landmarks are the honest health signal -- a dead tracker still emits a
+        # confident pose at a perfect 30 Hz. Below LOW_LANDMARKS there is not
+        # enough of the world in view to solve for motion, so cuVSLAM is dropped
+        # entirely and the pose runs on wheels and gyro until it recovers.
+        if 0 <= self.landmarks < LOW_LANDMARKS:
+            self.vo_unhealthy += 1
+            self._deadreckon()
+            return
+
         _, ox, oy, oth = self.vo_prev
         dx, dy = px - ox, py - oy
         c, s = math.cos(-oth), math.sin(-oth)          # into the body frame
@@ -544,6 +558,7 @@ class Compare(Node):
         enc_ok = (self.wheel_dead_side is None and self.wheel_moved_l
                   and self.wheel_moved_r)
         self.enc_path_at_fuse = w.path
+        self.tick_at_fuse = self.tick_path
         w_fresh = w.n > 0 and (time.time() - w.last_msg) <= COVER_STALE_S
         if not (enc_ok and w_fresh):
             self.cover_enc += 1        # cuVSLAM carrying distance on its own
@@ -563,7 +578,7 @@ class Compare(Node):
             self.scale_held += 1
         if (enc_ok and w_fresh and not turning_now
                 and self.vo_path_raw > SCALE_MIN_TRAVEL):
-            ratio = (w.path - self.enc_path_dr) / self.vo_path_raw
+            ratio = (self.tick_travel - self.enc_path_dr) / self.vo_path_raw
             # cuVSLAM reads ~2% under, so ~1.02 is expected. Anything outside
             # this band is wheel slip or a tracking failure, not calibration.
             if SCALE_LO < ratio < SCALE_HI:
@@ -626,7 +641,24 @@ class Compare(Node):
         self.wheel_prev = (vx, wz)
 
     def _ticks(self, m):
-        self.ticks = (int(m.x), int(m.y), int(m.z), int(m.w))
+        """Signed body distance from raw cumulative counts.
+
+        NOT from Source.path, which accumulates in 5 mm chords. At 30 Hz the
+        chord increment is usually exactly zero, so dead reckoning asked "how far
+        since the last frame?", got 0, and returned without moving anything --
+        it reported carrying 0 frames through 32 teleports on 2026-08-21 while
+        the rover was really moving the whole time. Raw counts have no such
+        floor: every tick is travel.
+        """
+        t = (int(m.x), int(m.y), int(m.z), int(m.w))
+        if self.ticks is not None:
+            d = [c - p for c, p in zip(t, self.ticks)]
+            left = 0.5 * (d[0] + d[1])
+            right = 0.5 * (d[2] + d[3])
+            step = 0.5 * (left + right) * METRES_PER_COUNT
+            self.tick_path += step            # signed: reversing subtracts
+            self.tick_travel += abs(step)     # unsigned arc length
+        self.ticks = t
 
     def _gyro(self, m):
         s = self.src['gyro']
@@ -793,6 +825,8 @@ class Compare(Node):
         cover = []
         if self.cover_vo:
             cover.append(f'wheels+gyro covered cuvslam {self.cover_vo}x')
+        if self.vo_unhealthy:
+            cover.append(f'cuvslam DROPPED (few landmarks) {self.vo_unhealthy}x')
         if self.cover_gyro:
             cover.append(f'cuvslam covered gyro {self.cover_gyro}x')
         if self.cover_enc:
