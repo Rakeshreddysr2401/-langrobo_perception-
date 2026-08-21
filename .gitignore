@@ -7,3 +7,16 @@ maps/
 # they appear and vanish, and one got swept into a commit by `git add -A`.
 .claude/settings.local.json
 .claude/settings.local.json.tmp.*
+
+# Run artifacts. logs/ holds two very different things: the diagnostic TOOLS
+# (*.py), which are source and belong in git, and the OUTPUT of runs, which does
+# not. run.txt/kill.txt/smoke.txt are terminal capture from background runs --
+# run.txt alone reached 15,065 lines. The CSVs are real measurement data, but
+# every claim they support is already written up in PHASE1.md with the numbers
+# quoted; keeping 22 near-identical files to re-derive a table nobody will
+# re-derive is bulk, not evidence. Force-add one with `git add -f` if a specific
+# run ever needs preserving.
+logs/*.csv
+logs/run.txt
+logs/kill.txt
+logs/smoke.txt
