@@ -222,6 +222,58 @@ this needs somewhere else to go.
 
 ---
 
+## ✅ 13. Skid-steer scrub — measured, and it changes what the wheels are for
+
+This rover has four driven wheels and no steering, so a turn drags every tyre
+sideways. Two consequences, both measured 2026-08-21.
+
+**The turning geometry is not the physical track.** `wz = (vR - vL) / W` needs an
+effective width that includes the scrub:
+
+| turn | wheels read | truth | ratio | implied width | peak rate |
+|---|---|---|---|---|---|
+| 90 left | 146.49 | 90 | 1.628 | 0.5534 m | — |
+| 360 left | 556.49 | 360 | 1.546 | 0.5256 m | 21.4 °/s |
+| 360 left | 548.34 | 360 | 1.523 | 0.5179 m | 76.2 °/s |
+| 360 left | 553.08 | 360 | 1.536 | 0.5224 m | 74.3 °/s |
+
+`WHEEL_BASE_ROT_M = 0.5219`, the mean of the three 360s. Using the physical
+0.34 m made the wheels **63% wrong on every turn**. Note the faster turns
+over-read slightly less — scrub is not a constant, so re-measure on carpet.
+
+**The wheels only agree with each other in a straight line.** Per-wheel counts,
+same side, same BTS7960, mechanically obliged to sweep the same arc:
+
+| | LEFT front/rear | RIGHT front/rear |
+|---|---|---|
+| straight (200 cm) | 1.00× | 1.03× |
+| turning (360°) | **1.60×** | **1.29×** |
+
+So encoder distance is an excellent reference straight and a poor one mid-turn.
+`compare.py` now **freezes the encoder/cuVSLAM scale calibration while turning**,
+because folding those samples in would drag a good calibration off with scrub
+that is not travel at all.
+
+**Design consequence:** heading comes from the gyro (−0.2% to −0.9% across four
+turns), distance from the encoders while straight, and neither trusts the wheels
+to measure a rotation.
+
+---
+
+## ✅ 12. Yaw sign verified against REP-103 (2026-08-21)
+
+A LEFT teleop command produces a **positive** yaw rate, as REP-103 requires.
+Checked with `logs/check_yaw_sign.py` because it cannot be read off the source —
+it depends on how the IMU is bolted in and how `gyro_node` re-frames it. An
+inverted sign would have made nav2 steer away from every goal, and would not
+have shown up until the rover was driving itself.
+
+This also resolved an ambiguity: a 360° run reported as clockwise read
+`+361.53°`. The convention being correct means it was a mislabelled left turn,
+not a sign bug.
+
+---
+
 ## ✅ 11. cuVSLAM under-reads distance by ~2.2%, consistently
 
 Four independent measurements against a tape:

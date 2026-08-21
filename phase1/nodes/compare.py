@@ -86,18 +86,18 @@ WHEEL_BASE_M = 0.34    # rover_firmware_v2.ino:100 — 34 cm between L/R wheel c
 #     90 left       146.49       90     1.628      0.5534 m        -
 #     360 left      556.49      360     1.546      0.5256 m     21.4 deg/s
 #     360 left      548.34      360     1.523      0.5179 m     76.2 deg/s
+#     360 left      553.08      360     1.536      0.5224 m     74.3 deg/s
 #
-# The two 360s agree to 1.5% and are the ones used -- four times the signal of a
-# 90, and returning to the same floor line is far easier to judge than a right
-# angle. Their mean is 1.534.
+# The three 360s span 1.5% and their mean is what is used -- four times the
+# signal of a 90, and returning to the same floor line is far easier to judge
+# than a right angle.
 #
-# Note the third column against the last: the faster turn over-read slightly
-# LESS. Scrub is not a fixed property, it varies with turn rate, tyre loading and
-# floor surface, so this is a calibrated average and not a physical constant.
+# Scrub is not a fixed property of the chassis. It varies with turn rate, tyre
+# loading and floor, so this is a calibrated average, not a dimension.
 # Re-measure on carpet.
 #
 # Using the physical 0.34 m made the wheels 63% wrong on every turn.
-WHEEL_BASE_ROT_M = 0.5217
+WHEEL_BASE_ROT_M = 0.5219
 STALE_S = 1.0          # a source with no message for this long is shown as stale
 
 # Path is accumulated in CHORDS of at least this length, not per frame.
@@ -320,6 +320,7 @@ class Compare(Node):
         self.cover_gyro = 0          # frames cuVSLAM covered for the gyro
         self.cover_enc = 0           # frames cuVSLAM covered for the encoders
         self.yaw_held = 0            # frames the VO heading correction was refused
+        self.scale_held = 0          # frames encoder recalibration was refused (turning)
         self.enc_corrections = 0     # how many steps the encoders actually rescaled
         self.accel = (0.0, 0.0, 0.0)      # raw, base_link frame
         self.gyro_xyz = (0.0, 0.0, 0.0)   # raw rates, all three axes
@@ -545,7 +546,22 @@ class Compare(Node):
         w_fresh = w.n > 0 and (time.time() - w.last_msg) <= COVER_STALE_S
         if not (enc_ok and w_fresh):
             self.cover_enc += 1        # cuVSLAM carrying distance on its own
-        if enc_ok and w_fresh and self.vo_path_raw > SCALE_MIN_TRAVEL:
+
+        # Do not re-calibrate the encoder scale WHILE TURNING. Measured
+        # 2026-08-21 through a 360 deg pivot, the two wheels on one side --
+        # bolted to the same chassis and driven by the same BTS7960, so
+        # mechanically obliged to sweep the same arc -- disagreed by 1.60x on
+        # the left and 1.29x on the right. Going straight the same wheels agree
+        # to 1.00x and 1.03x. So the encoders are an excellent distance
+        # reference in a straight line and a poor one mid-turn, and folding
+        # turn samples into the ratio would drag a good calibration off with
+        # scrub that is not travel at all.
+        turning_now = (self.gyro_bias is not None
+                       and abs(self.gyro_xyz[2] - self.gyro_bias) > YAW_CORRECT_MAX_RATE)
+        if turning_now:
+            self.scale_held += 1
+        if (enc_ok and w_fresh and not turning_now
+                and self.vo_path_raw > SCALE_MIN_TRAVEL):
             ratio = (w.path - self.enc_path_dr) / self.vo_path_raw
             # cuVSLAM reads ~2% under, so ~1.02 is expected. Anything outside
             # this band is wheel slip or a tracking failure, not calibration.
