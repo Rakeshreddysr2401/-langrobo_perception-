@@ -471,19 +471,74 @@ Also watch:
 
 ---
 
-## 10. What Phase 1 does **not** do
+## 10. Phase 1b — the fused pose is published
 
-- **No runtime fused pose.** `FUSED` lives inside `compare.py`, a measurement
-  tool. Nothing publishes it for nav2. **This is Phase 1b and it is the critical
-  path** — the algorithm is proven; it needs to become a node publishing
-  `odom → base_link`.
-- **No teleport guard on the published pose.** `compare.py` protects its own
-  estimate; `/vo/odom` is still raw. During autonomous navigation a 2 m teleport
-  would make nav2 react violently to a position the rover was never in. That is a
-  **safety** issue, not an accuracy one.
-- **No `nav_msgs/Odometry` from the wheels.** `/wheel_odom` carries three numbers;
-  something must wrap them properly.
-- **No footprint.** nav2 needs the chassis outline to plan clearances.
+**Done 2026-08-21.** `FUSED` is no longer trapped inside a measurement tool.
+
+| topic | rate | what |
+|---|---|---|
+| `/odom` | 20 Hz | `nav_msgs/Odometry`, fused pose + twist + covariance |
+| TF `odom → base_link` | 20 Hz | **owned by the fusion node**, not `vo_node` |
+| `/fusion/status` | 1 Hz | JSON health — which sensors are alive, what is covering |
+
+```bash
+./rover fused        # after ./rover camera and ./rover pose
+```
+
+### One algorithm, two consumers
+
+`fusion.py` holds the estimator with no ROS in it. It was extracted from
+`compare.py` **programmatically** — the method bodies are the same source text,
+not retyped — so the thing validated over two days of tape-measured runs is the
+thing that ships. `compare.py` grades it, `fusion_node.py` publishes it.
+
+**Verified by running both at once and driving:**
+
+| | straight | yaw |
+|---|---|---|
+| `/odom` (fusion_node) | 67.1 cm | +90.60° |
+| `compare` FUSED | 66.5 cm | +91.07° |
+| difference | **0.6 cm** | **0.47°** |
+
+Separate instances, separate bias calibrations, separate start moments — so the
+residual is startup timing, not a behavioural difference.
+
+### The fusion node owns the transform
+
+`vo_node` now runs `publish_tf:=false`. Only one thing may publish a transform,
+and the raw cuVSLAM pose is the one that teleports. nav2 consuming that would
+react violently to a position the rover was never in — a **safety** issue.
+
+Two publishers of `odom → base_link` make TF non-deterministic, and the symptom
+is a robot jittering between two poses with nothing in any log.
+
+### Covariance, from the gates
+
+| state | position σ | yaw σ | grounded in |
+|---|---|---|---|
+| healthy | 2 cm | 1.0° | 2.5 cm hand-pushed, 4.9 cm driven hard |
+| degraded | 10 cm | 3.0° | the 4.9 cm run had 12 teleports |
+| not ready | 1 m | 90° | before the gyro bias is measured |
+
+`z`, roll and pitch carry `1e6` — this is a planar estimate, and claiming
+certainty about a dimension nothing measures would be a lie to whatever consumes
+it.
+
+**Twist** comes from the sensors that measure velocity directly — forward speed
+from the wheels, yaw rate from the gyro — rather than by differencing the
+filtered pose, which would feed the filter's own lag back into control.
+
+---
+
+## 11. What Phase 1 does **not** do
+
+- ~~No runtime fused pose~~ — **done, see §10.**
+- ~~No teleport guard on the published pose~~ — **done**: the guarded estimate
+  owns the TF and `/vo/odom` stays raw for comparison.
+- **No footprint.** nav2 needs the chassis outline to plan clearances. Nothing
+  has measured the rectangle or the camera's forward overhang.
+- **The fused pose has never been driven by nav2.** It publishes; nothing has
+  consumed it yet.
 
 ### Constraints nav2 will inherit
 
