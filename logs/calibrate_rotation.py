@@ -121,6 +121,13 @@ def main():
             sys.stdout.flush()
     except KeyboardInterrupt:
         pass
+    except RuntimeError as e:
+        # rclpy raises this if Ctrl-C lands while the executor is mid-take on a
+        # subscription. It killed the results of a real 360 deg calibration run
+        # on 2026-08-21 -- the numbers were on screen and the summary never
+        # printed. Same guard as compare.py.
+        if 'convert call argument' not in str(e):
+            raise
 
     w = math.degrees(n.wheel_yaw)
     g = math.degrees(n.gyro_yaw)

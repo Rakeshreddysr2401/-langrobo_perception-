@@ -82,17 +82,22 @@ WHEEL_BASE_M = 0.34    # rover_firmware_v2.ino:100 — 34 cm between L/R wheel c
 #
 # Measured 2026-08-21, logs/calibrate_rotation.py:
 #
-#     turn      wheels read   truth    ratio   implied width
-#     90 deg      146.49       90      1.631      0.5546 m
-#     360 deg     556.49      360      1.546      0.5256 m
+#     turn       wheels read   truth   ratio   implied width   peak rate
+#     90 left       146.49       90     1.628      0.5534 m        -
+#     360 left      556.49      360     1.546      0.5256 m     21.4 deg/s
+#     360 left      548.34      360     1.523      0.5179 m     76.2 deg/s
 #
-# The 360 is the better number -- four times the signal, and returning to the
-# same floor line is far easier to judge than a right angle -- so that is what
-# is used. The 5.4% spread between them is honest: scrub varies with turn rate,
-# tyre loading and floor, so this is a good average and not a physical constant.
+# The two 360s agree to 1.5% and are the ones used -- four times the signal of a
+# 90, and returning to the same floor line is far easier to judge than a right
+# angle. Their mean is 1.534.
+#
+# Note the third column against the last: the faster turn over-read slightly
+# LESS. Scrub is not a fixed property, it varies with turn rate, tyre loading and
+# floor surface, so this is a calibrated average and not a physical constant.
+# Re-measure on carpet.
 #
 # Using the physical 0.34 m made the wheels 63% wrong on every turn.
-WHEEL_BASE_ROT_M = 0.5256
+WHEEL_BASE_ROT_M = 0.5217
 STALE_S = 1.0          # a source with no message for this long is shown as stale
 
 # Path is accumulated in CHORDS of at least this length, not per frame.
