@@ -217,7 +217,7 @@ went.
 | encoder CPR | **1560, verified** | 200 cm tape push, all four within 3% |
 | cuVSLAM scale error | **−2.2%, systematic** | four tape measurements |
 | cuVSLAM path over-read | ~19% | encoder cross-check between teleports |
-| cuVSLAM speed limit | ~25 cm/s | teleports correlate with peak speed |
+| cuVSLAM failure driver | **landmarks, not speed** | 42 cm/s at 162 landmarks gave 0 teleports; 84 cm/s at 17 gave 12 |
 | gyro bias | 0.084–0.181 °/s, **varies** | three runs, moves with temperature |
 | healthy landmarks | 100–200; **<30 is fragile** | recorded at every teleport |
 | yaw sign | **+z = left, REP-103 correct** | commanded-vs-measured check |
@@ -542,7 +542,10 @@ filtered pose, which would feed the filter's own lag back into control.
 
 ### Constraints nav2 will inherit
 
-- **`vx_max` ≤ 25 cm/s** — above it cuVSLAM teleports
+- **Watch landmarks, not the speedometer.** The old "25 cm/s limit" was a
+  mis-attribution: 42 cm/s with 162 landmarks gave zero teleports, while 84 cm/s
+  with 17 gave twelve. `/fusion/status` publishes the count and the fusion drops
+  cuVSLAM below 30. See TODO §3
 - **Pivots cost tracking** — 2.0 rad/s swings the camera at 34 cm/s. Prefer plans
   that turn and drive forward over plans that reverse or spin in place
 - **The D555 drops out** — three distinct failure modes, see `TODO.md` §7. A robot

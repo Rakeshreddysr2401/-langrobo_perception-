@@ -135,22 +135,38 @@ bug to chase.
 
 ---
 
-## 🟠 3. cuVSLAM loses tracking above ~25 cm/s
+## 🟡 3. Teleports are driven by TEXTURE, not speed — the 25 cm/s limit was wrong
 
-Measured 2026-08-15:
+Every run we have, cross-tabulated:
 
-| run | median | peak | teleports |
+| run | peak speed | landmarks | teleports |
 |---|---|---|---|
-| clean 2 m push | 14.3 cm/s | 18.8 cm/s | 0 |
-| failed out-and-back | 10.2 cm/s | **76.5 cm/s** | **1** |
+| clean 2 m push | 18.8 cm/s | healthy | 0 |
+| failed out-and-back | 76.5 cm/s | — | 1 |
+| hard drive, bare wall | 94 cm/s | **min 4** | **32** |
+| hard drive #2 | 84 cm/s | **min 17** | **12** |
+| **teleop loop, 2026-08-21** | **42 cm/s** | **162** | **0** |
 
-The teleport was **202 cm in a single frame**, at a healthy 28 Hz, with nothing
-logged — heading stepped +20.3° in one 0.25 s sample. SLAM is off, so no loop
-closure could legitimately do it.
+**42 cm/s with good texture produced zero teleports.** The runs that failed were
+not the fast ones, they were the blind ones. And the 84–94 cm/s figures are
+themselves *inflated by* the teleports — peak speed is computed from cuVSLAM's
+own position deltas — so the real driving speed in those runs was lower than it
+looks, which weakens the speed correlation further.
 
-`compare.py` now detects jumps and refuses to grade a run containing one, and
-warns live above 25 cm/s. **This is also a speed limit on autonomous driving
-later** — nav2's `vx_max` must respect it.
+The original entry claimed a ~25 cm/s limit from correlating teleports with peak
+speed across two runs. That correlation was real and the causation was not:
+landmarks were the confound, and they move together because a bare wall is both
+featureless and where you tend to drive faster.
+
+**Consequence for nav2:** do not cap `vx_max` at 25 cm/s on this evidence. The
+honest rule is to **watch landmarks, not the speedometer** — `compare.py` and
+`fusion_node` already drop cuVSLAM below 30 of them, and `/fusion/status`
+publishes the count. A texture-aware speed limit would be better than a fixed
+one, but this needs a deliberate test: drive the same textured route at
+increasing speed until it breaks. That has not been done.
+
+**Not yet ruled out:** that speed matters *at the margin*, when texture is
+already thin. Nothing here separates those.
 
 ---
 
