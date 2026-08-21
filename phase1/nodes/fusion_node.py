@@ -43,7 +43,8 @@ import sys
 
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import (qos_profile_sensor_data, QoSProfile,
+                       DurabilityPolicy, ReliabilityPolicy, HistoryPolicy)
 from geometry_msgs.msg import Vector3, Quaternion, TransformStamped
 from nav_msgs.msg import Odometry, Path
 from geometry_msgs.msg import PoseStamped
@@ -63,6 +64,7 @@ STATUS_HZ = 1.0
 # of a room-sized drive and coarse enough that standing still costs nothing.
 PATH_CHORD_M = 0.02
 PATH_MAX = 5000        # ~100 m of travel at 2 cm; oldest dropped after that
+PATH_PUB_HZ = 2.0      # republish rate, independent of whether it moved
 
 # (position sigma, yaw sigma) per health state -- see the module docstring
 COV_HEALTHY = (0.02, math.radians(1.0))
@@ -91,7 +93,16 @@ class FusionNode(Node):
         self.tf = TransformBroadcaster(self) if self.publish_tf else None
         self.pub = self.create_publisher(Odometry, topic, 10)
         self.pub_status = self.create_publisher(String, '/fusion/status', 10)
-        self.pub_path = self.create_publisher(Path, '/fusion/path', 10)
+        # TRANSIENT_LOCAL: the path is state, not a stream. Without it an RViz
+        # started after the rover has been driving shows an empty screen until
+        # the next 2 cm of travel, and shows nothing at all if the rover is
+        # parked -- which reads as a broken publisher rather than a design
+        # choice about when to append.
+        self.pub_path = self.create_publisher(
+            Path, '/fusion/path',
+            QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                       durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                       history=HistoryPolicy.KEEP_LAST))
         self.path = Path()
         self.path.header.frame_id = 'odom'
         self._path_anchor = None
@@ -104,6 +115,10 @@ class FusionNode(Node):
 
         self.create_timer(1.0 / PULSE_HZ, self._pulse)
         self.create_timer(1.0 / STATUS_HZ, self._report)
+        # Appending and publishing are separate concerns: append only on real
+        # travel so a parked rover does not grow the message, but publish
+        # steadily so a viewer always has the current track.
+        self.create_timer(1.0 / PATH_PUB_HZ, self._publish_path)
         self._last_log = None
 
         self.get_logger().info(
@@ -229,7 +244,10 @@ class FusionNode(Node):
         if len(self.path.poses) > PATH_MAX:
             self.path.poses.pop(0)
         self.path.header.stamp = od.header.stamp
-        self.pub_path.publish(self.path)
+
+    def _publish_path(self):
+        if self.path.poses:
+            self.pub_path.publish(self.path)
 
     def _report(self):
         h = self.f.health()
