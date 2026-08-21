@@ -80,14 +80,19 @@ WHEEL_BASE_M = 0.34    # rover_firmware_v2.ino:100 — 34 cm between L/R wheel c
 # a yaw rate is therefore not the physical 34 cm track -- it is an effective
 # width that includes the scrub, and it is always larger.
 #
-# Measured 2026-08-21 against a hand-set 90 deg turn: wheels read 146.49 deg
-# where the gyro read 89.80. That is 1.63x too much rotation, i.e. the width the
-# wheels behave as if they have is 0.34 * 1.63 = 0.55 m.
+# Measured 2026-08-21, logs/calibrate_rotation.py:
 #
-# Using the physical track made the wheels 63% wrong on every turn. This is the
-# single constant that fixes it, and it is worth re-measuring on a different
-# floor surface -- carpet scrubs differently from tile.
-WHEEL_BASE_ROT_M = 0.5546
+#     turn      wheels read   truth    ratio   implied width
+#     90 deg      146.49       90      1.631      0.5546 m
+#     360 deg     556.49      360      1.546      0.5256 m
+#
+# The 360 is the better number -- four times the signal, and returning to the
+# same floor line is far easier to judge than a right angle -- so that is what
+# is used. The 5.4% spread between them is honest: scrub varies with turn rate,
+# tyre loading and floor, so this is a good average and not a physical constant.
+#
+# Using the physical 0.34 m made the wheels 63% wrong on every turn.
+WHEEL_BASE_ROT_M = 0.5256
 STALE_S = 1.0          # a source with no message for this long is shown as stale
 
 # Path is accumulated in CHORDS of at least this length, not per frame.
