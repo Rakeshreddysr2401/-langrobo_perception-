@@ -125,6 +125,14 @@ YAW_TRUST_VO = 0.001
 # no ordinary manoeuvre produces.
 DEAD_SIDE_SAMPLES = 100
 
+# Encoder/cuVSLAM distance ratio is only meaningful once there is real travel to
+# divide; below this both totals are dominated by noise.
+SCALE_MIN_TRAVEL = 0.20
+# cuVSLAM reads ~2% under against a tape, so the honest ratio sits near 1.02.
+# Outside this band it is wheel slip or lost tracking, not calibration, and the
+# last good scale is kept instead.
+SCALE_LO, SCALE_HI = 0.85, 1.25
+
 # Continuous gyro-bias tracking. Measured on 2026-08-15 across three runs, the
 # offset was +0.0838, +0.1050 and +0.1808 deg/s -- it moves as the board warms,
 # so a five-second average taken at startup goes stale and starts adding error
@@ -262,6 +270,8 @@ class Compare(Node):
         self.bias_updates = 0
         self.vo_speed = 0.0
         self.enc_path_prev = 0.0
+        self.vo_path_raw = 0.0       # cuVSLAM path before any encoder rescale
+        self.enc_scale = 1.0         # encoder/cuVSLAM distance ratio, from totals
         self.enc_corrections = 0     # how many steps the encoders actually rescaled
         self.accel = (0.0, 0.0, 0.0)      # raw, base_link frame
         self.gyro_xyz = (0.0, 0.0, 0.0)   # raw rates, all three axes
@@ -376,20 +386,33 @@ class Compare(Node):
                               + wrap(vo_th - self.fused_yaw) * YAW_TRUST_VO)
         self.gyro_prev_yaw = self.gyro_yaw
 
-        # ── distance: encoders if both sides are alive, else cuVSLAM ──────────
+        # ── distance: one scale factor from TOTALS, not a per-step ratio ──────
+        # Per-step was systematically wrong, and the failure is worth keeping in
+        # mind. w.path accumulates in 5 mm chords while vo_step is smooth
+        # per-frame, so the per-step ratio was lumpy -- often exactly 0, sometimes
+        # ~2x. The sanity band then did something perverse: a 0 ratio fell below
+        # it and was REJECTED (keeping the full cuVSLAM step), while a large one
+        # passed and was APPLIED. It could only ever inflate. Measured 2026-08-21
+        # on a driven out-and-back: FUSED path 313 cm against cuVSLAM's 244 and
+        # the wheels' own 254, and FUSED endpoint error 6.9 cm against cuVSLAM's
+        # 2.2 -- fusion made the answer worse, which fusion must never do.
+        #
+        # Totals do not have that problem. Both sides are large numbers by the
+        # time they matter, chord quantisation averages out, and the ratio is the
+        # honest calibration between the two sensors.
         vo_step = math.hypot(bx, by)
+        self.vo_path_raw += vo_step
         w = self.src['wheels']
         enc_ok = (self.wheel_dead_side is None and self.wheel_moved_l
                   and self.wheel_moved_r)
-        if enc_ok:
-            enc_travel = w.path
-            gained = enc_travel - self.enc_path_prev
-            self.enc_path_prev = enc_travel
-            if gained > 0 and vo_step > 1e-6:
-                scale = gained / vo_step
-                if 0.5 < scale < 2.0:           # sanity: ignore absurd corrections
-                    bx, by = bx * scale, by * scale
-                    self.enc_corrections += 1
+        if enc_ok and self.vo_path_raw > SCALE_MIN_TRAVEL:
+            ratio = w.path / self.vo_path_raw
+            # cuVSLAM reads ~2% under, so ~1.02 is expected. Anything outside
+            # this band is wheel slip or a tracking failure, not calibration.
+            if SCALE_LO < ratio < SCALE_HI:
+                self.enc_scale = ratio
+                self.enc_corrections += 1
+        bx, by = bx * self.enc_scale, by * self.enc_scale
 
         # ── tilt: only the horizontal component is floor travel ───────────────
         if self.pitch is not None:
@@ -611,8 +634,10 @@ class Compare(Node):
             out.append(f'  tilt: roll {math.degrees(self.roll):+6.2f} deg   '
                        f'pitch {math.degrees(self.pitch):+6.2f} deg{mp}')
         if self.enc_corrections:
-            out.append(f'  encoders rescaled {self.enc_corrections} FUSED steps '
-                       f'(distance taken from the wheels, direction from cuVSLAM)')
+            out.append(f'  encoder scale {self.enc_scale:.4f}  '
+                       f'(wheels {self.src["wheels"].path * 100:.1f} cm / cuvslam '
+                       f'{self.vo_path_raw * 100:.1f} cm) — distance from the '
+                       f'wheels, direction from cuVSLAM')
 
         w = self.src['wheels']
         if w.n and w.hz > 0 and w.hz < 15:
