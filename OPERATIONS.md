@@ -16,6 +16,8 @@ own layer instead of hiding in a wall of log.
 ./rover camera      # the D555 alone
 ./rover pose        # + cuVSLAM and the gyro
 ./rover fused       # + the fused pose -> /odom and TF
+./rover map         # + nvblox: build the room as it drives
+./rover nav         # + nav2: plan a route and drive it
 ```
 
 | command | what it proves |
@@ -23,6 +25,12 @@ own layer instead of hiding in a wall of log.
 | `./rover camera` | streaming ≥15 Hz **and** the IR emitter verified OFF by read-back |
 | `./rover pose` | cuVSLAM ≥10 Hz, gyro ≥50 Hz, re-framed into `base_link` |
 | `./rover fused` | `/odom` ≥15 Hz, TF `odom → base_link` owned by exactly one node |
+| `./rover map` | the occupancy grid publishing, and how much is mapped |
+| `./rover nav` | both costmaps carrying obstacle data, all servers activated |
+
+**Restarting `fused` destroys the map.** The pose origin resets, so the old
+geometry would land in the wrong place. Restart `map` whenever you restart
+`fused`.
 
 Then, at any time:
 
@@ -145,6 +153,10 @@ docker exec -it rover bash -lc 'source /opt/ros/jazzy/setup.bash; export ROS_DOM
 | **all rates + board health** | `python3 -u /logs/check_rates.py` | nothing — it just listens |
 | **teleop end to end** | `python3 -u /logs/watch_teleop.py 25` | press FORWARD during the window |
 | **fusion equivalence** | `python3 -u /logs/check_equivalence.py` | run beside `compare.py`, drive, compare endpoints |
+| **does the driven line close?** | `python3 -u /logs/loop_test.py` | drive a loop back to the start, graded on `/odom` |
+| **how much is mapped** | `python3 -u /logs/map_stats.py` | nothing — it just reads |
+| **the map, as text** | `python3 -u /logs/map_view.py` | nothing; `--once` for a single frame |
+| **why won't it pivot?** | `python3 -u /logs/turn_diag.py 40` | hold LEFT then RIGHT during the window |
 
 ### Calibration rules learned the hard way
 
@@ -210,6 +222,27 @@ the access point.
 | many teleports, `landmarks` healthy | too fast. Keep under 25 cm/s |
 | `wheels` row wildly wrong in turns | expected — skid-steer scrub. The gyro owns heading |
 | `FUSED` worse than an input | a real bug. This has happened twice; see PHASE1.md §7 |
+
+### The map
+
+| symptom | likely cause |
+|---|---|
+| RViz map display empty, topic alive | **QoS.** nvblox is VOLATILE, nav2's costmaps are TRANSIENT_LOCAL. RViz renders a mismatch exactly like a dead publisher |
+| subscriber gets nothing, `topic hz` shows 5 Hz | wrong topic: `static_map_slice` is a `DistanceMapSlice`. The `OccupancyGrid` is `static_occupancy_grid` |
+| `./rover map` gate reads 0 Hz | checked too early — nvblox allocates GPU hash tables before publishing. The gate waits 25 s |
+| walls doubled or offset | the pose drifted; the map was written twice in different places |
+| map smears suddenly | a cuVSLAM teleport. **Unrecoverable** — nvblox cannot un-write it. Check `jumps` in `/fusion/status` and restart the map |
+| large areas blank despite driving there | the camera never saw them — a wall behind the rover stays unknown until it turns |
+
+### nav2
+
+| symptom | likely cause |
+|---|---|
+| `bt_navigator` fails: *"spin action server not available"* | a behaviour tree still references Spin. **Both** trees need overriding, `navigate_to_pose` and `navigate_through_poses` |
+| costmap topic silent but the node is fine | `always_send_full_costmap: false` — it only sends deltas after the first full map |
+| `Invalid frame ID "odom"` at startup | a race; the costmaps come up before the TF is flowing and recover |
+| rover sits still after a goal | it was told to rotate in place, which it cannot do. See TODO §14 and the `NO-PIVOT` settings |
+| goal rejected as unreachable | `allow_unknown: false` — it will not plan through unmapped space. Drive there first |
 
 ### Everything looks alive but nodes cannot see each other
 

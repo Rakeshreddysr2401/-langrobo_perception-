@@ -8,9 +8,11 @@ Four phases, each standing on the one before it:
 |---|---|---|
 | **1 — perception** | know where it is | ✅ **complete** — all gates pass |
 | **1b — publish it** | a pose nav2 can navigate on | ✅ **complete** — `/odom` at 20 Hz |
-| 2 — mapping | build walls and a map of the environment | next |
-| 3 — path planning | plan a route through that map | |
-| 4 — motion planning | follow the route | |
+| **2a — see it** | RViz, the pose, the track it draws | ✅ **complete** |
+| **2b — build it** | map the room as it drives | ✅ **complete** — nvblox |
+| 2c — keep it | a map that survives a power cycle | deferred by choice |
+| 2d — localize | recognise a room mapped before | deferred by choice |
+| **3/4 — navigate** | click a goal, it plans and drives there | 🟡 **running, no goal driven yet** |
 
 Phases 2–4 must also work in unfamiliar places; that is the point of the goal.
 
@@ -22,7 +24,9 @@ Phases 2–4 must also work in unfamiliar places; that is the point of the goal.
 |---|---|
 | **[OPERATIONS.md](OPERATIONS.md)** | **the runbook** — bring-up, gates, calibration, troubleshooting by symptom |
 | **[ARCHITECTURE.md](ARCHITECTURE.md)** | the system as built — machines, topics, frames, and *why each decision went that way* |
-| **[PHASE1.md](PHASE1.md)** | the measured record — every number, every technique, every fault found |
+| **[PHASE1.md](PHASE1.md)** | perception — every number, technique and fault found |
+| **[PHASE2.md](PHASE2.md)** | mapping — nvblox, the map, and seeing it |
+| **[PHASE3.md](PHASE3.md)** | navigation — nav2, and everything shaped by the pivot fault |
 | **[TODO.md](TODO.md)** | open faults, and the dead theories kept so they are not re-litigated |
 | **[PLAN.md](PLAN.md)** | the plan of record, and what was settled in the design interview |
 | **[knowledge/](knowledge/)** | the concepts — frames, visual odometry, fusion, costmaps, planners |
@@ -35,16 +39,22 @@ Phases 2–4 must also work in unfamiliar places; that is the point of the goal.
 ./rover camera      # the D555 alone; verifies the IR emitter is OFF
 ./rover pose        # + cuVSLAM and the gyro
 ./rover fused       # + the fused pose -> /odom and TF odom -> base_link
+./rover map         # + nvblox: build the room as it drives
+./rover nav         # + nav2: plan a route and drive it
 ./rover status      # what is alive right now
 ```
 
 Then drive it from a phone at **`http://192.168.1.16:8091`** — and **flip it to
 MANUAL**, it defaults to AUTO and the buttons do nothing until you do.
 
+Watch it from a laptop with RViz — see **[phase2/LAPTOP.md](phase2/LAPTOP.md)**.
+
 To measure rather than just watch:
 
 ```bash
-./rover compare --return         # drive out and back -> want ≤ 10 cm
+./rover compare --return                  # hand-pushed, graded
+python3 -u /logs/loop_test.py             # driven: does the line close?
+python3 -u /logs/map_view.py              # the map, as text, in the terminal
 ```
 
 ---

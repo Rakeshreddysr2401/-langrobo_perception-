@@ -86,7 +86,24 @@ occurrence is a glance rather than an investigation.
 | `/vo/status` | `String` | 1 Hz | `vo_node` — landmarks, health |
 | `/gyro/base` | `Imu` | 200 Hz | `gyro_node` — re-framed into `base_link` |
 | **`/odom`** | `Odometry` | 20 Hz | **`fusion_node` — what nav2 consumes** |
+| `/fusion/path` | `Path` | 2 Hz | `fusion_node` — the track driven, **latched** |
 | `/fusion/status` | `String` | 1 Hz | `fusion_node` — who is covering for whom |
+
+### Mapping and navigation
+
+| topic | type | rate | note |
+|---|---|---|---|
+| `/nvblox_node/static_occupancy_grid` | `OccupancyGrid` | 5 Hz | **the map.** VOLATILE |
+| `/nvblox_node/static_map_slice` | `DistanceMapSlice` | 5 Hz | **not** an OccupancyGrid — what `NvbloxCostmapLayer` consumes |
+| `/global_costmap/costmap` | `OccupancyGrid` | 1 Hz | TRANSIENT_LOCAL |
+| `/local_costmap/costmap` | `OccupancyGrid` | 2 Hz | TRANSIENT_LOCAL |
+| `/plan` | `Path` | on request | nav2's computed route |
+| `/goal_pose` | `PoseStamped` | in | set from RViz |
+
+**The durabilities are opposite and both matter.** nvblox publishes VOLATILE;
+nav2's costmaps publish TRANSIENT_LOCAL. Subscribe with the wrong one and you
+receive nothing while the topic looks perfectly alive — RViz renders that
+identically to a dead publisher.
 
 ---
 
@@ -134,6 +151,10 @@ a point 17 cm in front of itself.
 | **`phase1/nodes/fusion.py`** | **the estimator, with no ROS in it** |
 | `phase1/nodes/fusion_node.py` | wraps `fusion.py` → `/odom`, TF, `/fusion/status` |
 | `phase1/nodes/compare.py` | the measurement instrument: side-by-side rows, gates, CSV |
+| `phase2/launch/nvblox.launch.py` | nvblox: depth + `/odom` → TSDF, mesh, 2D grid |
+| `phase2/rviz/rover.rviz` | the RViz view, standard message types only |
+| `phase3/config/nav2.yaml` | nav2, with every NO-PIVOT adaptation marked |
+| `phase3/bt/*.xml` | behaviour trees with Spin removed |
 | `phase1/nodes/values.py` | one-shot readout of every sensor |
 | `phase1/firmware/rover_firmware_v2.ino` | ESP32: PID, encoders, telemetry |
 
@@ -238,3 +259,6 @@ compiled for Thor and will not run on this Orin.
 - **The D555 drops out** in three distinct ways — see [TODO.md](TODO.md) §7. The
   fusion survives it; a robot needing a human to reseat a cable does not
   autonomously
+- **The rover cannot turn in place** ([TODO.md](TODO.md) §14). nav2 assumes
+  rotation is free; every workaround is marked `NO-PIVOT` in
+  `phase3/config/nav2.yaml` so they can be reverted together once it is fixed

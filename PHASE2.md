@@ -1,0 +1,212 @@
+# Phase 2 — Mapping
+
+**Goal: build the room as the rover drives, and see it.**
+
+Phase 1 answered *where am I*. Phase 2 answers *what is around me*, and writes it
+down. Everything here stands on the fused pose — nvblox writes depth wherever the
+pose claims the robot is, so a bad pose does not produce a slightly wrong map, it
+produces a permanently smeared one.
+
+Divided into four parts. **2a and 2b are done**; 2c and 2d were deliberately
+deferred.
+
+| | what | status |
+|---|---|---|
+| **2a** | see it — RViz, the pose, the track it draws | ✅ |
+| **2b** | build it — nvblox turns depth + pose into a map | ✅ |
+| 2c | keep it — save and reload across a power cycle | deferred |
+| 2d | localize in it — recognise a room you mapped before | deferred |
+
+---
+
+## 1. Why 2b and 2d are different
+
+They sound alike and are opposites.
+
+- **Mapping** assumes you *know where you are* and records what you see. It
+  trusts `/odom`.
+- **Localization** is handed a map and works out *where you are in it*.
+
+That shows up in the frame chain:
+
+```
+map ──(localization, 2d)──► odom ──(Phase 1b)──► base_link
+```
+
+Phase 1 produced `odom → base_link`. **`odom` drifts and resets to zero on every
+restart.** A map that survives needs `map → odom`, and producing that transform
+is what localization does. Until then everything lives in `odom`, which is enough
+to map a room and navigate it in one session — and not enough to recognise it
+tomorrow.
+
+**`global_frame` is `odom` everywhere in Phase 2 and 3.** Pointing anything at a
+`map` frame nothing publishes gives an empty screen and a confusing hunt.
+
+---
+
+## 2a — Seeing it
+
+### The track it draws
+
+`fusion_node` publishes **`/fusion/path`** (`nav_msgs/Path`) — the line the rover
+has driven.
+
+Two decisions in a small feature, both learned by getting them wrong:
+
+- **Appended in 2 cm chords, not per pulse.** At 20 Hz a stationary rover would
+  otherwise add 20 identical poses a second until the message is megabytes and
+  RViz stutters. Capped at 5000 poses, about 100 m.
+- **Published on a timer and latched**, not only when it moves. Appending is
+  about travel; publishing is about viewers. The first version conflated them, so
+  RViz showed nothing once the rover stopped and nothing at all if it started
+  after a drive — which reads as a broken publisher rather than a design choice.
+
+### RViz, on a laptop
+
+Full setup in [phase2/LAPTOP.md](phase2/LAPTOP.md). The rover changes nothing —
+RViz only subscribes.
+
+**Two settings fail silently** and are the first thing to check when a display is
+blank:
+
+- `ROS_DOMAIN_ID=0` and an **unset** `ROS_DISCOVERY_SERVER`. A laptop pointed at
+  a stale discovery server sees an empty graph and looks exactly like a network
+  fault.
+- **QoS durability**, and the two sources here are opposite:
+
+| topic | durability |
+|---|---|
+| `nvblox .../static_occupancy_grid` | **Volatile** |
+| `/global_costmap/costmap` | **Transient Local** |
+| `/fusion/path` | **Transient Local** |
+
+RViz renders a QoS mismatch **exactly like a dead publisher** — empty screen, no
+error.
+
+The laptop has ROS 2 Jazzy but **not `nvblox_rviz_plugin`**, so the 3D mesh
+cannot render there. The config uses only standard message types, and the 2D map
+is what nav2 plans on anyway.
+
+### Seeing it without RViz
+
+`logs/map_view.py` draws the same occupancy grid as text, with the rover on it:
+
+```
+                    .............###
+                  ............###
+                ...........#####
+ > ................#########
+   ................#########
+     ..######.....##########
+```
+
+`#` wall · `.` floor seen · blank unknown · `> < ^ v` the rover and its heading.
+
+---
+
+## 2b — Building it
+
+### The technique
+
+**nvblox**, on the GPU. Depth images plus a pose become a **TSDF** — a truncated
+signed distance field, a grid of voxels each storing how far it is to the nearest
+surface. From that comes a mesh to look at, and an **ESDF** slice at floor height
+which is a 2D occupancy grid: the blueprint, and what nav2 plans on.
+
+Confirmed running on this Orin before use, because `isaac_ros_visual_slam` in the
+same image is a Thor build that will not run here. nvblox allocated GPU hash
+tables and built TSDF/Color/Feature/Freespace/Occupancy/ESDF layers at 5 cm.
+
+### The settings that matter, and why
+
+| setting | value | why |
+|---|---|---|
+| `global_frame` | `odom` | no map frame exists yet — see §1 |
+| `voxel_size` | 0.05 m | small enough for a chair leg, large enough that a room fits in GPU memory. Phase 1's 10 cm drift gate was set as two voxels for this reason |
+| `mapping_type` | `static_tsdf` | the dynamic modes track moving objects and cost more; the room is not moving |
+| `esdf_slice_min_height` | **0.10 m** | **the camera sits 16.3 cm up and pitches down 1.3°.** A slice at exactly 0 clips the floor itself and fills the map with phantom obstacles. That mount pitch came from Phase 1's gravity measurement and earns its keep here |
+| `max_integration_distance` | 4.0 m | beyond this the depth is too noisy on this camera to trust into a map |
+| `use_color` | false | colour is disabled on the camera: with `enable_sync:=false`, enabling it gates the IR pair behind colour alignment and starves the stereo cuVSLAM needs |
+
+### Measured
+
+Standing still, then after one hand-driven loop:
+
+| | parked | after driving |
+|---|---|---|
+| grid | 4.4 × 8.4 m | 5.3 × 8.0 m |
+| floor seen | 1.63 m² | **3.55 m²** |
+| obstacle | 1.77 m² | **2.48 m²** |
+| unknown | 90.8% | **85.6%** |
+
+The grid itself expanded and its origin moved, so nvblox allocated new blocks to
+cover ground the rover drove into. `vo_dropped: 0` with 195 landmarks throughout —
+the map was built on an honest pose.
+
+### Two traps, both silent
+
+**`static_map_slice` is not an occupancy grid.** It carries
+`nvblox_msgs/DistanceMapSlice`. The `nav_msgs/OccupancyGrid` that RViz and nav2
+want is **`static_occupancy_grid`**. Subscribing to the wrong one receives
+nothing while `ros2 topic hz` still cheerfully reports 5 Hz — because `hz` does
+not check the type.
+
+**nvblox publishes VOLATILE.** A `transient_local` subscription — the obvious
+choice for something called a map — receives nothing and looks exactly like a
+dead node.
+
+A third, less subtle: **nvblox allocates GPU hash tables before it publishes**, so
+a health check run 12 s after launch reads 0 Hz and looks broken. The gate now
+waits 25 s and reports how much is mapped rather than only that a topic exists.
+
+---
+
+## 3. What Phase 2 does not do
+
+- **The map dies when `fused` restarts.** The pose origin resets, so the old
+  geometry would land in the wrong place. That is exactly what 2c fixes.
+- **No relocalization.** The rover cannot recognise a room it mapped yesterday.
+- **A teleport is unrecoverable.** nvblox has no way to un-write geometry
+  committed at a wrong pose. Watch `jumps` in `/fusion/status`; if one happens,
+  restart the map.
+- **Only what the camera has seen is mapped.** A wall behind the rover stays
+  unknown until it turns toward it — and turning is currently limited to wide
+  arcs, see [TODO](TODO.md) §14.
+
+---
+
+## 4. Commands
+
+```bash
+./rover camera && ./rover pose && ./rover fused   # Phase 1
+./rover map                                       # nvblox
+./rover rviz                                      # on the Jetson; prefer a laptop
+```
+
+```bash
+# how much is mapped, as numbers
+python3 -u /logs/map_stats.py
+
+# the map as text, with the rover on it -- live, or --once
+python3 -u /logs/map_view.py
+
+# drive a loop and see whether the line closes
+python3 -u /logs/loop_test.py
+```
+
+Each runs inside the container after
+`source /opt/ros/jazzy/setup.bash; export ROS_DOMAIN_ID=0`.
+
+### Measured with `loop_test.py`
+
+Driven under teleop, out and back through several turns:
+
+```
+back at the start, /odom is 6.8 cm away   -> PASS (want <= 10 cm)
+heading is +1.2 deg off                   -> PASS (want <= 10 deg)
+0 teleports, 0 frames dropped, landmarks 162
+```
+
+That run also corrected a Phase 1 "fact": it peaked at **42 cm/s** with zero
+teleports, against a documented ~25 cm/s limit. See [TODO](TODO.md) §3 —
+teleports track **texture**, not speed.
