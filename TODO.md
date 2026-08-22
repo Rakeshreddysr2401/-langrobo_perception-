@@ -419,6 +419,62 @@ inflation and concluded the route was clear; it was blocked.
 
 ---
 
+## 🔴 21. cuVSLAM diverges repeatedly, and the fallback is SILENT
+
+Third divergence, 2026-08-22 19:09, found only because a pose reading looked
+1.5 m off and I went looking:
+
+```
+vo_z              -40.087 m     forty metres underground
+vo_implausible      99394       and climbing at ~30/s
+dead_reckoned        3341
+dr_metres           21.409 m    travelled on dead reckoning alone
+```
+
+At ~30 rejections/second, 99394 is about 55 minutes — and `fusion_node` had
+been up 57 minutes. **It had been diverged for essentially the entire session**,
+including both autonomous goal drives.
+
+### The gate works. That is not the problem.
+
+`VO_MAX_Z` caught it and the fused pose never followed cuVSLAM underground.
+Restarting `vo_node` recovered it completely: `vo_z` −40.087 → −0.005,
+`vo_implausible` steady at 0, 110 landmarks, 0 jumps.
+
+**The problem is that nothing said so.** The rover degraded to gyro-plus-wheels
+dead reckoning and carried on looking healthy: `/odom` at 20 Hz, `ready: true`,
+`vo_alive: true`, gates passing, nav2 planning and driving. Every check we run
+routinely was green while the pose quietly ran open-loop for 21 metres.
+
+Worth noting what dead reckoning actually managed: the 1 m autonomous goal read
+95.8 cm and the tape said 93–95. Over a metre it is fine. Over 21 it is not, and
+nothing distinguishes the two on screen.
+
+### What needs doing
+
+- **`./rover fused` does NOT reset cuVSLAM.** It restarts `fusion_node` only.
+  Recovering a diverged tracker needs `./rover pose` first. Easy to get wrong
+  while debugging, and it silently leaves the divergence in place.
+- **Surface it.** `vo_implausible` climbing should be loud — in the `fused` gate,
+  in `./rover status`, and ideally as a red line in `compare.py`. A counter you
+  have to go and ask for is not a warning.
+- **Find out why it diverges.** `planar_constraints = True` was set specifically
+  to make vertical drift impossible and has now failed three times (−21.7 m,
+  +87.7 m, −40.1 m). Either the flag does not do what its name says on this
+  build, or something upstream — extrinsics, the IR emitter, frame conjugation —
+  is feeding it a rotation it cannot reconcile. Nothing here has been examined.
+- **Consider whether the gate is too blunt.** It rejects on absolute z. At the
+  moment of divergence the x/y estimate may still be usable, and throwing the
+  whole pose away forces dead reckoning. Rejecting on z *rate* rather than z
+  *value* would keep more good data — but this is a design change, not a tweak.
+
+### Cost this session
+
+The map and the odom origin were both discarded to recover, because resetting
+the pose invalidates a map built in the old frame.
+
+---
+
 ## ✅ 20. First autonomous goals driven — and the controller fixed after the first one
 
 **2026-08-22: the rover navigated to a goal on its own for the first time.**
