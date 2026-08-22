@@ -125,8 +125,36 @@ tables and built TSDF/Color/Feature/Freespace/Occupancy/ESDF layers at 5 cm.
 | `voxel_size` | 0.05 m | small enough for a chair leg, large enough that a room fits in GPU memory. Phase 1's 10 cm drift gate was set as two voxels for this reason |
 | `mapping_type` | `static_tsdf` | the dynamic modes track moving objects and cost more; the room is not moving |
 | `esdf_slice_min_height` | **0.10 m** | **the camera sits 16.3 cm up and pitches down 1.3°.** A slice at exactly 0 clips the floor itself and fills the map with phantom obstacles. That mount pitch came from Phase 1's gravity measurement and earns its keep here |
+| `esdf_slice_max_height` | **0.22 m** | **the rover's own height** — see below |
 | `max_integration_distance` | 4.0 m | beyond this the depth is too noisy on this camera to trust into a map |
 | `use_color` | false | colour is disabled on the camera: with `enable_sync:=false`, enabling it gates the IR pair behind colour alignment and starves the stereo cuVSLAM needs |
+
+### The slice is the rover's height, not the camera's range
+
+The 2D map is a **horizontal slice** through nvblox's 3D model, and anything
+inside the band becomes an obstacle. The band must be set by **what the rover
+collides with**:
+
+| height | |
+|---|---|
+| camera | 17 cm |
+| **rover** | **22 cm** — the number that matters |
+| table | 29 cm — 7 cm of clearance above the rover |
+
+| band | |
+|---|---|
+| 0 – 10 cm | **skipped.** The camera pitches down 1.3°, so at 3 m the floor itself reads up to 6.8 cm high and would fill the map with phantom obstacles |
+| **10 – 22 cm** | **the obstacle band.** Anything here, the rover hits |
+| above 22 cm | **ignored.** The rover drives under it |
+
+With the original 0.60 m ceiling, a 29 cm table was inside the band — so driving
+under one painted obstacles in **every direction**, and the rover was surrounded
+by a tabletop it could comfortably fit beneath. Table *legs* span 0–29 cm and
+stay flagged, which is what actually needs avoiding.
+
+Heights are in the `odom` frame, whose z = 0 is where `base_link` started —
+ground level. **Raise this if the rover grows a mast; lower it and it will drive
+into things it cannot clear.**
 
 ### Measured
 

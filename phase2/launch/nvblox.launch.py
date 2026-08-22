@@ -58,13 +58,34 @@ def generate_launch_description():
                 'publish_esdf_distance_slice': True,
                 'esdf_mode': '2d',
 
-                # The floor slice. The camera sits 16.3 cm up and pitches down
-                # 1.3 deg, so a slice taken at exactly 0 would clip the floor
-                # itself and fill the map with phantom obstacles. Taken from
-                # just above the ground plane instead.
+                # THE SLICE IS THE ROVER'S OWN HEIGHT, NOT THE CAMERA'S RANGE.
+                #
+                # nvblox builds a 3D model; the 2D map is a horizontal slice
+                # through it, and anything inside the band becomes an obstacle.
+                # Set the band by what the ROVER COLLIDES WITH:
+                #
+                #   camera        17 cm
+                #   rover height  22 cm   <- this is the number that matters
+                #   table         29 cm   <- 7 cm of clearance above the rover
+                #
+                #   0 - 10 cm   skipped. The camera pitches down 1.3 deg, so at
+                #               3 m the floor itself reads up to 6.8 cm high and
+                #               would fill the map with phantom obstacles.
+                #   10 - 22 cm  the OBSTACLE band. Anything here, the rover hits.
+                #   above 22 cm ignored. The rover drives under it.
+                #
+                # With the old 0.60 m ceiling a 29 cm table was inside the band,
+                # so driving under one painted obstacles in every direction --
+                # the rover was surrounded by a tabletop it could comfortably fit
+                # beneath. Table LEGS still span 0-29 cm and stay flagged, which
+                # is what actually needs avoiding.
+                #
+                # Heights are in the odom frame, whose z=0 is where base_link
+                # started -- ground level. Raise this if the rover grows a mast;
+                # lower it and it will drive into things it cannot clear.
                 'static_mapper.esdf_slice_min_height': 0.10,
-                'static_mapper.esdf_slice_max_height': 0.60,
-                'static_mapper.esdf_slice_height': 0.20,
+                'static_mapper.esdf_slice_max_height': 0.22,
+                'static_mapper.esdf_slice_height': 0.16,
 
                 # How far out to trust depth into the map. Stereo error grows
                 # with range SQUARED -- z^2 * sigma_d / (f * b), with f 448.3 and
