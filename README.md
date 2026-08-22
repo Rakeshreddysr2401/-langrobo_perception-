@@ -14,6 +14,11 @@ Four phases, each standing on the one before it:
 | 2d — localize | recognise a room mapped before | deferred by choice |
 | **3/4 — navigate** | click a goal, it plans and drives there | 🟡 **running, no goal driven yet** |
 
+**Open blocker:** the rover could not turn in place — every turn command drove it
+backward instead, which is why early mapping produced a blob rather than a room.
+Diagnosed to a units mismatch in the teleop (48% duty, not the 100% its comment
+claimed) and fixed; **retest pending**. See [TODO](TODO.md) §14.
+
 Phases 2–4 must also work in unfamiliar places; that is the point of the goal.
 
 ---
@@ -28,6 +33,8 @@ Phases 2–4 must also work in unfamiliar places; that is the point of the goal.
 | **[PHASE2.md](PHASE2.md)** | mapping — nvblox, the map, and seeing it |
 | **[PHASE3.md](PHASE3.md)** | navigation — nav2, and everything shaped by the pivot fault |
 | **[TODO.md](TODO.md)** | open faults, and the dead theories kept so they are not re-litigated |
+| **[phase2/LAPTOP.md](phase2/LAPTOP.md)** | watching it from a laptop in RViz |
+| **[phase1/teleop/README.md](phase1/teleop/README.md)** | the hold-to-move web control, and its units |
 | **[PLAN.md](PLAN.md)** | the plan of record, and what was settled in the design interview |
 | **[knowledge/](knowledge/)** | the concepts — frames, visual odometry, fusion, costmaps, planners |
 

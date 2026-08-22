@@ -146,6 +146,28 @@ A step is a teleport if it exceeds **15 cm** *or* implies over **1 m/s** — nob
 hand-pushes a rover at 4.4 m/s, so a 14.7 cm hop in one 33 ms frame is the
 tracker re-initialising, not motion.
 
+### Plausibility: a ground rover cannot be underground
+
+Landmarks are **not sufficient** to catch a diverged tracker. Measured
+2026-08-22, cuVSLAM reported **95 landmarks** — healthy by every signal we had —
+while claiming the rover was 17 m away and **21.7 m below the floor**, frozen
+there. It had jumped once and settled into a confident wrong pose. It was still
+tracking features perfectly well; it was tracking them from the wrong place.
+
+The damage was quiet rather than obvious. FUSED takes **distance** from the
+encoders and **direction** from cuVSLAM, so the step lengths stayed right while
+the directions went random — a random walk that largely cancelled itself out.
+The symptom was **37.4 m driven inside a 2.1 × 1.6 m box**.
+
+Gravity says which way is down and never drifts, so the check costs nothing:
+reject cuVSLAM whenever `|z| > VO_MAX_Z` (0.30 m — enough for a threshold or a
+shallow ramp). Checked **before** the landmark gate, because a diverged tracker
+still reports healthy landmarks at a steady 30 Hz.
+
+**The general lesson:** a sensor's own confidence signal cannot detect the
+failure where it is confidently wrong. That needs an *external* constraint —
+here, physics.
+
 ### Skid-steer effective track width
 
 This rover has four driven wheels and **no steering**, so turning drags every
@@ -173,6 +195,7 @@ that job**. Fusion here is not averaging; it is assignment plus fallback.
 
 | when this fails | this carries it | proven by |
 |---|---|---|
+| **cuVSLAM diverges silently** | wheels + gyro | claimed 21.7 m underground **with 95 landmarks** |
 | cuVSLAM goes blind (<30 landmarks) | wheels + gyro | dropped 501 frames in one run |
 | cuVSLAM teleports | wheels + gyro | 101 frames, 65.1 cm dead-reckoned |
 | cuVSLAM stops publishing entirely | wheels + gyro | killed `vo_node`; FUSED held 20 Hz |
@@ -345,6 +368,8 @@ Most of these presented as **healthy**. That is the lesson.
 | camera "half-alive" | streams at 30 Hz but refuses option changes | a live stream is not a health check |
 | `path` ratcheting | 9.0 cm accumulated while stationary | noise that cannot cancel accumulates |
 | `ros2 topic hz` default QoS | silently receives nothing from a best-effort publisher | match QoS or measure nothing |
+| cuVSLAM diverged with 95 landmarks | 37 m driven inside a 2 m box | a sensor's own confidence cannot catch it being confidently wrong |
+| teleop asked 48% duty, comment said 100% | every turn drove the rover backward | a config written for a different firmware |
 
 ### Two false alarms worth remembering
 

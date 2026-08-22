@@ -1,7 +1,18 @@
 # Costmaps and inflation
 
-**Used by:** tasks 06, 07, 08.
-**Code:** `config/nav2.yaml` (`local_costmap`, `global_costmap`)
+**Used by:** Phase 3 (navigation).
+> **Measured on this rig (Phase 3):** the footprint is derived from tape
+> measurements — **35 cm long × 38 cm wide**, front `+0.180` (the camera face),
+> rear `−0.170`, sides `±0.190`. Obstacles reach the costmap from nvblox through
+> `NvbloxCostmapLayer`, reading the ESDF slice rather than an occupancy grid.
+>
+> One trap: nav2's costmaps publish **TRANSIENT_LOCAL** and, by default, only
+> deltas after the first full map — a subscriber that connects later sees
+> nothing while the costmap runs perfectly. `always_send_full_costmap: true`.
+> Note nvblox publishes **VOLATILE**, the opposite, on displays that sit next to
+> each other in RViz. See [PHASE3](../PHASE3.md).
+
+**Code:** `phase3/config/nav2.yaml` (`local_costmap`, `global_costmap`)
 
 ---
 

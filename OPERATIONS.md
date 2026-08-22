@@ -244,6 +244,48 @@ the access point.
 | rover sits still after a goal | it was told to rotate in place, which it cannot do. See TODO §14 and the `NO-PIVOT` settings |
 | goal rejected as unreachable | `allow_unknown: false` — it will not plan through unmapped space. Drive there first |
 
+### RViz shows nothing
+
+**Check this first: was it started with `-d`?**
+
+```bash
+rviz2 -d ~/rover.rviz        # correct
+rviz2 ~/rover.rviz           # WRONG -- silently ignored
+```
+
+`rviz2` ignores a bare config path. Without `-d` it starts with its **defaults**:
+Fixed Frame `map`, which does not exist on this rover, and **zero displays**. A
+blank window, no error, and the ROS graph shows `/rviz` connected while
+subscribing to nothing. Use `~/rviz_rover.sh` on the laptop, which cannot get
+this wrong.
+
+| symptom | cause |
+|---|---|
+| blank, `/rviz` in the graph, **0 subscribers** on `/odom` | started without `-d` |
+| blank, displays listed, Global Status red | Fixed Frame is `map`; set it to `odom` |
+| one display blank, others fine | **QoS.** nvblox is Volatile, nav2 costmaps are Transient Local |
+| `GLSL link result: active samplers...` | a driver quirk in RViz's Map shader; usually still draws |
+
+To confirm from the rover whether RViz is really subscribing:
+
+```bash
+ros2 topic info /odom        # Subscription count should be >= 1
+```
+
+### Teleop
+
+| symptom | cause |
+|---|---|
+| buttons do nothing | still in **AUTO** — flip to MANUAL |
+| turn command drives forward/backward | not enough duty to scrub four tyres. See TODO §14 — `WZ` must be ~5.0 for this firmware, not 2.0 |
+| `/cmd_vel` traffic but nothing moves | in MANUAL it publishes 10 Hz of zeros whether or not a button is held. Only a **non-zero** velocity means anything |
+
+Restart it **without a password** — it runs as your user with `Restart=always`:
+
+```bash
+ssh 192.168.1.16 'pkill -f teleop_web.py'
+```
+
 ### Everything looks alive but nodes cannot see each other
 
 A stale `ROS_DISCOVERY_SERVER`. `./rover` unsets it on every command; if you are

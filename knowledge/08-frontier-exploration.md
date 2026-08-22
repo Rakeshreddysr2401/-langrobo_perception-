@@ -1,6 +1,6 @@
 # Frontier exploration
 
-**Used by:** task 08 — the stage-2 goal.
+**Used by:** Phase 2 and beyond (exploration).
 
 ---
 

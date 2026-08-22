@@ -1,7 +1,24 @@
 # Voxels, TSDF, ESDF and the 2D slice
 
-**Used by:** tasks 04, 05, 06, 08.
-**Code:** `config/nvblox.yaml`
+**Used by:** Phase 2 (mapping) and Phase 3 (the costmap layer).
+**Code:** `phase2/launch/nvblox.launch.py`
+
+> **Measured on this rig (Phase 2):** two settings decide whether the map is any
+> use, and neither default suits a static room.
+>
+> **Decay.** nvblox multiplies every voxel's weight by 0.95 at 5 Hz and
+> deallocates blocks that fall below threshold — a **2.7 second half-life**. A
+> full room loop ended with less map than it started with. Set
+> `decay_tsdf_rate_hz: 0.0` for surveying; leave it on where things move.
+>
+> **The ESDF slice is the ROBOT's height, not the camera's range.** The 2D map is
+> a horizontal slice through the TSDF, and anything inside the band is an
+> obstacle. Ours runs 0.10–0.22 m: above the floor (which the camera's 1.3° down
+> pitch would otherwise read as an obstacle at range) and up to the rover's own
+> 22 cm height. A 29 cm table is then correctly ignored while its legs are not.
+>
+> See [PHASE2.md](../PHASE2.md).
+
 
 ---
 

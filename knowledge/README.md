@@ -23,6 +23,21 @@ wins and is noted here.
 
 ## Where practice differed from theory
 
+**A sensor's own health signal cannot catch it being confidently wrong** (02, 03).
+cuVSLAM reported **95 landmarks** — healthy by every measure it exposes — while
+claiming the rover was 17 m away and **21.7 m underground**. It was tracking
+features perfectly; it was tracking them from the wrong place. Catching that
+needs an **external constraint**, not a better reading of the sensor's own
+confidence: gravity says which way is down and never drifts, so a ground rover
+whose `z` leaves ±0.30 m is lying. See [PHASE1 §3](../PHASE1.md).
+
+**A map that forgets is worse than a map that is wrong** (04). nvblox decays its
+TSDF by default with a 2.7 second half-life, deallocating blocks that fall below
+threshold. Correct for a scene full of moving things, where a stale observation
+is worse than none; wrong for surveying a static room. A full room loop ended
+with **less** map than it started with, while looking perfectly good locally the
+whole way round. See [PHASE2](../PHASE2.md).
+
 **We did not build an EKF** (03). An EKF weights every sensor by covariance and
 blends them all. What this rig needed was **assignment plus fallback** — each
 sensor doing the one job it is good at, and being *dropped entirely* when it goes

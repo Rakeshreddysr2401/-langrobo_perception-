@@ -190,6 +190,7 @@ everything, and one that is bad at a job does not get that job.
 
 | when this fails | this carries it |
 |---|---|
+| **cuVSLAM diverges** (implausible `z`) | wheels + gyro |
 | cuVSLAM blind (<30 landmarks) | wheels + gyro |
 | cuVSLAM teleports | wheels + gyro |
 | cuVSLAM silent | wheels + gyro, via the independent 20 Hz pulse |
@@ -209,6 +210,13 @@ Rejecting individual teleports left cuVSLAM publishing at a confident 30 Hz
 between them with an equally corrupted *direction*. With 4 landmarks, FUSED took
 its heading from it and finished 42.4 cm from the start while the wheels *alone*
 managed 17.4 cm. Fusion did worse than its own worst input.
+
+**A sensor's own confidence cannot detect it being confidently wrong.** cuVSLAM
+reported 95 landmarks while claiming the rover was 21.7 m underground. Catching
+that needs an *external* constraint — gravity, which never drifts — not a better
+reading of the sensor's own health. FUSED takes distance from the encoders and
+direction from cuVSLAM, so the failure showed up as 37 m driven inside a 2 m box:
+right step lengths, random directions.
 
 **Do not calibrate during the manoeuvre that breaks your reference.** The
 encoder/cuVSLAM scale ratio freezes while turning, because the wheels scrub 1.60×

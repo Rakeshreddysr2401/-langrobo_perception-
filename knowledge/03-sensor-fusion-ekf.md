@@ -1,6 +1,6 @@
 # Sensor fusion and the EKF
 
-**Used by:** task 03, and everything that reads `/odometry/filtered` after it.
+**Used by:** Phase 1 (pose).
 **Code:** `phase1/nodes/fusion.py`, `phase1/nodes/gyro_node.py`  ·  **What we built instead of an EKF:** [ARCHITECTURE.md](../ARCHITECTURE.md) §5
 
 ---
@@ -47,7 +47,7 @@ wrong, and nothing will look broken.
 
 ---
 
-## Reading `config/ekf.yaml`
+## Reading `phase1/nodes/fusion.py`
 
 The config is a grid of booleans. Each sensor's `_config` is 15 flags in this
 order:

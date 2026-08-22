@@ -1,7 +1,16 @@
 # Planners, controllers and behaviour trees
 
-**Used by:** tasks 07, 08.
-**Code:** `config/nav2.yaml`, `config/bt_navigate_to_pose.xml`
+**Used by:** Phases 3 and 4 (navigation).
+> **Measured on this rig (Phase 3):** this rover **cannot turn in place** — see
+> [TODO §14](../TODO.md). nav2 assumes rotation is free, so almost every choice
+> in our config is a workaround: RPP runs `use_rotate_to_heading: false`,
+> `allow_reversing` is off, the yaw tolerance is loose, and the **Spin recovery
+> is removed**. Removing the Spin *behaviour* is not enough — nav2's default
+> behaviour trees hard-require a `spin` action server, and **both** trees must be
+> overridden or `bt_navigator` refuses to load at all. Every such setting is
+> marked `NO-PIVOT` so they can be reverted together. See [PHASE3](../PHASE3.md).
+
+**Code:** `phase3/config/nav2.yaml`, `phase3/bt/navigate_no_spin.xml`
 
 ---
 
@@ -51,7 +60,7 @@ It does not follow the plan exactly. It finds a *dynamically achievable* motion
 that mostly agrees with the plan — which is why the robot rounds corners the
 planner drew as sharp, and can dodge something that was not on the map.
 
-**Limits (`config/nav2.yaml`):**
+**Limits (`phase3/config/nav2.yaml`):**
 
 ```yaml
 vx_max: 0.30   # m/s
@@ -89,7 +98,7 @@ Standard nav2 recovery is: clear the costmap, spin in place, back up, try again.
 Those are **blind** moves. On a rover that is tethered and sees only 87°
 forwards, "back up" means reversing into space it has literally never observed.
 
-So `config/bt_navigate_to_pose.xml` omits them. The plugins are still loaded in
+So `phase3/bt/navigate_no_spin.xml` omits them. The plugins are still loaded in
 `nav2.yaml` — loading a plugin is not calling it — but the tree never invokes
 them. Failing cleanly beats recovering blindly.
 

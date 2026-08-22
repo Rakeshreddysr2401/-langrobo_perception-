@@ -1,6 +1,22 @@
 # QoS, DDS, and why we measure rates
 
-**Used by:** every task.
+**Used by:** Every phase — it is how failures present here.
+
+> **Measured on this rig:** QoS mismatches here have cost more time than any
+> other single cause, because they are **completely silent**. RViz renders a
+> mismatch identically to a dead publisher; `ros2 topic hz` reports a healthy
+> rate while a typed subscriber receives nothing, because `hz` does not check
+> the message type.
+>
+> | publisher | durability |
+> |---|---|
+> | nvblox `static_occupancy_grid` | **Volatile** |
+> | nav2 costmaps | **Transient Local** |
+> | `/fusion/path` | **Transient Local** |
+>
+> And `/nvblox_node/static_map_slice` is an `nvblox_msgs/DistanceMapSlice`, not
+> an `OccupancyGrid` — subscribing to the wrong type there receives nothing
+> while `hz` still reports 5 Hz.
 
 > Every failure this rig has had was a **rate collapsing**, not a topic
 > disappearing. That single sentence explains most of the tooling here.
@@ -32,7 +48,7 @@ Two matter most here.
 
 Sensor streams use `BEST_EFFORT` — a dropped camera frame is irrelevant, and you
 never want a slow consumer to stall the camera. Hence `input_qos: "SENSOR_DATA"`
-in `config/nvblox.yaml`.
+in `phase2/launch/nvblox.launch.py`.
 
 ### Durability
 

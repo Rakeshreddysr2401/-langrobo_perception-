@@ -1,6 +1,6 @@
 # Frames and TF
 
-**Used by:** tasks 02, 03, 04, 06, 07, 08 — i.e. nearly everything.
+**Used by:** Phases 1, 2 and 3 — nearly everything.
 
 > Nearly every confusing thing a robot does is a frame problem. If you only
 > properly learn one topic here, make it this one.
@@ -72,8 +72,8 @@ smooth, and everything reading `odom` is undisturbed.
 
 ### Where this shows up in our config
 
-- `config/nvblox.yaml`: `global_frame: "odom"`
-- `config/nav2.yaml`: both costmaps use `global_frame: odom`, but
+- `phase2/launch/nvblox.launch.py`: `global_frame: "odom"`
+- `phase3/config/nav2.yaml`: both costmaps use `global_frame: odom`, but
   `bt_navigator` uses `global_frame: map`
 
 So goals arrive in `map` and get transformed through cuVSLAM's `map → odom`,
@@ -92,7 +92,7 @@ Everything follows from that:
 
 - open floor must deproject to **z ≈ 0.000**
 - the camera TF is `z = 0.163` because the camera is 16.3 cm above the ground
-- `config/nvblox.yaml`'s obstacle band, `0.12 → 0.40`, is **height above the
+- `phase2/launch/nvblox.launch.py`'s obstacle band, `0.10 → 0.22`, is **height above the
   floor**
 
 ### The 3.7 cm that broke the robot

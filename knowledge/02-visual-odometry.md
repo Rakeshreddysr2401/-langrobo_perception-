@@ -1,6 +1,14 @@
 # Visual odometry and SLAM (cuVSLAM)
 
-**Used by:** tasks 02, 03, 04, 08.
+**Used by:** Phase 1 (pose).
+> **Measured on this rig:** cuVSLAM can fail in a way this document does not
+> cover — it can **diverge silently**, reporting healthy landmark counts and a
+> steady rate while its pose is metres wrong and frozen. Feature tracking being
+> fine is not the same as the pose being fine. See
+> [PHASE1 §3](../PHASE1.md) and [TODO §3](../TODO.md), which also corrects the
+> "speed limit" this file's drift discussion would imply: teleports track
+> **texture**, not velocity.
+
 **Code:** `phase1/nodes/vo_node.py`  ·  **What we measured:** [PHASE1.md](../PHASE1.md) §3, §5
 
 ---
