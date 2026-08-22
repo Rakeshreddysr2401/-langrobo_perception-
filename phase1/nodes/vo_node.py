@@ -12,7 +12,7 @@ WHAT IT PUBLISHES
     /vo/status std_msgs/String     JSON: tracking state, rate, frame count
     TF         odom -> base_link   (disable with publish_tf:=false)
 
-PHASE 1 DELIBERATELY RUNS ODOMETRY ONLY — NO SLAM
+SLAM / LOOP CLOSURE — off by default, on with slam:=true
     Loop closure exists to *hide* accumulated drift by snapping the pose back
     when it recognises a place. That is exactly the quantity Phase 1 is trying
     to measure: push the rover out 2 m and back, and the residual IS the drift.
@@ -225,6 +225,13 @@ def main():
             self.pub_odom = self.create_publisher(Odometry, '/vo/odom', 10)
             self.pub_status = self.create_publisher(String, '/vo/status', 1)
             self.tf = TransformBroadcaster(self) if self.publish_tf else None
+            # map -> odom is published whenever SLAM is on, independently of
+            # publish_tf: that flag is about who owns odom -> base_link (the
+            # fusion node does), and this is a different edge of the tree.
+            self.tf_map = TransformBroadcaster(self) if self.want_slam else None
+            self.correction_m = 0.0
+            self.loop_closures = 0
+            self._last_lc_len = 0
 
             # camera_info is a low-rate metadata topic, safe to hold open.
             self.create_subscription(CameraInfo, f'{self.ns}/infra1/camera_info',
@@ -291,7 +298,15 @@ def main():
             # image_rect_raw is already rectified by the driver.
             odom_cfg.rectified_stereo_camera = True
 
-            slam_cfg = vslam.Tracker.SlamConfig() if self.want_slam else None
+            slam_cfg = None
+            if self.want_slam:
+                slam_cfg = vslam.Tracker.SlamConfig()
+                # PLANAR CONSTRAINTS. This is a ground rover: it cannot leave the
+                # floor, and telling the optimiser so removes a whole degree of
+                # freedom it would otherwise get wrong. Measured 2026-08-22
+                # WITHOUT this, cuVSLAM settled into a confident pose 21.7 m
+                # underground while still reporting 95 healthy landmarks.
+                slam_cfg.planar_constraints = True
             self.tracker = vslam.Tracker(rig, odom_config=odom_cfg, slam_config=slam_cfg)
             self.get_logger().info(
                 f'tracker up — {li.width}x{li.height} fx={fx:.1f} baseline={baseline * 100:.2f} cm '
@@ -316,7 +331,7 @@ def main():
             ts = lmsg.header.stamp.sec * 10**9 + lmsg.header.stamp.nanosec
 
             try:
-                est, _slam_pose = self.tracker.track(ts, [limg, rimg])
+                est, slam_pose = self.tracker.track(ts, [limg, rimg])
             except ValueError as e:
                 self.get_logger().warn(f'track rejected frame: {e}', throttle_duration_sec=5.0)
                 return
@@ -340,6 +355,19 @@ def main():
                 self.landmarks = len(self.tracker.get_last_landmarks())
             except Exception:
                 self.landmarks = -1
+
+            # cuVSLAM keeps the last 10 loop closures. Counting them turns "the
+            # map looks better" into a number, and distinguishes a tracker that
+            # is recognising places from one that simply has not revisited any.
+            if self.want_slam:
+                try:
+                    lc = self.tracker.get_loop_closure_poses()
+                    if lc is not None and len(lc) != self._last_lc_len:
+                        if len(lc) > self._last_lc_len:
+                            self.loop_closures += len(lc) - self._last_lc_len
+                        self._last_lc_len = len(lc)
+                except Exception:
+                    pass
             cur = (tuple(wfr.translation), tuple(wfr.rotation))
             self.frozen = self.frozen + 1 if cur == self.last_pose else 0
             self.last_pose = cur
@@ -374,6 +402,63 @@ def main():
                 t.transform.rotation = od.pose.pose.orientation
                 self.tf.sendTransform(t)
 
+            self._publish_correction(slam_pose, T, lmsg.header.stamp)
+
+        def _publish_correction(self, slam_pose, T_odom, stamp):
+            """map -> odom: everything loop closure has corrected, and nothing else.
+
+            THIS IS WHY LOOP CLOSURE DOES NOT BREAK THE TELEPORT GUARD.
+
+            cuVSLAM returns two poses per frame. The ODOMETRY one is continuous:
+            it drifts but never jumps, which is exactly what an odom frame must be
+            and what the fusion's teleport rejection depends on. The SLAM one is
+            globally consistent but JUMPS whenever a loop closes.
+
+            Publishing the SLAM pose as odom -> base_link would make every loop
+            closure look identical to the divergence we spent a day learning to
+            reject. So the two are kept apart, the way REP-105 intends:
+
+                odom -> base_link   continuous, drifts     (fusion_node)
+                map  -> odom        the correction, jumps  (here)
+                map  -> base_link   globally consistent    (the two composed)
+
+            nav2 and nvblox keep consuming odom; anything wanting a globally
+            consistent frame reads map. Nothing has to choose between smooth and
+            correct.
+
+            map_from_odom = map_from_base * odom_from_base^-1, with both poses
+            already conjugated into base_link.
+            """
+            if slam_pose is None or self.tf_map is None:
+                return
+            try:
+                S = np.eye(4)
+                S[:3, :3] = Rotation.from_quat(list(slam_pose.rotation)).as_matrix()
+                S[:3, 3] = list(slam_pose.translation)
+            except (AttributeError, TypeError, ValueError):
+                return                      # not a pose this build returns
+
+            T_map = self.B @ S @ self.Binv
+            corr = T_map @ np.linalg.inv(T_odom)
+
+            # How far loop closure has moved the world. Worth reporting: it IS the
+            # accumulated drift, measured rather than estimated.
+            self.correction_m = float(np.linalg.norm(corr[:3, 3]))
+
+            q = Rotation.from_matrix(corr[:3, :3]).as_quat()
+            t = TransformStamped()
+            t.header.stamp = stamp
+            t.header.frame_id = 'map'
+            t.child_frame_id = 'odom'
+            t.transform.translation.x = float(corr[0, 3])
+            t.transform.translation.y = float(corr[1, 3])
+            t.transform.translation.z = float(corr[2, 3])
+            t.transform.rotation.x = float(q[0])
+            t.transform.rotation.y = float(q[1])
+            t.transform.rotation.z = float(q[2])
+            t.transform.rotation.w = float(q[3])
+            self.tf_map.sendTransform(t)
+
         def _report(self):
             now = time.time()
             dt = now - self.last_report
@@ -385,6 +470,11 @@ def main():
                 'tracked': self.tracked,
                 'tracker_up': self.tracker is not None,
                 'landmarks': self.landmarks,
+                'slam': self.want_slam,
+                # How far loop closure has moved the world. This IS the
+                # accumulated drift, measured rather than estimated.
+                'correction_m': round(self.correction_m, 3),
+                'loop_closures': self.loop_closures,
                 'frozen_frames': self.frozen,
                 # Rate alone is NOT enough: a dead tracker returns identity at a
                 # perfect 30 Hz. Landmarks are what say it is really tracking.

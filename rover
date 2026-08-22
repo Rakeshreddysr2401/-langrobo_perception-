@@ -148,6 +148,10 @@ camera)
   ;;
 
 # ── pose ────────────────────────────────────────────────────────────────────
+# SLAM (loop closure) is ON by default now that Phase 1 has its drift numbers.
+# It publishes map -> odom; odom -> base_link stays continuous and owned by
+# fusion_node, so a loop closure cannot look like the teleports the fusion
+# rejects. Run with SLAM=false ./rover pose to measure raw drift again.
 pose)
   need_container
   echo "  checking the camera is still healthy before building on it..."
@@ -163,7 +167,7 @@ pose)
 
   echo "[pose] visual odometry  (stereo IR -> /vo/odom, TF odom -> base_link)"
   kill_match "[v]o_node.py"
-  dexec "export LD_LIBRARY_PATH=$CU12:\$LD_LIBRARY_PATH; exec python3 $SRC/nodes/vo_node.py --ros-args -p publish_tf:=false > /tmp/vo.log 2>&1"
+  dexec "export LD_LIBRARY_PATH=$CU12:\$LD_LIBRARY_PATH; exec python3 $SRC/nodes/vo_node.py --ros-args -p publish_tf:=false -p slam:=\${SLAM:-true} > /tmp/vo.log 2>&1"
 
   echo "[pose] gyro  (D555 IMU, re-framed into base_link -> /gyro/base)"
   kill_match "[g]yro_node.py"
