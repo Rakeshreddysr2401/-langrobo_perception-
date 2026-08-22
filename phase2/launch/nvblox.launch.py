@@ -66,9 +66,17 @@ def generate_launch_description():
                 'static_mapper.esdf_slice_max_height': 0.60,
                 'static_mapper.esdf_slice_height': 0.20,
 
-                # Depth beyond this is too noisy on this camera to trust into a
-                # map; below it is inside the rover.
-                'static_mapper.projective_integrator_max_integration_distance_m': 4.0,
+                # How far out to trust depth into the map. Stereo error grows
+                # with range SQUARED -- z^2 * sigma_d / (f * b), with f 448.3 and
+                # the D555's 9.49 cm baseline:
+                #
+                #     2 m -> 1.9 cm    4 m -> 7.5 cm    6 m -> 16.9 cm
+                #     3 m -> 4.2 cm    5 m -> 11.8 cm
+                #
+                # 5 m costs ~12 cm of wall fuzz, under 2.5 voxels, and reaches
+                # the far wall of a normal room from a corner. 6 m is 3.4 voxels
+                # and the walls start to smear rather than sharpen.
+                'static_mapper.projective_integrator_max_integration_distance_m': 5.0,
                 'static_mapper.projective_integrator_truncation_distance_vox': 4.0,
 
                 'max_mapping_height_m': 2.0,
