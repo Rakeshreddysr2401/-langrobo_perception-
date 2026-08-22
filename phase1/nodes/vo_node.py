@@ -80,6 +80,13 @@ CAM_Z_DEFAULT = 0.163  # metres above the ground              -- confirmed
 # affect distance travelled, and it cancels out of any measured rotation. It
 # only tilts the reported DIRECTION of travel — which is why it survived a
 # passing scale gate.
+# A loop-closure correction is accumulated drift made visible. On a ground rover
+# over a room that is centimetres to a metre or two -- never tens of metres, and
+# never vertical. Beyond these the SLAM optimiser has diverged and the correction
+# is discarded; odom -> base_link is unaffected either way.
+MAX_CORRECTION_Z = 0.30
+MAX_CORRECTION_M = 5.0
+
 CAM_YAW_DEG_DEFAULT = 2.06
 
 
@@ -231,6 +238,7 @@ def main():
             self.tf_map = TransformBroadcaster(self) if self.want_slam else None
             self.correction_m = 0.0
             self.loop_closures = 0
+            self.correction_rejected = 0
             self._last_lc_len = 0
 
             # camera_info is a low-rate metadata topic, safe to hold open.
@@ -440,10 +448,34 @@ def main():
 
             T_map = self.B @ S @ self.Binv
             corr = T_map @ np.linalg.inv(T_odom)
+            mag = float(np.linalg.norm(corr[:3, 3]))
+
+            # THE SLAM POSE NEEDS THE SAME PLAUSIBILITY CHECK AS THE ODOMETRY ONE.
+            # Measured 2026-08-22: after a room loop the correction came out as
+            # [-10.5, -22.2, 87.7] m -- 87 metres straight up, a 91 m "correction"
+            # for a rover that had driven about four. The SLAM optimiser had
+            # diverged exactly as the odometry once did, and setting
+            # planar_constraints did not prevent it.
+            #
+            # A correction is accumulated drift made visible. On a ground rover
+            # over a room it is centimetres to a metre or two; it is never tens of
+            # metres and it is never vertical. Publishing this would have dragged
+            # the whole map frame with it.
+            #
+            # The odom frame was untouched throughout -- z exactly 0.000 -- which
+            # is the separation earning its keep: the garbage stayed in the frame
+            # nothing critical consumes.
+            if abs(corr[2, 3]) > MAX_CORRECTION_Z or mag > MAX_CORRECTION_M:
+                self.correction_rejected += 1
+                self.get_logger().warn(
+                    f'SLAM correction implausible ({mag:.1f} m, z={corr[2, 3]:+.1f} m) '
+                    f'— not publishing map->odom. Odometry is unaffected.',
+                    throttle_duration_sec=10.0)
+                return
 
             # How far loop closure has moved the world. Worth reporting: it IS the
             # accumulated drift, measured rather than estimated.
-            self.correction_m = float(np.linalg.norm(corr[:3, 3]))
+            self.correction_m = mag
 
             q = Rotation.from_matrix(corr[:3, :3]).as_quat()
             t = TransformStamped()
@@ -475,6 +507,7 @@ def main():
                 # accumulated drift, measured rather than estimated.
                 'correction_m': round(self.correction_m, 3),
                 'loop_closures': self.loop_closures,
+                'correction_rejected': self.correction_rejected,
                 'frozen_frames': self.frozen,
                 # Rate alone is NOT enough: a dead tracker returns identity at a
                 # perfect 30 Hz. Landmarks are what say it is really tracking.
