@@ -74,18 +74,45 @@ nav2's costmaps are 2D. So nvblox takes a horizontal band of the 3D world and
 flattens it:
 
 ```yaml
-esdf_slice_min_height: 0.12   # bottom of the band
-esdf_slice_max_height: 0.40   # top
-esdf_slice_height:     0.20   # the representative height
+esdf_slice_min_height: 0.10   # bottom of the band
+esdf_slice_max_height: 0.22   # top — the rover's own height
+esdf_slice_height:     0.16   # the representative height
 ```
 
 Heights are **above the floor**, because `base_link`'s origin is on the ground.
 
-The band is a judgement call. Too low and floor noise becomes obstacles; too high
-and you drive into low things. Ours is at 0.12 as a **stale workaround** — see
-`TODO.md §4`. It was raised from 0.05 to dodge a camera-height error that is now
-fixed, and the 2026-08-11 experiment showed the floor is not what fills the map,
-so both reasons are gone. It costs every obstacle under 12 cm.
+The band is a judgement call, and ours is set to **the rover's own height**.
+That is the honest definition of an obstacle for a ground vehicle: something
+occupying the space the rover would occupy. Anything above 22 cm it drives
+*under*, and the 29 cm table in this room is the case that forced the issue —
+with a taller band the tabletop was integrated and the whole area came back as
+solid obstacle, so the rover could not plan under a table it fits beneath.
+
+### The slice height sets your useful depth range
+
+This is the non-obvious consequence, and it cost us a day's confusion.
+
+The band is only **12 cm tall**. Stereo depth error grows with the square of
+range: at 5 m this camera's error is ~11.8 cm — *the entire height of the band*.
+So a distant wall has its points smeared vertically right out of the slice.
+Most miss it, the wall is never marked solid, and the ray therefore passes
+**through** it and writes free space beyond.
+
+| range | depth error | vs a 12 cm band |
+|---|---|---|
+| 2 m | 1.9 cm | well inside |
+| 3 m | 4.2 cm | about a third — usable |
+| 5 m | 11.8 cm | the whole band |
+
+Observed 2026-08-22 with the limit at 5 m: an 18 × 17 m blob, walls scattered
+through the middle and none at the edges, 150 m² of "free floor" for one room.
+Both symptoms, one cause. `max_integration_distance_m` is now 3.0 m.
+
+**The rule: the useful depth range is set by the SLICE HEIGHT, not by the voxel
+size and not by the camera's spec range.** Want to see further? You need a
+taller band — and a taller band re-integrates the tabletop. That is a genuine
+trade, not a setting to tune freely. Change `esdf_slice_min/max_height` and you
+must recheck the integration distance in the same breath.
 
 **Slice heights are read at init.** `ros2 param set` reports success and changes
 nothing — verified by getting a byte-identical map back. Edit the YAML and

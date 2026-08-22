@@ -123,6 +123,37 @@ This is why:
 
 ---
 
+## SLAM can diverge, and the frame split is what saves you
+
+Loop closure's correction goes in `map -> odom`, never into `odom -> base_link`.
+The usual reason given is REP-105's: `odom` must be continuous, and a closure is
+a jump. There is a second reason, and 2026-08-22 demonstrated it:
+
+```
+odom -> base_link   [-0.828, 0.876,  0.000]     healthy, z exactly 0
+map  -> odom        [-10.5,  -22.2, 87.685]     87 metres UP
+correction_m        91.045
+```
+
+The SLAM optimiser had settled into a pose 87 m above the floor and wanted to
+"correct" the world by 91 m — for a rover that had driven about four. Odometry
+was untouched and perfectly fine the whole time. **The garbage stayed in the
+frame nothing critical consumes**, so nav2 and nvblox never saw it.
+
+Two things worth carrying forward:
+
+- **`planar_constraints = True` did not prevent this.** It was set specifically
+  to make a vertical divergence impossible, and it happened anyway. Do not treat
+  that flag as a guarantee.
+- **Gate the correction like you gate the pose.** A loop-closure correction is
+  accumulated drift made visible: over a room it is centimetres to a metre or
+  two, never tens of metres and never vertical. `vo_node` now discards any
+  correction beyond 0.30 m of z or 5 m of magnitude rather than publishing it.
+
+A gate stops the damage; it does not make closure work. See `TODO.md §16`.
+
+---
+
 ## Reading `cuvslam_node.py`
 
 | Parameter | Default | Why it is there |

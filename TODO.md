@@ -146,6 +146,8 @@ Every run we have, cross-tabulated:
 | hard drive, bare wall | 94 cm/s | **min 4** | **32** |
 | hard drive #2 | 84 cm/s | **min 17** | **12** |
 | **teleop loop, 2026-08-21** | **42 cm/s** | **162** | **0** |
+| room loop, 2026-08-22 | 89 cm/s | 19 (at end) | **0** |
+| room loop #2, 2026-08-22 | 84 cm/s | 40 (at end) | **0** |
 
 **42 cm/s with good texture produced zero teleports.** The runs that failed were
 not the fast ones, they were the blind ones. And the 84–94 cm/s figures are
@@ -164,6 +166,17 @@ honest rule is to **watch landmarks, not the speedometer** — `compare.py` and
 publishes the count. A texture-aware speed limit would be better than a fixed
 one, but this needs a deliberate test: drive the same textured route at
 increasing speed until it breaks. That has not been done.
+
+**2026-08-22 strengthens this considerably.** Two full room loops at 84 and
+89 cm/s -- more than three times the supposed limit -- produced **zero**
+teleports and zero dropped frames each. That is the fastest clean driving we
+have recorded, and the 25 cm/s figure now looks not merely unproven but wrong
+by a factor of three.
+
+One caveat on those two rows: `loop_test` reports the landmark count *at the
+end of the run*, whereas the failing rows above report the *minimum during* it.
+They are not the same measurement and the low numbers are not comparable. The
+teleport counts are directly comparable, and they are zero.
 
 **Not yet ruled out:** that speed matters *at the margin*, when texture is
 already thin. Nothing here separates those.
@@ -235,6 +248,105 @@ The only proof is the emitter read-back.
 nor its 57.8 GB base has a recipe. If it is deleted, everything stops. The only
 insurance is `docker save` to external storage. `/` has ~45 GB free of 227 GB, so
 this needs somewhere else to go.
+
+---
+
+## 🟡 15. The estimate has never actually been graded — the loop test measured the wrong thing
+
+`loop_test.py` printed **FAIL** whenever `/odom` did not finish within 10 cm of
+where it started. That grades the *driving*. Nobody parks a rover back onto a
+tape mark to 10 cm by eye down a phone screen, so it reported failure on runs
+where the estimate was excellent and merely said so honestly.
+
+Two room loops on 2026-08-22, both graded FAIL:
+
+| run | /odom says | tape says | estimate error | driven |
+|---|---|---|---|---|
+| 1 | 120.6 cm | ~100 cm | **~20 cm = 1.6%** | 12.9 m |
+| 2 | 71.2 cm | *never measured* | unknown | ~12 m |
+
+Run 1 is **good stereo VO** and the verdict called it a failure. We went looking
+for a regression that did not exist.
+
+The pose error is the DIFFERENCE between what odometry claims and what a tape
+says, and only one of those two numbers is available inside the program. The
+test now asks for the tape reading and grades the difference as a percentage of
+distance driven (PASS ≤ 2%, OK ≤ 5%).
+
+**Still open, and this is the real item:** we have exactly one measured data
+point, and it was eyeballed as "around 1 metre". Run 2's **−22° heading error**
+is the part worth chasing — twice run 1's 11°, and heading error is what smears
+a map into a blob. Neither has a tape reading behind it.
+
+**Next run:** measure the gap with a tape when the test asks. Until then the
+odometry is *probably* around 1.6% and we cannot say more than that.
+
+---
+
+## 🟠 16. The SLAM pose diverged 91 m — and the frame split contained it
+
+First real outing for loop closure, 2026-08-22, straight after a room loop:
+
+```
+odom -> base_link   [-0.828, 0.876,  0.000]     z exactly 0 -- healthy
+map  -> odom        [-10.5,  -22.2, 87.685]     87 metres UP
+correction_m        91.045
+```
+
+The SLAM optimiser diverged exactly as the odometry pose once did (§ the z-gate
+work), and **`planar_constraints = True` did not prevent it** — which is worth
+recording on its own, because that setting was added specifically to make this
+impossible and it did not.
+
+A correction is accumulated drift made visible. On a ground rover over a room
+that is centimetres to a metre or two; it is never tens of metres and never
+vertical. So `_publish_correction` now applies the same plausibility test the
+odometry gets (`MAX_CORRECTION_Z` 0.30 m, `MAX_CORRECTION_M` 5.0 m) and
+discards rather than publishes.
+
+**What did NOT happen is the point.** `odom -> base_link` stayed perfectly
+healthy throughout, because the correction lives in a different frame. Keeping
+loop closure out of the odom frame was argued for on the grounds that a closure
+would look like a teleport to the fusion guard; its first real outing showed
+the other half of the argument, which is that a diverged optimiser cannot drag
+down the frame nav2 and nvblox consume.
+
+**Open:** loop closure has therefore still never usefully fired. The gate stops
+the damage; it does not make closure work. Why the optimiser diverges — and
+whether `planar_constraints` is being applied at all — is unexamined.
+
+---
+
+## 🟠 17. The obstacle slice is 12 cm tall, which caps useful depth range at ~3 m
+
+A real room loop produced an 18 × 17 m blob with walls scattered through the
+**middle** and none at the edges, claiming 150 m² of free floor for a room
+nothing like that size. Both symptoms are one cause.
+
+The obstacle band is 0.10–0.22 m — 12 cm, set to the rover's own height so it
+can drive under the 29 cm table. Stereo depth error grows with range squared:
+
+| range | depth error | vs the 12 cm band |
+|---|---|---|
+| 2 m | 1.9 cm | well inside |
+| 3 m | 4.2 cm | about a third — usable |
+| 5 m | 11.8 cm | **the entire band** |
+
+A wall 5 m away has its points smeared vertically across the whole band. Most
+miss it, the wall is never marked solid, the ray passes **through**, and free
+space is written beyond it — which is exactly walls-only-near-the-rover plus an
+absurd free area.
+
+`projective_integrator_max_integration_distance_m` is now **3.0 m**, down from
+the 5.0 m an earlier commit *the same day* had raised it to in order to reach
+far walls. It reached them with data too noisy for the band to catch.
+
+**The general rule, worth remembering:** the useful depth range is set by the
+SLICE HEIGHT, not by the voxel size or the camera's spec range. Any change to
+`esdf_slice_min/max_height` should be followed by rechecking this distance.
+
+**Not yet verified:** the 3 m setting has not been driven. The map was cleared
+when it was applied and no loop has been run since.
 
 ---
 

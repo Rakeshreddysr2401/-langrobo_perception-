@@ -219,7 +219,7 @@ the access point.
 |---|---|
 | `straight` grows while parked | gyro bias stale — should self-correct; check `STILL — retuning bias` appears |
 | many teleports, `landmarks` low | featureless scene. Drive where there is furniture, not a bare wall |
-| many teleports, `landmarks` healthy | too fast. Keep under 25 cm/s |
+| many teleports, `landmarks` healthy | genuinely unexplained. Speed is NOT the answer — 89 cm/s with 0 teleports on 2026-08-22. See TODO §3 |
 | `wheels` row wildly wrong in turns | expected — skid-steer scrub. The gyro owns heading |
 | `FUSED` worse than an input | a real bug. This has happened twice; see PHASE1.md §7 |
 

@@ -260,10 +260,14 @@ compiled for Thor and will not run on this Orin.
 
 ## 8. Constraints that propagate to nav2
 
-- **`vx_max` ≤ 25 cm/s** — above it cuVSLAM teleports
-- **Pivots cost tracking** — 2.0 rad/s swings the camera at 34 cm/s, past its
-  limit. Prefer plans that turn and drive forward over spinning in place or
-  reversing (cuVSLAM under-reads reverse by ~6%)
+- **No speed cap is justified by our evidence.** This said `vx_max ≤ 25 cm/s`
+  for a long time; two room loops on 2026-08-22 at 84 and 89 cm/s produced zero
+  teleports and zero dropped frames. Teleports track TEXTURE, not speed. The
+  honest constraint is to watch `landmarks` in `/fusion/status` — see TODO §3
+- **Prefer turn-then-drive over spinning or reversing.** Not for the speed
+  reason once given here: reversing is the measured problem (cuVSLAM under-reads
+  it by ~6%, TODO §4), and a pivot on this chassis burns roughly two-thirds of
+  its torque in scrub (TODO §13)
 - **The D555 drops out** in three distinct ways — see [TODO.md](TODO.md) §7. The
   fusion survives it; a robot needing a human to reseat a cable does not
   autonomously
