@@ -60,11 +60,12 @@ controller_server:
       plugin: nav2_controller::SimpleGoalChecker
       stateful: true
       xy_goal_tolerance: 0.15          # 15 cm: the pose is good to ~7 cm, and
-      yaw_goal_tolerance: 0.5          # demanding better than the estimate is
+                                       # demanding better than the estimate is
                                        # asking the rover to chase its own noise.
-                                       # 0.5 rad = 29 deg, loose because NO-PIVOT
-                                       # means final heading cannot be corrected
-                                       # in place.
+      # 0.25 rad = 14 deg, tightened from 0.5 now that the rover can rotate in
+      # place to fix its final heading. At 0.5 the first autonomous goal was
+      # declared reached while 23 deg off and still commanding 0.9 rad/s.
+      yaw_goal_tolerance: 0.25
 
     FollowPath:
       plugin: nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController
@@ -77,21 +78,37 @@ controller_server:
       max_lookahead_dist: 0.9
       use_velocity_scaled_lookahead_dist: true
 
-      # NO-PIVOT. This is the single most important setting in this file. With
-      # it true, RPP stops and rotates to face the path before moving -- which
-      # this rover cannot do, so it would sit still commanding a turn that never
-      # happens until the progress checker times out. False makes it arc onto
-      # the path from a standstill instead.
-      use_rotate_to_heading: false
+      # TRUE since 2026-08-22. This was false for as long as the rover could not
+      # pivot: RPP would have stopped and commanded a rotation that never
+      # happened, until the progress checker timed out.
+      #
+      # The pivot fault is fixed and verified on the floor (93% and 96% duty,
+      # counter-rotating, 65 deg/s -- TODO 14), so the reason has expired. And
+      # leaving it false has a real cost, measured on the first autonomous goal:
+      # with heading correctable only by driving an arc, the rover overshot a
+      # 1 m goal to 1.13 m, came back, and hunted around it for 13 seconds of a
+      # 6-second journey, crawling at 0.05 m/s while turning at the full
+      # 1.0 rad/s limit. It was buying heading with forward motion because that
+      # was the only currency it had.
+      use_rotate_to_heading: true
+
+      # Kept well under the 65 deg/s (1.13 rad/s) the rover actually achieved on
+      # the floor, so a commanded in-place rotation is one it can execute.
+      rotate_to_heading_angular_vel: 0.8
+      rotate_to_heading_min_angle: 0.6
+      max_angular_accel: 1.5
       allow_reversing: false           # cuVSLAM under-reads reverse by ~6%
 
       # Slow down near obstacles and on tight curves rather than cornering hard.
       use_regulated_linear_velocity_scaling: true
       use_cost_regulated_linear_velocity_scaling: true
-      regulated_linear_scaling_min_radius: 0.9
+      # 0.6 m was the OTHER half of the crawl. On a 1 m goal it begins slowing
+      # 60 cm out -- most of the journey spent decelerating. 0.25 m still gives
+      # a controlled arrival without turning every short hop into a creep.
+      regulated_linear_scaling_min_radius: 0.6
       regulated_linear_scaling_min_speed: 0.10
       min_approach_linear_velocity: 0.05
-      approach_velocity_scaling_dist: 0.6
+      approach_velocity_scaling_dist: 0.25
 
       transform_tolerance: 0.2
       use_collision_detection: true

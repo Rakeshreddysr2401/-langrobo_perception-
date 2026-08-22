@@ -419,6 +419,65 @@ inflation and concluded the route was clear; it was blocked.
 
 ---
 
+## ✅ 20. First autonomous goals driven — and the controller fixed after the first one
+
+**2026-08-22: the rover navigated to a goal on its own for the first time.**
+
+Goal 1 m straight ahead. It planned, checked, drove, and stopped 7.8 cm from the
+goal against a 15 cm tolerance. Tape-confirmed: odometry read 95.8 cm of
+displacement, measured on the floor as 93–95 cm.
+
+### The first run got there badly
+
+| symptom | measured |
+|---|---|
+| overshot the goal | out to 113 cm, then back to 95 |
+| hunted around it | ~13 s of a 6 s journey |
+| crawled | 0.05 m/s instead of 0.18 |
+| turned at the limit | 1.00 rad/s, the velocity_smoother cap |
+| ended rotated | −23 deg, having been asked to hold heading |
+| declared success while still turning | last command vx 0.00, **wz +0.90** |
+
+Two causes, both leftovers from the pivot fault:
+
+- **`use_rotate_to_heading: false`** — the NO-PIVOT setting. With heading
+  correctable only by driving an arc, the rover was buying heading with forward
+  motion, because that was the only currency it had. The pivot fault is fixed
+  and verified on the floor (§14), so the reason had expired.
+- **`approach_velocity_scaling_dist: 0.6`** — it begins decelerating 60 cm out,
+  which on a 1 m goal is most of the journey. Now 0.25.
+
+Also `yaw_goal_tolerance` 0.5 → 0.25 rad. At 0.5 (29 deg) the goal was declared
+reached while 23 deg off; heading can now be corrected in place, so the loose
+tolerance is no longer needed to avoid a deadlock.
+
+### Second run, same 1 m goal, after the fix
+
+| | before | after |
+|---|---|---|
+| time | ~30 s | **4.9 s** |
+| overshoot | to 113 cm then back | **none** |
+| cruise speed | 0.05 m/s | **0.18 m/s throughout** |
+| heading change | −23 deg | **+2.3 deg** |
+| peak turn rate | 1.00 rad/s (at cap) | 0.26 rad/s |
+| cmd_vel messages | 597 | 100 |
+| stop | still commanding wz 0.90 | **clean, topic released** |
+
+`rotate_to_heading_angular_vel` is 0.8 rad/s, kept under the 1.13 rad/s
+(65 deg/s) the rover actually achieved on the floor, so a commanded in-place
+rotation is one it can execute.
+
+### Watch on the next runs
+
+It stopped **14.7 cm** from the goal, just inside the 15 cm tolerance, having
+travelled 85.7 cm of the 1.00 m asked. That is the goal checker firing as soon
+as it is close enough, which is correct behaviour — but it means short goals
+land systematically short. Worth watching whether it matters for §6's obstacle
+test; tightening `xy_goal_tolerance` below the ~7 cm pose error would just make
+it chase noise.
+
+---
+
 ## ✅ 19. The costmap did not reflect its ESDF — FIXED, it was a double gradient
 
 Step 1 of the autonomy road **passed**. Driving a lap with the 3 m integration
