@@ -134,7 +134,7 @@ class FusionNode(Node):
     # ── inputs ─────────────────────────────────────────────────────────────
     def _vo(self, m):
         p = m.pose.pose.position
-        self.f.on_vo(self._now(), p.x, p.y, yaw_of(m.pose.pose.orientation))
+        self.f.on_vo(self._now(), p.x, p.y, yaw_of(m.pose.pose.orientation), p.z)
 
     def _gyro(self, m):
         self.f.on_gyro(self._now(),
@@ -270,6 +270,10 @@ class FusionNode(Node):
                 if down:
                     self.get_logger().warn(
                         f'{", ".join(down)} DOWN — carrying on with the rest')
+                elif h.get('vo_implausible', 0) and h['vo_z'] and abs(h['vo_z']) > 0.3:
+                    self.get_logger().warn(
+                        f'cuvslam DIVERGED (z={h["vo_z"]:.1f} m) — ignoring it, '
+                        f'running on wheels+gyro')
                 elif 0 <= h['landmarks'] < LOW_LANDMARKS:
                     self.get_logger().warn(
                         f'cuvslam blind ({h["landmarks"]} landmarks) — '

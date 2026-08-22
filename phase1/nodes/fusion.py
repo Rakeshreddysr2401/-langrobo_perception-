@@ -119,6 +119,21 @@ MAX_PUSH_MS = 1.0
 # collapse just before a teleport. Recorded at every jump to test that.
 LOW_LANDMARKS = 30
 
+# A ground rover on a floor cannot be this far above or below where it started.
+# Landmarks are NOT sufficient to catch a diverged tracker: measured 2026-08-22,
+# cuVSLAM reported 95 landmarks -- healthy by every signal we had -- while
+# claiming the rover was 17 m away and 21.7 m UNDERGROUND, frozen there. It had
+# jumped once and settled into a confident wrong pose.
+#
+# The damage was not obvious either. FUSED takes DISTANCE from the encoders and
+# DIRECTION from cuVSLAM, so the magnitudes stayed right while the directions
+# went random: 37.4 m driven inside a 2.1 x 1.6 m box, a random walk that
+# largely cancelled itself out.
+#
+# Gravity says which way is down and never drifts, so this is cheap and certain.
+# 0.30 m allows a threshold or a shallow ramp and nothing more.
+VO_MAX_Z = 0.30
+
 # Complementary-filter time constant for roll/pitch, seconds. Above it the
 # accelerometer wins (absolute, no drift); below it the gyro wins (smooth, and
 # immune to the fake tilt that acceleration puts on the accelerometer). A quarter
@@ -330,7 +345,9 @@ class PoseFusion:
         self.cover_vo = 0
         self.cover_gyro = 0
         self.cover_enc = 0
-        self.vo_unhealthy = 0
+        self.vo_unhealthy = 0        # frames cuVSLAM was dropped, low landmarks
+        self.vo_implausible = 0      # frames cuVSLAM claimed an impossible z
+        self.vo_z = 0.0              # latest cuVSLAM z, for the health report
         self.yaw_held = 0
         self.scale_held = 0
 
@@ -361,6 +378,8 @@ class PoseFusion:
             'gyro_alive': self.gyro_n > 0 and (now - self.gyro_last_msg) <= COVER_STALE_S,
             'landmarks': self.landmarks,
             'vo_dropped': self.vo_unhealthy,
+            'vo_implausible': self.vo_implausible,
+            'vo_z': round(self.vo_z, 3),
             'dead_reckoned': self.dr_steps,
             'dr_metres': self.enc_path_dr,
             'jumps': len(self.jumps),
@@ -433,10 +452,20 @@ class PoseFusion:
                 self._attitude_step(gx, gy, dt)
         self.gyro_last_t = t
 
-    def on_vo(self, t, px, py, pth):
-        """A cuVSLAM pose. Teleports are rejected here, before they reach the estimate."""
+    def on_vo(self, t, px, py, pth, pz=0.0):
+        """A cuVSLAM pose. Teleports and divergence are rejected here."""
         self.vo_n += 1
         self.vo_last_msg = t
+        self.vo_z = pz
+
+        # Is it even claiming something physically possible? See VO_MAX_Z.
+        # Checked before anything else, because a diverged tracker still reports
+        # healthy landmarks and a perfectly steady rate.
+        if abs(pz) > VO_MAX_Z:
+            self.vo_implausible += 1
+            self._deadreckon()
+            self.vo_prev = (t, px, py, pth)
+            return
         if self.vo_first is None:
             self.vo_first = (px, py, pth)
         fx, fy, fth = self.vo_first
