@@ -35,9 +35,12 @@ class Loop(Node):
         self.health = {}
         self.peak = 0.0
         self.prev = None
+        self.dist = 0.0     # arc length actually driven, for a per-metre figure
 
     def _o(self, m):
         p = m.pose.pose.position
+        if self.now is not None:
+            self.dist += math.hypot(p.x - self.now[0], p.y - self.now[1])
         t = time.time()
         self.now = (p.x, p.y, yaw_of(m.pose.pose.orientation))
         if self.prev is not None:
@@ -93,20 +96,57 @@ def main():
     dropped = n.health.get('vo_dropped', 0) - d0
 
     print('\n  ── result ' + '─' * 46)
-    print(f'   back at the start, /odom is {err * 100:.1f} cm away   '
-          f'-> {"PASS" if err <= 0.10 else "FAIL"} (want <= 10.0 cm)')
-    print(f'   heading is {dth:+.1f} deg off   '
-          f'-> {"PASS" if abs(dth) <= 10 else "FAIL"} (want <= 10 deg)')
-    print(f'   peak speed {n.peak * 100:.0f} cm/s'
-          + ('   <- over the 25 cm/s tracking limit' if n.peak > 0.25 else ''))
+    print(f'   drove {n.dist:.1f} m')
+    print(f'   /odom thinks you finished {err * 100:.1f} cm from the mark, '
+          f'{dth:+.1f} deg off')
     print()
     print(f'   during the run: {jumps} cuvslam teleport(s), '
           f'{dropped} frames with cuvslam dropped')
     lm = n.health.get('landmarks', -1)
     print(f'   landmarks now {lm}' + ('   <- thin, tracking is fragile' if 0 <= lm < 30 else ''))
+    print(f'   peak speed {n.peak * 100:.0f} cm/s')
+
+    # THE POSE ERROR IS NOT THE DISTANCE FROM THE MARK.
+    #
+    # This test used to print FAIL whenever /odom did not end within 10 cm of
+    # where it started -- which grades the DRIVING, not the estimate. Nobody
+    # parks a rover back on a tape mark to 10 cm by eye down a phone screen, so
+    # it printed FAIL on runs where the pose was excellent and simply said so.
+    #
+    # Measured 2026-08-22: /odom read 120.6 cm from the mark and the rover was
+    # physically about 100 cm from it. The estimate was ~20 cm out over 12.9 m
+    # of driving -- 1.6% -- and the old verdict called that a failure twice.
+    #
+    # So ask. The pose error is the DIFFERENCE between what odometry claims and
+    # what a tape measure says, and only one of those two is in this program.
     print()
-    print('   This is the same estimate RViz draws /fusion/path from, so the')
-    print('   number above is exactly how far the green line missed by.')
+    try:
+        ans = input('   Measure it: how far is the rover REALLY from the mark, '
+                    'in cm?  (blank to skip)  ').strip()
+    except (EOFError, KeyboardInterrupt):
+        ans = ''
+
+    if ans:
+        try:
+            truth = float(ans)
+        except ValueError:
+            truth = None
+        if truth is not None:
+            pose_err = abs(err * 100 - truth)
+            print()
+            print(f'   odometry said {err * 100:.1f} cm, tape says {truth:.1f} cm')
+            print(f'   -> the ESTIMATE is off by {pose_err:.1f} cm over {n.dist:.1f} m '
+                  f'= {pose_err / max(n.dist * 100, 1) * 100:.2f}%')
+            print()
+            if pose_err / max(n.dist * 100, 1) <= 0.02:
+                print('   PASS -- under 2% of distance driven, which is good stereo VO.')
+            elif pose_err / max(n.dist * 100, 1) <= 0.05:
+                print('   OK -- 2-5%. Usable, worth improving with loop closure.')
+            else:
+                print('   FAIL -- over 5% of distance driven. Something is wrong.')
+    else:
+        print('   (skipped -- without a tape reading the number above grades your')
+        print('    parking, not the estimate)')
     if rclpy.ok():
         rclpy.shutdown()
 
