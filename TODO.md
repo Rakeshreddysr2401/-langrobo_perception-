@@ -238,52 +238,47 @@ this needs somewhere else to go.
 
 ---
 
-## 🔴 14. A pivot command drives instead of turning
+## 🟠 14. A pivot needed ~2× the duty the teleop was sending — RESOLVED, retest pending
 
-Measured 2026-08-21 with `logs/turn_diag.py`, rover on the floor:
+**On the floor**, a pivot command drove instead of turning: counter-rotating in
+**0%** of samples, the rover reversing along a slight curve. It cost a mapping
+session — 10.7 m of "room loop" driven inside a 1.8 m box, because every attempt
+to turn just drove the rover back and forth.
 
-| commanded | velL | velR | gyro | what happened |
-|---|---|---|---|---|
-| `wz +2.00` (left) | −0.36 | −0.30 | +7.8 °/s | both **backward** |
-| `wz −2.00` (right) | +0.35 | +0.30 | −6.6 °/s | both **forward** |
+**Lifted on blocks, the wheels counter-rotate perfectly and symmetrically:**
 
-**Counter-rotating in 0% of samples.** A pivot requires the two sides to turn
-opposite ways; they never do.
+| commanded | velL | velR | |
+|---|---|---|---|
+| `wz −2.00` | **+0.411** | **−0.407** | counter-rotating |
+| `wz +2.00` | **−0.398** | **+0.398** | counter-rotating |
 
-The left side tracks its target exactly: `wL = 0 − 2.0 × 0.34/2 = −0.34` against
-−0.36 measured. **The right side is commanded +0.34 and measures −0.30** — it is
-being dragged backward by the chassis rather than driving against it. The small
-residual differential (0.06 m/s) is why the gyro still reads ~7 °/s: the rover
-reverses along a slight curve, which is what the operator saw as "goes front/back
-even when I click right".
+So the wiring, `R_MOTOR_DIR` and the reverse PWM path are all **correct**. The
+electrical side does exactly what it is told. It is **traction**: four tyres
+scrubbing sideways need more torque than the rover was being given.
 
-### Not the torque theory
+### The cause: a units mismatch in the teleop
 
-The first theory was that the teleop under-commands: it was written for a
-different firmware (`rover_sim contract_bridge.py`) where `wz` is a **PWM
-fraction**, while `rover_firmware_v2.ino` reads it as **rad/s**. So `WZ = 2.0`
-asks for ±0.34 m/s = ~40% duty, not the ~100% its comment claims. **That
-mismatch is real and still worth fixing** — but it is not this fault, because
-40% duty would produce weak counter-rotation, not confident motion the wrong way.
+`rover_firmware_v2.ino` reads `wz` as **rad/s** and computes each wheel as
+`vx ± wz × 0.34/2`. The teleop was written for an earlier firmware
+(`rover_sim contract_bridge.py`) where `wz` was a **PWM fraction** — and its own
+comment still claims `WZ = 2.0` gives "~100% PWM per wheel".
 
-### Candidates, in order
+| WZ | wheel target | duty |
+|---|---|---|
+| **2.0** (was) | 0.34 m/s | **48%** |
+| 4.0 | 0.68 m/s | 87% |
+| **5.0** (now) | 0.85 m/s | **100%** |
 
-1. **The right side stalls under scrub load and is dragged.** A pivot scrubs all
-   four tyres; if the right motor cannot break loose it gets pushed backward by
-   the left. Fits the measured 1.29–1.60× front/rear scrub (§13).
-2. **Current sag.** Two motors share one BTS7960 per side, and a pivot is the
-   highest-current manoeuvre there is.
-3. **A direction constant that only shows in reverse.** Forward is verified
-   (balance 1.00), so `R_MOTOR_DIR` is right for forward — but `driveSide()`
-   selects a different PWM pin by sign, and the reverse pin has never been
-   exercised on the right side under load.
+Full authority is `2 × 0.86 / 0.34 = 5.06 rad/s`, where both wheels reach maximum
+speed in opposite directions. `WZ` is now 5.0 and `WZ_SLIGHT` 4.25, scaled by the
+same factor.
 
-**Next test:** lift the rover and repeat. Off the ground there is no scrub load
-and no traction, so if the sides counter-rotate when lifted it is (1) or (2); if
-they still both turn the same way it is (3), a wiring or constant fault.
-
-**Consequence:** the rover cannot currently turn in place. Phase 2 mapping works
-with wide arcs, but nav2 will want spot turns.
+**Retest on the floor before believing it.** Unloaded counter-rotation proves the
+duty is now available; it does not prove it is enough to break the scrub. If it
+still will not pivot, the remaining candidates are current sag (two motors share
+one BTS7960 per side, and a pivot is the highest-current manoeuvre) or simply
+too much grip for these motors — in which case the answer is a wider turning
+radius rather than more duty.
 
 ---
 
