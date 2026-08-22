@@ -143,7 +143,13 @@ global_costmap:
         plugin: nvblox::nav2::NvbloxCostmapLayer
         enabled: true
         nvblox_map_slice_topic: /nvblox_node/static_map_slice
-        max_obstacle_distance: 1.0
+        # 0.4, down from 1.0, and this is PROVISIONAL -- it is a measured
+        # improvement whose mechanism is not understood. See TODO 19.
+        # Free space in the global costmap went 5.8% -> 23.1% on the same map.
+        # 0.4 is still above the 0.35 m inflation radius, so the safety margin
+        # is unchanged: inflation owns that, this only sets how far the nvblox
+        # layer's cost gradient reaches. It did NOT make planning work.
+        max_obstacle_distance: 0.4
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         enabled: true
@@ -177,7 +183,13 @@ local_costmap:
         plugin: nvblox::nav2::NvbloxCostmapLayer
         enabled: true
         nvblox_map_slice_topic: /nvblox_node/static_map_slice
-        max_obstacle_distance: 1.0
+        # 0.4, down from 1.0, and this is PROVISIONAL -- it is a measured
+        # improvement whose mechanism is not understood. See TODO 19.
+        # Free space in the global costmap went 5.8% -> 23.1% on the same map.
+        # 0.4 is still above the 0.35 m inflation radius, so the safety margin
+        # is unchanged: inflation owns that, this only sets how far the nvblox
+        # layer's cost gradient reaches. It did NOT make planning work.
+        max_obstacle_distance: 0.4
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         enabled: true

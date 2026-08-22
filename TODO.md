@@ -419,6 +419,76 @@ inflation and concluded the route was clear; it was blocked.
 
 ---
 
+## 🔴 19. The costmap does not reflect the ESDF it is built from
+
+Step 1 of the autonomy road **passed**. Driving a lap with the 3 m integration
+limit improved the map on every gate:
+
+| | before the lap | after | wanted |
+|---|---|---|---|
+| median ESDF clearance | 0.21 m | **0.46 m** | above 0.35 |
+| cells further than 1 m | 3% | **21%** | above 15% |
+| wall as % of floor | 46% | **9%** | under 10% |
+
+It also beats the pre-§17 map (0.35 m median, 7.4 m² of wall). The map is not
+the problem any more.
+
+**nav2 still cannot plan anywhere.** Every goal from 0.5 m to 3.0 m fails with
+NO_VALID_PATH, in every direction — worse than before, when 0.3–0.9 m worked.
+
+### The costmap disagrees with the ESDF it is derived from
+
+Read at identical world points, 5 cm cells around the rover:
+
+```
+          costmap        ESDF clearance
+ y ≥ -0.05    all 99       0.45 – 0.53 m
+ y ≤ -0.10    all  0       0.45 – 0.61 m
+```
+
+ESDF 0.45 reads FREE, ESDF 0.47 reads INSCRIBED. The boundary is a sharp
+axis-aligned line, not a distance contour — so the cost is **not a function of
+the ESDF value at that cell**, which is the only thing that layer is supposed
+to compute.
+
+The layer is correctly wired: both costmaps subscribe to
+`/nvblox_node/static_map_slice`, and the log confirms
+`Name: nvblox_layer  Topic name: /nvblox_node/static_map_slice  Max obstacle
+distance: 1`. The costmap is live, not frozen — 146 cells changed over 171 s
+with the rover parked.
+
+### What was ruled out
+
+- **Not the start cell alone.** The rover does stand in an INSCRIBED cell, which
+  by itself fails every goal. But planning with `use_start: true` from a free
+  cell 20 cm away fails identically.
+- **Not unknown-space fragmentation.** `allow_unknown: true` changed nothing —
+  though see the caveat below.
+- **Not a stale costmap.** It updates.
+
+### The caveat that undermines two of those
+
+**Runtime `ros2 param set` on costmap layers appears not to take effect.**
+Disabling `inflation_layer.enabled` returned "Set parameter successful" and
+produced a **byte-identical** costmap — the same init-only trap already
+documented for nvblox's slice heights. So the inflation and allow_unknown tests
+are inconclusive, not negative. Re-run both by editing the YAML and restarting.
+
+### Open
+
+The cost function itself. Something maps ESDF distance to cost in a way that is
+spatially discontinuous, and until that is understood no amount of map quality
+will help. Worth reading the actual `NvbloxCostmapLayer::updateCosts` source
+rather than inferring the formula from outputs, which is what produced two
+wrong hypotheses today.
+
+`max_obstacle_distance` is now 0.4 (from 1.0) in both costmaps. It quadrupled
+free space, 5.8% → 23.1%, on the same map, and it is above the 0.35 m inflation
+radius so the safety margin is untouched. **It did not make planning work**, and
+its mechanism is not understood — provisional.
+
+---
+
 ## ✅ 14. A pivot needed ~2× the duty the teleop was sending — FIXED, verified on the floor
 
 **On the floor**, a pivot command drove instead of turning: counter-rotating in
