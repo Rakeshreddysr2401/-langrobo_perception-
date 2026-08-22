@@ -238,7 +238,7 @@ this needs somewhere else to go.
 
 ---
 
-## 🟠 14. A pivot needed ~2× the duty the teleop was sending — RESOLVED, retest pending
+## ✅ 14. A pivot needed ~2× the duty the teleop was sending — FIXED, verified on the floor
 
 **On the floor**, a pivot command drove instead of turning: counter-rotating in
 **0%** of samples, the rover reversing along a slight curve. It cost a mapping
@@ -273,7 +273,23 @@ Full authority is `2 × 0.86 / 0.34 = 5.06 rad/s`, where both wheels reach maxim
 speed in opposite directions. `WZ` is now 5.0 and `WZ_SLIGHT` 4.25, scaled by the
 same factor.
 
-**Retest on the floor before believing it.** Unloaded counter-rotation proves the
+### Verified on the floor, 2026-08-22
+
+| | counter-rotating | peak turn |
+|---|---|---|
+| LEFT | **93%** | 63.5 °/s |
+| RIGHT | **96%** | 65.9 °/s |
+
+Against **0%** before the change. The rover pivots.
+
+**It is working hard to do it.** The wheels reach ~0.28 m/s of the 0.85
+commanded and the body turns at ~65 °/s rather than the ~290 °/s full duty would
+give unloaded — so scrub is absorbing roughly two-thirds of the torque. Fine for
+driving; worth remembering when nav2 plans a tight turn, and it is why the
+`NO-PIVOT` settings in `phase3/config/nav2.yaml` should be relaxed carefully
+rather than all at once.
+
+### Superseded Unloaded counter-rotation proves the
 duty is now available; it does not prove it is enough to break the scrub. If it
 still will not pivot, the remaining candidates are current sag (two motors share
 one BTS7960 per side, and a pivot is the highest-current manoeuvre) or simply
