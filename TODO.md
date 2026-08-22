@@ -419,7 +419,7 @@ inflation and concluded the route was clear; it was blocked.
 
 ---
 
-## 🔴 19. The costmap does not reflect the ESDF it is built from
+## ✅ 19. The costmap did not reflect its ESDF — FIXED, it was a double gradient
 
 Step 1 of the autonomy road **passed**. Driving a lap with the 3 m integration
 limit improved the map on every gate:
@@ -474,18 +474,57 @@ produced a **byte-identical** costmap — the same init-only trap already
 documented for nvblox's slice heights. So the inflation and allow_unknown tests
 are inconclusive, not negative. Re-run both by editing the YAML and restarting.
 
-### Open
+### The cause: two layers both computing a distance falloff
 
-The cost function itself. Something maps ESDF distance to cost in a way that is
-spatially discontinuous, and until that is understood no amount of map quality
-will help. Worth reading the actual `NvbloxCostmapLayer::updateCosts` source
-rather than inferring the formula from outputs, which is what produced two
-wrong hypotheses today.
+`libnvblox_nav2.so` exports `nav2_costmap_2d::CostmapLayer::updateWithMax`. That
+merge takes the per-cell **maximum** of the layer and the master grid, so it can
+raise a cost but never lower one.
 
-`max_obstacle_distance` is now 0.4 (from 1.0) in both costmaps. It quadrupled
-free space, 5.8% → 23.1%, on the same map, and it is above the 0.35 m inflation
-radius so the safety margin is untouched. **It did not make planning work**, and
-its mechanism is not understood — provisional.
+In gradient mode the nvblox layer writes a graduated cost to every cell within
+`max_obstacle_distance` of an obstacle. Merged by max, those costs accumulated
+and never released — which is exactly a sharp stale boundary rather than a
+distance contour, and exactly why a better map did not produce a better costmap.
+
+**`convert_to_binary_costmap: true` fixes it.** The layer then marks LETHAL only
+where the ESDF distance is ≤ 0 — actually inside an obstacle — and FREE
+everywhere else. Nothing accumulates because there is no gradient.
+
+Immediately after the change, every goal planned:
+
+| goal | before | after |
+|---|---|---|
+| 0.5 m | NO_VALID_PATH | OK, 25 poses |
+| 1.0 m | NO_VALID_PATH | OK, 47 poses |
+| 2.0 m | NO_VALID_PATH | OK, 91 poses |
+| 3.0 m | NO_VALID_PATH | OK, 203 poses |
+| 1.5 m in all four directions | NO_VALID_PATH | OK |
+
+Path length now grows with distance instead of saturating at 18 poses, which
+was the §18 gate.
+
+And it is correct, not merely permissive. ESDF and costmap now agree:
+
+```
+clearance 0.47, 0.45, 0.46, 0.54 m  ->  0   FREE
+clearance 0.15, 0.10 m              ->  99  INSCRIBED
+clearance −0.10 m (inside)          ->  99  INSCRIBED
+```
+
+**The safety margin was never this layer's job.** `inflation_layer` owns it with
+`inflation_radius: 0.35`. Having both layers compute a falloff was
+double-counting, and the one that merges by max is the one that could not clear
+itself.
+
+`max_obstacle_distance` was restored to 1.0: it is the ramp length in gradient
+mode and inert in binary mode, verified by identical planning results at 0.4 and
+1.0. Left at stock so that turning binary mode off returns to stock behaviour.
+
+### The lesson worth keeping
+
+Two wrong hypotheses came from inferring the cost formula from its outputs.
+The answer came from `strings` on the plugin `.so` and reading which nav2 merge
+function it links against. When a layer misbehaves, look at how it MERGES before
+theorising about what it computes.
 
 ---
 

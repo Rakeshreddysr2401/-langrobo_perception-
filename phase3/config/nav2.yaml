@@ -143,13 +143,33 @@ global_costmap:
         plugin: nvblox::nav2::NvbloxCostmapLayer
         enabled: true
         nvblox_map_slice_topic: /nvblox_node/static_map_slice
-        # 0.4, down from 1.0, and this is PROVISIONAL -- it is a measured
-        # improvement whose mechanism is not understood. See TODO 19.
-        # Free space in the global costmap went 5.8% -> 23.1% on the same map.
-        # 0.4 is still above the 0.35 m inflation radius, so the safety margin
-        # is unchanged: inflation owns that, this only sets how far the nvblox
-        # layer's cost gradient reaches. It did NOT make planning work.
-        max_obstacle_distance: 0.4
+        # BINARY, and this is the setting that made nav2 able to plan at all.
+        #
+        # In gradient mode this layer writes a graduated cost to every cell
+        # within max_obstacle_distance of an obstacle. nav2 then merges layers
+        # with CostmapLayer::updateWithMax, which takes the per-cell MAXIMUM and
+        # therefore can raise a cost but never lower one. Costs accumulated and
+        # never released: measured 2026-08-22, cells with 0.47 m of clearance
+        # read INSCRIBED while cells with 0.45 m read FREE, separated by a sharp
+        # axis-aligned line rather than a distance contour. Every goal from
+        # 0.5 to 3.0 m failed with NO_VALID_PATH, in every direction.
+        #
+        # In binary mode the layer marks LETHAL only where the ESDF distance is
+        # <= 0 -- actually inside an obstacle -- and FREE everywhere else, so
+        # there is no gradient to accumulate. Immediately after the change every
+        # one of those goals planned, with path length growing with distance
+        # rather than saturating.
+        #
+        # The safety margin is NOT lost, because it was never this layer's job:
+        # inflation_layer owns it, with inflation_radius 0.35 m. Having both
+        # layers compute a distance falloff was double-counting, and the one
+        # that merges by max is the one that could not clear itself.
+        convert_to_binary_costmap: true
+        # INERT while convert_to_binary_costmap is true -- it is the length of
+        # the cost ramp in gradient mode, and binary mode has no ramp. Left at
+        # the default so that turning binary mode off returns to stock
+        # behaviour rather than to a half-tuned value.
+        max_obstacle_distance: 1.0
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         enabled: true
@@ -183,13 +203,33 @@ local_costmap:
         plugin: nvblox::nav2::NvbloxCostmapLayer
         enabled: true
         nvblox_map_slice_topic: /nvblox_node/static_map_slice
-        # 0.4, down from 1.0, and this is PROVISIONAL -- it is a measured
-        # improvement whose mechanism is not understood. See TODO 19.
-        # Free space in the global costmap went 5.8% -> 23.1% on the same map.
-        # 0.4 is still above the 0.35 m inflation radius, so the safety margin
-        # is unchanged: inflation owns that, this only sets how far the nvblox
-        # layer's cost gradient reaches. It did NOT make planning work.
-        max_obstacle_distance: 0.4
+        # BINARY, and this is the setting that made nav2 able to plan at all.
+        #
+        # In gradient mode this layer writes a graduated cost to every cell
+        # within max_obstacle_distance of an obstacle. nav2 then merges layers
+        # with CostmapLayer::updateWithMax, which takes the per-cell MAXIMUM and
+        # therefore can raise a cost but never lower one. Costs accumulated and
+        # never released: measured 2026-08-22, cells with 0.47 m of clearance
+        # read INSCRIBED while cells with 0.45 m read FREE, separated by a sharp
+        # axis-aligned line rather than a distance contour. Every goal from
+        # 0.5 to 3.0 m failed with NO_VALID_PATH, in every direction.
+        #
+        # In binary mode the layer marks LETHAL only where the ESDF distance is
+        # <= 0 -- actually inside an obstacle -- and FREE everywhere else, so
+        # there is no gradient to accumulate. Immediately after the change every
+        # one of those goals planned, with path length growing with distance
+        # rather than saturating.
+        #
+        # The safety margin is NOT lost, because it was never this layer's job:
+        # inflation_layer owns it, with inflation_radius 0.35 m. Having both
+        # layers compute a distance falloff was double-counting, and the one
+        # that merges by max is the one that could not clear itself.
+        convert_to_binary_costmap: true
+        # INERT while convert_to_binary_costmap is true -- it is the length of
+        # the cost ramp in gradient mode, and binary mode has no ramp. Left at
+        # the default so that turning binary mode off returns to stock
+        # behaviour rather than to a half-tuned value.
+        max_obstacle_distance: 1.0
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         enabled: true
