@@ -94,10 +94,28 @@ def generate_launch_description():
                 #     2 m -> 1.9 cm    4 m -> 7.5 cm    6 m -> 16.9 cm
                 #     3 m -> 4.2 cm    5 m -> 11.8 cm
                 #
-                # 5 m costs ~12 cm of wall fuzz, under 2.5 voxels, and reaches
-                # the far wall of a normal room from a corner. 6 m is 3.4 voxels
-                # and the walls start to smear rather than sharpen.
-                'static_mapper.projective_integrator_max_integration_distance_m': 5.0,
+                # 3 m, and the reason is the SLICE, not the voxel size.
+                #
+                # The obstacle band is only 12 cm tall (0.10-0.22 m, the rover's
+                # height). Depth error at 5 m is ~11.8 cm -- the whole height of
+                # that band -- so a distant wall's points scatter vertically out
+                # of it. The wall is never marked solid, the ray passes THROUGH,
+                # and free space is written beyond it.
+                #
+                # Measured 2026-08-22 at 5 m: walls appeared only near the rover
+                # and never at the room's edges, and the map claimed 150 m2 of
+                # free floor for a room nothing like that size. Both symptoms are
+                # the same cause.
+                #
+                #   range   depth error   vs the 12 cm band
+                #     2 m       1.9 cm    well inside
+                #     3 m       4.2 cm    about a third -- usable
+                #     5 m      11.8 cm    the entire band
+                #
+                # An earlier version of this file raised the limit to 5 m to
+                # reach far walls. It reached them with data too noisy to use.
+                # Solid walls at 3 m beat scattered walls at 5 m: drive closer.
+                'static_mapper.projective_integrator_max_integration_distance_m': 3.0,
                 'static_mapper.projective_integrator_truncation_distance_vox': 4.0,
 
                 # DO NOT LET THE MAP FORGET.
