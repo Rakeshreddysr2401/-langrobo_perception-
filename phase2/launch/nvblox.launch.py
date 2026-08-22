@@ -100,6 +100,29 @@ def generate_launch_description():
                 'static_mapper.projective_integrator_max_integration_distance_m': 5.0,
                 'static_mapper.projective_integrator_truncation_distance_vox': 4.0,
 
+                # DO NOT LET THE MAP FORGET.
+                #
+                # nvblox decays the TSDF by default: every voxel's weight is
+                # multiplied by tsdf_decay_factor (0.95) at decay_tsdf_rate_hz
+                # (5 Hz), and once it falls low enough the block is DEALLOCATED.
+                # That is a 2.7 second half-life:
+                #
+                #     not seen for  3 s -> 50% weight
+                #                  10 s ->  7.7%
+                #                  30 s ->  0.05%, effectively erased
+                #
+                # It is the right behaviour for a scene full of moving things,
+                # where a stale observation is worse than none. It is exactly
+                # wrong for surveying a static room: measured 2026-08-22, a full
+                # room loop ended with LESS map than before it -- 8.74 m2 of
+                # floor down to 3.04 m2 -- because everything seen early in the
+                # loop had been deleted by the time the rover came back round.
+                #
+                # 0.0 disables it. The cost is that a moving object leaves a
+                # permanent ghost; the room does not move.
+                'decay_tsdf_rate_hz': 0.0,
+                'decay_dynamic_occupancy_rate_hz': 0.0,
+
                 'max_mapping_height_m': 2.0,
                 'map_clearing_radius_m': 0.0,      # 0 = never clear, we are mapping a room
                 'update_mesh_rate_hz': 5.0,

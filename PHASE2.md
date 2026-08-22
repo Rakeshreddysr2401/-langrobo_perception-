@@ -127,6 +127,7 @@ tables and built TSDF/Color/Feature/Freespace/Occupancy/ESDF layers at 5 cm.
 | `esdf_slice_min_height` | **0.10 m** | **the camera sits 16.3 cm up and pitches down 1.3°.** A slice at exactly 0 clips the floor itself and fills the map with phantom obstacles. That mount pitch came from Phase 1's gravity measurement and earns its keep here |
 | `esdf_slice_max_height` | **0.22 m** | **the rover's own height** — see below |
 | `max_integration_distance` | 4.0 m | beyond this the depth is too noisy on this camera to trust into a map |
+| `decay_tsdf_rate_hz` | **0.0** | **the map forgets otherwise** — see below |
 | `use_color` | false | colour is disabled on the camera: with `enable_sync:=false`, enabling it gates the IR pair behind colour alignment and starves the stereo cuVSLAM needs |
 
 ### The slice is the rover's height, not the camera's range
@@ -170,6 +171,30 @@ Standing still, then after one hand-driven loop:
 The grid itself expanded and its origin moved, so nvblox allocated new blocks to
 cover ground the rover drove into. `vo_dropped: 0` with 195 landmarks throughout —
 the map was built on an honest pose.
+
+### The map was forgetting
+
+nvblox decays the TSDF **by default**. Every voxel's weight is multiplied by
+`tsdf_decay_factor` (0.95) at `decay_tsdf_rate_hz` (5 Hz), and once it falls low
+enough the block is **deallocated — deleted**.
+
+That is a **2.7 second half-life**:
+
+| not looked at for | weight remaining |
+|---|---|
+| 3 s | 50% |
+| 10 s | 7.7% |
+| 30 s | 0.05% — effectively erased |
+
+Measured 2026-08-22: a **full room loop ended with less map than before it** —
+8.74 m² of floor down to **3.04 m²** — because everything seen early in the loop
+had been deleted by the time the rover came back round. The map looked good
+locally the whole time, which is what made it hard to notice.
+
+It is the right default for a scene full of moving things, where a stale
+observation is worse than none. It is exactly wrong for surveying a static room.
+Set to **0.0**. The cost is that a moving object leaves a permanent ghost; the
+room does not move.
 
 ### Two traps, both silent
 
