@@ -350,6 +350,75 @@ when it was applied and no loop has been run since.
 
 ---
 
+## 🔴 18. nav2's first goal: it will not plan past ~0.9 m, because the map noise seals it in
+
+First goal ever sent to nav2, 2026-08-22. All four servers active, `/cmd_vel`
+free, route clear. `compute_path_to_pose` returned **NO_VALID_PATH (208)**,
+"Failed to create plan with tolerance of: 0.250000".
+
+Bisecting the distance, straight ahead:
+
+| goal | result |
+|---|---|
+| 0.3 – 0.9 m | OK (path length saturates at 18 poses) |
+| **1.0 m** | **NO_VALID_PATH** |
+
+And it fails at 1.0 m in *every* direction — +x, −x, +y, −y. Not an obstacle,
+not a heading: a radius.
+
+**The rover is sealed in a 1.5 × 0.9 m pocket of traversable costmap.** Drawn
+with the correct thresholds, it is ringed by INSCRIBED/LETHAL cells on all
+sides. Global costmap census: 57.7% unknown, 5.8% free, 9.4% traversable,
+**21.8% INSCRIBED + 5.2% LETHAL**.
+
+### Why: the ESDF slice says nowhere is far from an obstacle
+
+The costmap layer consumes `/nvblox_node/static_map_slice` — distance to the
+nearest obstacle per cell — not the occupancy grid:
+
+```
+known cells            23050 (49% of the slice)
+median distance        0.35 m      <- in a room this should be ~1 m
+further than 1.0 m     15% of known   -> these become FREE
+closer  than 1.0 m     84% of known   -> these get cost
+```
+
+With `max_obstacle_distance: 1.0`, every obstacle cell projects a 1 m halo of
+cost, and the inflation layer then marks everything within the inscribed radius
+(~0.18 m) of a lethal cell as INSCRIBED, which NavFn treats as blocked. With
+spurious obstacles scattered through the map, those halos merge and seal it.
+
+**This is § 17 showing up downstream.** The same map reports 7.4 m² of wall for
+a room whose perimeter at 5 cm thickness should be well under 1 m² — roughly
+eight times too much obstacle. Every one of those false cells is a 1 m
+no-go halo. The map is not merely ugly, it is unplannable.
+
+### What has NOT been ruled out
+
+- The 3 m integration fix (§17) landed but **the map has never been rebuilt by
+  driving since**. The current map was accumulated largely from a stationary
+  rover, whose distant observations are exactly the noisy ones.
+- Whether `max_obstacle_distance: 1.0` is itself too generous for a 5 cm-voxel
+  map in a small room. It is nvblox's common default; it has never been tuned
+  here, and it multiplies the cost of every map error by a 1 m radius.
+- Whether NavFn's saturation at 18 poses for 0.7/0.8/0.9 m goals means those
+  "OK" paths were truncated at the tolerance rather than genuinely reaching the
+  goal. They were never driven.
+
+### Next
+
+Rebuild the map by driving a lap with the 3 m limit in force, then re-run the
+distance bisection. If the median ESDF distance does not rise well above 0.35 m,
+the map is still too noisy and `max_obstacle_distance` needs revisiting before
+autonomy is possible at all.
+
+**Read the costmap topic correctly when checking this.** nav2 publishes through
+a translation table: raw 253 (INSCRIBED) → **99**, raw 254 (LETHAL) → **100**,
+raw 1–252 → 1–98, unknown → −1. A first pass at this read 99 as ordinary
+inflation and concluded the route was clear; it was blocked.
+
+---
+
 ## ✅ 14. A pivot needed ~2× the duty the teleop was sending — FIXED, verified on the floor
 
 **On the floor**, a pivot command drove instead of turning: counter-rotating in
