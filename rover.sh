@@ -32,7 +32,14 @@ SRC=/opt/rover                   # where this repo is mounted inside the contain
 HOSTSRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/src"
 CAM_NS=/camera/camera0
 LAPTOP_USER=${LAPTOP_USER:-rakhi24}
-LAPTOP_IP=${LAPTOP_IP:-192.168.1.10}
+# The laptop is on DHCP and HAS MOVED: it was .10 on 2026-08-21 and .17 on
+# 2026-08-22. The symptom is a clean ping with "ssh: connect ... Connection
+# refused" -- something else has taken the old address. Find it again with:
+#   for i in $(seq 2 30); do (timeout 1 bash -c "echo >/dev/tcp/192.168.1.$i/22" \
+#     2>/dev/null && echo "192.168.1.$i") & done; wait
+# then `ssh rakhi24@<ip> hostname` -- the laptop answers `rakhi24`, the Jetson
+# is .15, and .12 is the ESP32.
+LAPTOP_IP=${LAPTOP_IP:-192.168.1.17}
 
 # cuVSLAM's own libcuvslam.so must beat Isaac ROS's Thor build in /opt/ros/jazzy,
 # so its wheel directory goes FIRST, then the CUDA-12 user-space libs.
