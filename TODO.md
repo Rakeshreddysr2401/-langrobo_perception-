@@ -4,7 +4,24 @@ Status: 🔴 blocks a gate · 🟠 real, worked around · 🟡 unverified · ⚪
 
 ---
 
-## 🔴 1. `/wheel_state` publishes at 1.000 Hz, not 20 Hz
+## ✅ 1. `/wheel_state` at 1.000 Hz — FIXED by the firmware flash, verified 2026-08-23
+
+**Confirmed fixed after a power cycle on 2026-08-23:** `/wheel_state` sustained
+**20.004 Hz** over a 369-sample window, `/wheel_ticks` 20.5 Hz, `/cmd_vel`
+subscription count 1. Sustained, not a burst — max inter-arrival 0.107 s, so
+nothing like the old 1000.1 ms ± 2.9 ms metronome.
+
+The fix was the firmware change that stops `rclc_executor_spin_some` blocking
+(timeout 0), described below. This entry stayed red long after the flash landed
+because nothing re-checked it; the diagnosis underneath is preserved because the
+reasoning is the useful part.
+
+**This unblocks §2** — the drift gate could not pass without wheel data at rate.
+That gate has still never been run.
+
+### Original diagnosis (kept — the method is the point)
+
+
 
 **The cause is the best-effort output stream on the ESP32, not the firmware
 logic and not the network.** Diagnosed 2026-08-15 afternoon. Several earlier
