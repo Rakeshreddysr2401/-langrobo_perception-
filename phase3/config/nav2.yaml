@@ -59,9 +59,13 @@ controller_server:
     general_goal_checker:
       plugin: nav2_controller::SimpleGoalChecker
       stateful: true
-      xy_goal_tolerance: 0.15          # 15 cm: the pose is good to ~7 cm, and
-                                       # demanding better than the estimate is
-                                       # asking the rover to chase its own noise.
+      # 5 cm. Was 15, which is a sensible NAVIGATION tolerance -- but the
+      # checker fires the moment it is satisfied, so a 15 cm tolerance makes
+      # every goal land systematically short: the 1 m goal on 2026-08-22 stopped
+      # at 85.7 cm and was declared reached. 5 cm is above the ~2 cm the pose
+      # was tape-confirmed to, so it is asking for precision the estimate can
+      # actually supply rather than making the rover chase its own noise.
+      xy_goal_tolerance: 0.05
       # 0.25 rad = 14 deg, tightened from 0.5 now that the rover can rotate in
       # place to fix its final heading. At 0.5 the first autonomous goal was
       # declared reached while 23 deg off and still commanding 0.9 rad/s.

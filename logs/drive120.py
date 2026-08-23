@@ -47,9 +47,9 @@ o = g["o"].pose.pose
 sx, sy = o.position.x, o.position.y
 q = o.orientation
 th = math.atan2(2*(q.w*q.z + q.x*q.y), 1 - 2*(q.y*q.y + q.z*q.z))
-gx, gy = sx + 1.0*math.cos(th), sy + 1.0*math.sin(th)
+gx, gy = sx + 1.20*math.cos(th), sy + 1.20*math.sin(th)
 print("  start (%+.3f, %+.3f)  heading %+.1f deg" % (sx, sy, math.degrees(th)))
-print("  goal  (%+.3f, %+.3f)  1.00 m straight ahead" % (gx, gy))
+print("  goal  (%+.3f, %+.3f)  1.20 m straight ahead" % (gx, gy))
 print()
 
 # ---- plan first, and refuse to drive a path that touches blocked cells ----
@@ -119,8 +119,8 @@ q2 = o.orientation
 th2 = math.atan2(2*(q2.w*q2.z + q2.x*q2.y), 1 - 2*(q2.y*q2.y + q2.z*q2.z))
 print()
 print("  ── result " + "-"*46)
-print("   travelled       %.1f cm   (asked for 100)" % (math.hypot(px-sx, py-sy)*100))
-print("   stopped         %.1f cm from the goal   (tolerance 15)" % (math.hypot(gx-px, gy-py)*100))
+print("   travelled       %.1f cm   (asked for 120)" % (math.hypot(px-sx, py-sy)*100))
+print("   stopped         %.1f cm from the goal   (tolerance 5)" % (math.hypot(gx-px, gy-py)*100))
 print("   heading change  %+.1f deg" % (math.degrees((th2-th+math.pi) % (2*math.pi) - math.pi)))
 print("   cmd_vel msgs    %d" % len(cmds))
 if cmds:
