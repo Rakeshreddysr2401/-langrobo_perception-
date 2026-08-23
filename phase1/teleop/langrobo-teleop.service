@@ -1,0 +1,14 @@
+[Unit]
+Description=LangRobo mobile teleop web (hold-to-move -> /cmd_vel)
+After=network-online.target langrobo-microros.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rakhi24
+ExecStart=/home/rakhi24/langrobo_teleop/run_teleop.sh
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
