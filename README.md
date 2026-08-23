@@ -12,14 +12,40 @@ Four phases, each standing on the one before it:
 | **2b — build it** | map the room as it drives | ✅ **complete** — nvblox |
 | 2c — keep it | a map that survives a power cycle | deferred by choice |
 | 2d — localize | recognise a room mapped before | deferred by choice |
-| **3/4 — navigate** | click a goal, it plans and drives there | 🟡 **running, no goal driven yet** |
-
-**Open blocker:** the rover could not turn in place — every turn command drove it
-backward instead, which is why early mapping produced a blob rather than a room.
-Diagnosed to a units mismatch in the teleop (48% duty, not the 100% its comment
-claimed) and fixed; **retest pending**. See [TODO](TODO.md) §14.
+| **3/4 — navigate** | give it a goal, it plans and drives there | ✅ **driving goals** — see below |
 
 Phases 2–4 must also work in unfamiliar places; that is the point of the goal.
+
+## Where it actually stands (2026-08-23)
+
+**It navigates.** Autonomous goals of 1.00 m and 1.20 m were planned and driven,
+finishing 4.9 cm and 3.6 cm from the target against a 5 cm tolerance, in 6 s and
+17 s. A 1 m run was tape-checked: odometry read 95.8 cm, the floor said 93–95.
+
+```bash
+./rover camera && ./rover pose && ./rover fused && ./rover map && ./rover nav
+./rover view                                   # RViz on the laptop
+
+docker exec -it rover bash -lc 'source /opt/ros/jazzy/setup.bash; \
+  export ROS_DOMAIN_ID=0; python3 -u /logs/goto.py 2.0 1.5 90'
+```
+
+`goto.py x y [theta] [--rel]`. It refuses to drive if the goal is unreachable, if
+the route crosses a blocked cell, or if anything else owns `/cmd_vel`.
+
+**What is NOT done, in the order it matters:**
+
+| | why it matters |
+|---|---|
+| 🔴 **cuVSLAM diverges, silently** (§21) | three times so far. The pose drops to dead reckoning and every gate stays green. Check `vo_z` after every bring-up |
+| 🔴 **obstacle avoidance untested** | no goal has yet been driven with something deliberately in the way. The costmap stops it *in theory* |
+| 🟠 **loop closure never fires** (§16) | drift is never corrected, so range is limited to what raw odometry carries — about a room |
+| 🟡 **the estimate has one measurement** (§15) | one tape reading. A −22° heading error from a loop test is still unexplained |
+| 🟡 **the drift gate has never been run** (§2) | it was blocked on wheel telemetry, which now works |
+
+**Blind spots that no amount of tuning fixes.** The rover sees nothing below
+10 cm, nothing above 24 cm, nothing outside 87°, and **nothing downward at all** —
+there is no drop-off detection. Autonomous runs need a human watching.
 
 ---
 

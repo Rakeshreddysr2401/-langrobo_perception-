@@ -392,13 +392,36 @@ values)
 
 status)
   need_container
-  echo "  layer          topic                            rate"
-  echo "  ---------------------------------------------------------------"
-  for pair in "camera:$CAM_NS/infra1/image_rect_raw" "camera:$CAM_NS/depth/image_rect_raw" \
-              "pose:/vo/odom" "pose:/gyro/base" "wheels:/wheel_state"; do
-    l=${pair%%:*}; t=${pair#*:}
-    printf '  %-14s %-32s %6.1f Hz\n' "$l" "$t" "$(rate_of "$t")"
+  echo "  layer     topic                                    rate      want"
+  echo "  ------------------------------------------------------------------"
+  # EVERY layer, not just the first three. A status command that stops at
+  # `wheels` cannot answer "what is alive", which is the only thing it is for.
+  for row in \
+      "camera:$CAM_NS/infra1/image_rect_raw:15" \
+      "camera:$CAM_NS/depth/image_rect_raw:10" \
+      "pose:/vo/odom:10" \
+      "pose:/gyro/base:50" \
+      "wheels:/wheel_state:15" \
+      "fused:/odom:15" \
+      "map:/nvblox_node/static_occupancy_grid:1" \
+      "nav:/global_costmap/costmap:0.5" \
+      "nav:/local_costmap/costmap:1" \
+      "view:/rover/model:0.5"; do
+    l=${row%%:*}; rest=${row#*:}; t=${rest%:*}; want=${rest##*:}
+    r=$(rate_of "$t")
+    if awk "BEGIN{exit !($r >= $want)}"; then v="OK"; else
+      if awk "BEGIN{exit !($r > 0)}"; then v="LOW"; else v="--"; fi
+    fi
+    printf '  %-9s %-40s %6.1f  %5s %s\n' "$l" "$t" "$r" "$want" "$v"
   done
+
+  # cuVSLAM can be publishing at 30 Hz and still be lying. It has diverged three
+  # times (TODO 21) and the fallback to dead reckoning is SILENT: every rate
+  # above stays green while the pose runs open-loop. So status has to look at the
+  # health payload, not just the rates -- and it cannot do that with `ros2 topic
+  # echo`, which TRUNCATES that JSON. health.py subscribes properly.
+  echo
+  rexec "python3 $SRC/nodes/health.py" || true
   ;;
 
 logs)

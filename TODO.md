@@ -216,6 +216,18 @@ whether `planar_constraints` is being applied at all — is unexamined.
 
 ## 🔴 21. cuVSLAM diverges repeatedly, and the fallback is SILENT
 
+> **Fourth occurrence, 2026-08-23**, found the instant `./rover status` learned
+> to check for it: `vo_z +7.232 m`, 117026 rejections, 17.84 m dead-reckoned —
+> while every rate in the table above it read OK. It was diverged during the
+> autonomous goal runs the same afternoon, which is a candidate explanation for
+> the heading errors seen there and was invisible at the time.
+>
+> Signs so far: −21.7 m, +87.7 m, −40.1 m, +7.2 m. Both directions, no pattern
+> in magnitude, `planar_constraints` set throughout.
+>
+> `./rover status` now reports it and says how to recover. That is detection,
+> not a fix.
+
 Third divergence, 2026-08-22 19:09, found only because a pose reading looked
 1.5 m off and I went looking:
 
