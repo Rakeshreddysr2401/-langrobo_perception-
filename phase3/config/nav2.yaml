@@ -98,9 +98,45 @@ controller_server:
 
       # Kept well under the 65 deg/s (1.13 rad/s) the rover actually achieved on
       # the floor, so a commanded in-place rotation is one it can execute.
-      rotate_to_heading_angular_vel: 0.8
+      # MEASURED 2026-08-23 by sweeping commanded wz and reading back /odom:
+      #
+      #   commanded   measured
+      #     0.15        0.00     <- RPP was stuck here, and it does nothing
+      #     0.30        0.01
+      #     0.50        0.03
+      #     0.80        0.11     <- breakaway: below this the rover does not turn
+      #     1.00        0.21
+      #     2.00        0.59
+      #     3.00        0.86
+      #
+      # Two separate faults. There is a DEADBAND below ~0.8 rad/s where skid
+      # scrub is never broken and the wheels simply sit, and above it commanded
+      # wz still runs about 3.4x optimistic because the firmware converts wz to
+      # wheel speeds using the physical 0.34 m track while the rover actually
+      # rotates about an effective 0.52 m (TODO 13) -- and saturates on top.
+      #
+      # 2.0 commanded gives ~0.59 rad/s (34 deg/s) actual, which is a usable
+      # in-place turn and well inside the 65 deg/s the chassis has done.
+      # 1.0 commanded is ~0.21 rad/s (12 deg/s) actual. Deliberately modest:
+      # 2.0 was tried and overshot badly -- 23.6 cm off, 59 deg of heading
+      # change, and nav2 fell back on its backup recovery. RPP predicts the arc
+      # it will sweep from the twist it COMMANDS, and while commanded and actual
+      # differ by 3.4x every one of those predictions is wrong, so a faster
+      # commanded turn just overshoots faster. Until the mapping is corrected
+      # (TODO 22) the controller has to be kept slow enough that its own error
+      # stays small.
+      rotate_to_heading_angular_vel: 1.0
       rotate_to_heading_min_angle: 0.6
-      max_angular_accel: 1.5
+
+      # 10.0, because RPP clamps its rotate-to-heading output to
+      # curr_speed +/- max_angular_accel * dt, and curr_speed comes from
+      # ODOMETRY. From a standstill the first step is max_angular_accel * 0.1 s.
+      # At 1.5 that was 0.15 rad/s, which is inside the deadband -- so the rover
+      # never moved, curr_speed stayed 0, and the clamp never rose. A deadlock,
+      # and it cost 35 seconds of a 53-second 1.2 m run spent commanding 0.15
+      # and going nowhere. 10.0 makes the first step 1.0 rad/s, clear of the
+      # 0.8 breakaway on the very first tick.
+      max_angular_accel: 10.0
       allow_reversing: false           # cuVSLAM under-reads reverse by ~6%
 
       # Slow down near obstacles and on tight curves rather than cornering hard.
@@ -127,7 +163,27 @@ planner_server:
       plugin: nav2_navfn_planner::NavfnPlanner
       tolerance: 0.25
       use_astar: true
-      allow_unknown: false             # do not plan through unmapped space:
+      # TRUE since 2026-08-23, and this is a real trade rather than a tidy-up.
+      #
+      # A forward-facing camera can never see the floor the rover is standing on,
+      # so the rover's OWN cell is unknown until something observes it from
+      # elsewhere. NavFn cannot start a wavefront from an unknown cell, so with
+      # allow_unknown false every goal fails immediately after a fresh start --
+      # measured today: rover cell UNKNOWN, free space plainly visible 20 cm
+      # ahead, NO_VALID_PATH in every direction. It cannot plan until it moves
+      # and cannot move until it plans.
+      #
+      # What this costs: the planner will route through unmapped floor. Unknown
+      # is not the same as empty, and this rover's blind spots are real -- it
+      # sees nothing below 10 cm, nothing overhanging above 22 cm, nothing
+      # outside 87 deg, and nothing downward at all.
+      #
+      # What still protects it: the local costmap and the controller's own
+      # collision check (use_collision_detection, 1.5 s to collision) run during
+      # execution, and nav2 replans as new ground is observed. Those guard the
+      # DRIVING; nothing guards the blind spots, which is why autonomous runs
+      # still need a human watching.
+      allow_unknown: true              # was false:
                                        # 79% of this map is still unknown, and
                                        # planning into it would drive blind.
 
@@ -158,6 +214,18 @@ global_costmap:
       # => 35 cm long x 38 cm wide. The tyre half-width is the one assumption;
       # verify with a tape before trusting it through a tight gap.
       footprint: "[[0.180, 0.190], [0.180, -0.190], [-0.170, -0.190], [-0.170, 0.190]]"
+      # 7 cm of padding, added 2026-08-23 after the rover was seen grazing
+      # obstacles by about 1 cm. That is geometry, not a planner bug: NavFn
+      # blocks cells at INSCRIBED, and the inscribed radius of this footprint is
+      # 0.17 m -- the distance to the NEAREST edge -- while the rover reaches
+      # 0.19 m at its widest. The centre can legally sit 0.17 m from an obstacle
+      # with a corner 2 cm inside it.
+      #
+      # Padding inflates the footprint used for that calculation, so the
+      # inscribed radius becomes 0.24 m and the body keeps ~5 cm of real
+      # clearance. Cost: the rover now believes it is 52 cm wide and will refuse
+      # gaps narrower than that. If it starts refusing doorways, this is why.
+      footprint_padding: 0.07
 
       plugins: [nvblox_layer, inflation_layer]
       nvblox_layer:
@@ -182,7 +250,7 @@ global_costmap:
         # rather than saturating.
         #
         # The safety margin is NOT lost, because it was never this layer's job:
-        # inflation_layer owns it, with inflation_radius 0.35 m. Having both
+        # inflation_layer owns it, with inflation_radius 0.45 m. Having both
         # layers compute a distance falloff was double-counting, and the one
         # that merges by max is the one that could not clear itself.
         convert_to_binary_costmap: true
@@ -197,8 +265,14 @@ global_costmap:
         # Half the diagonal is ~0.13 m; inflating to 0.35 keeps a real margin
         # around a rover whose pose is good to ~7 cm and whose turning is
         # currently limited to arcs.
-        inflation_radius: 0.35
-        cost_scaling_factor: 3.0
+        # 0.45 and 2.0, from 0.35 and 3.0, on 2026-08-23.
+        # Cost falls off as exp(-scaling * distance), so a HIGHER scaling decays
+        # faster and lets the planner hug obstacles; lower spreads the penalty
+        # further and makes it prefer the middle of open floor. This is what
+        # actually buys distance from the pink -- footprint_padding only forbids
+        # contact, it does not make a route prefer the clear middle of a room.
+        inflation_radius: 0.45
+        cost_scaling_factor: 2.0
 
 local_costmap:
   local_costmap:
@@ -219,6 +293,18 @@ local_costmap:
       # a 12 m grid; worth it for something you have to be able to look at.
       always_send_full_costmap: true
       footprint: "[[0.180, 0.190], [0.180, -0.190], [-0.170, -0.190], [-0.170, 0.190]]"
+      # 7 cm of padding, added 2026-08-23 after the rover was seen grazing
+      # obstacles by about 1 cm. That is geometry, not a planner bug: NavFn
+      # blocks cells at INSCRIBED, and the inscribed radius of this footprint is
+      # 0.17 m -- the distance to the NEAREST edge -- while the rover reaches
+      # 0.19 m at its widest. The centre can legally sit 0.17 m from an obstacle
+      # with a corner 2 cm inside it.
+      #
+      # Padding inflates the footprint used for that calculation, so the
+      # inscribed radius becomes 0.24 m and the body keeps ~5 cm of real
+      # clearance. Cost: the rover now believes it is 52 cm wide and will refuse
+      # gaps narrower than that. If it starts refusing doorways, this is why.
+      footprint_padding: 0.07
       plugins: [nvblox_layer, inflation_layer]
       nvblox_layer:
         plugin: nvblox::nav2::NvbloxCostmapLayer
@@ -242,7 +328,7 @@ local_costmap:
         # rather than saturating.
         #
         # The safety margin is NOT lost, because it was never this layer's job:
-        # inflation_layer owns it, with inflation_radius 0.35 m. Having both
+        # inflation_layer owns it, with inflation_radius 0.45 m. Having both
         # layers compute a distance falloff was double-counting, and the one
         # that merges by max is the one that could not clear itself.
         convert_to_binary_costmap: true
@@ -254,8 +340,14 @@ local_costmap:
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         enabled: true
-        inflation_radius: 0.35
-        cost_scaling_factor: 3.0
+        # 0.45 and 2.0, from 0.35 and 3.0, on 2026-08-23.
+        # Cost falls off as exp(-scaling * distance), so a HIGHER scaling decays
+        # faster and lets the planner hug obstacles; lower spreads the penalty
+        # further and makes it prefer the middle of open floor. This is what
+        # actually buys distance from the pink -- footprint_padding only forbids
+        # contact, it does not make a route prefer the clear middle of a room.
+        inflation_radius: 0.45
+        cost_scaling_factor: 2.0
 
 behavior_server:
   ros__parameters:
@@ -283,9 +375,14 @@ velocity_smoother:
     smoothing_frequency: 20.0
     scale_velocities: false
     feedback: OPEN_LOOP
-    max_velocity: [0.20, 0.0, 1.0]
-    min_velocity: [-0.10, 0.0, -1.0]
-    max_accel: [1.5, 0.0, 2.0]
-    max_decel: [-1.5, 0.0, -2.0]
+    # Angular limits raised from 1.0 / 2.0 on 2026-08-23. The old 1.0 rad/s cap
+    # allowed at most 0.21 rad/s of ACTUAL rotation (12 deg/s), and the 2.0
+    # rad/s^2 accel would have re-imposed the deadlock the controller's own
+    # max_angular_accel was raised to escape. 2.5 commanded is about 0.7 rad/s
+    # actual (40 deg/s); linear limits are unchanged.
+    max_velocity: [0.20, 0.0, 1.5]
+    min_velocity: [-0.10, 0.0, -1.5]
+    max_accel: [1.5, 0.0, 10.0]
+    max_decel: [-1.5, 0.0, -10.0]
     odom_topic: /odom
     odom_duration: 0.1

@@ -84,7 +84,7 @@ def generate_launch_description():
                 # started -- ground level. Raise this if the rover grows a mast;
                 # lower it and it will drive into things it cannot clear.
                 'static_mapper.esdf_slice_min_height': 0.10,
-                'static_mapper.esdf_slice_max_height': 0.22,
+                'static_mapper.esdf_slice_max_height': 0.24,
                 'static_mapper.esdf_slice_height': 0.16,
 
                 # How far out to trust depth into the map. Stereo error grows
