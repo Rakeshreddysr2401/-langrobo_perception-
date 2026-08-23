@@ -1,7 +1,12 @@
-"""Send the rover to an x,y in the odom frame, and watch it get there.
+"""Send the rover to an x,y[,theta] in the odom frame, and watch it get there.
 
-  goto.py 2.0 1.5          go to (2.0, 1.5)
-  goto.py 2.0 1.5 --rel    2.0 m ahead, 1.5 m to the left OF WHERE IT IS NOW
+  goto.py 2.0 1.5           go to (2.0, 1.5), keep the current heading
+  goto.py 2.0 1.5 90        go to (2.0, 1.5) and finish facing 90 deg
+  goto.py 2.0 1.5 --rel     2.0 m ahead, 1.5 m left OF WHERE IT IS NOW
+  goto.py 2.0 1.5 90 --rel  ... and turn 90 deg from its current heading
+
+theta is DEGREES. Absolute: 0 is +x, 90 is +y, measured like a compass drawn on
+the floor with the map. With --rel it is a turn relative to the current heading.
 
 Unmapped floor is allowed -- the planner routes through it and the map fills in
 as the rover drives. That is deliberate, and it is also the risk: unknown is not
@@ -23,6 +28,8 @@ if len(sys.argv) < 3:
     print(__doc__); sys.exit(1)
 GX_IN, GY_IN = float(sys.argv[1]), float(sys.argv[2])
 REL = "--rel" in sys.argv
+nums = [a for a in sys.argv[3:] if not a.startswith("--")]
+TH_IN = float(nums[0]) if nums else None
 TIMEOUT = 180.0
 
 QT = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
@@ -64,10 +71,20 @@ if REL:
     gy = sy + GX_IN*math.sin(th) + GY_IN*math.cos(th)
 else:
     gx, gy = GX_IN, GY_IN
+# Final heading. Given none, hold the current one -- that is what "go there and
+# stay pointed the way I am" means, and it is the least surprising default.
+if TH_IN is None:
+    gth = th
+elif REL:
+    gth = th + math.radians(TH_IN)
+else:
+    gth = math.radians(TH_IN)
+gth = (gth + math.pi) % (2*math.pi) - math.pi
 dist0 = math.hypot(gx-sx, gy-sy)
 print()
-print("  from (%+.2f, %+.2f) heading %+.0f deg" % (sx, sy, math.degrees(th)))
-print("  to   (%+.2f, %+.2f)   %.2f m away" % (gx, gy, dist0))
+print("  from (%+.2f, %+.2f) facing %+.0f deg" % (sx, sy, math.degrees(th)))
+print("  to   (%+.2f, %+.2f) facing %+.0f deg   %.2f m away"
+      % (gx, gy, math.degrees(gth), dist0))
 print()
 
 # IS THE GOAL ITSELF REACHABLE?
@@ -116,7 +133,7 @@ if gv >= 99:
 
 gp = PoseStamped(); gp.header.frame_id = "odom"
 gp.pose.position.x = gx; gp.pose.position.y = gy
-gp.pose.orientation.z = q.z; gp.pose.orientation.w = q.w
+gp.pose.orientation.z = math.sin(gth/2.0); gp.pose.orientation.w = math.cos(gth/2.0)
 
 pc = ActionClient(n, ComputePathToPose, "compute_path_to_pose")
 if not pc.wait_for_server(timeout_sec=15):
@@ -184,10 +201,21 @@ while rclpy.ok() and not resf.done() and time.time()-t0 < TIMEOUT:
 rclpy.spin_until_future_complete(n, resf, timeout_sec=10)
 o = g["o"].pose.pose
 px, py = o.position.x, o.position.y
+q2 = o.orientation
+th2 = math.atan2(2*(q2.w*q2.z+q2.x*q2.y), 1-2*(q2.y*q2.y+q2.z*q2.z))
+dth = math.degrees((th2-gth+math.pi) % (2*math.pi) - math.pi)
 print()
 print("  -- result " + "-"*44)
-print("   ended at (%+.3f, %+.3f)" % (px, py))
-print("   %.1f cm from the goal   (tolerance 5 cm)" % (math.hypot(gx-px, gy-py)*100))
+print("   ended at (%+.3f, %+.3f) facing %+.0f deg" % (px, py, math.degrees(th2)))
+print("   %.1f cm from the goal        (tolerance 5 cm)" % (math.hypot(gx-px, gy-py)*100))
+print("   %+.0f deg off the asked heading  (tolerance 14 deg)" % dth)
 print("   straight-line distance covered: %.1f cm of %.1f cm"
       % (math.hypot(px-sx, py-sy)*100, dist0*100))
+# How far the route bulged off the straight line -- the honest answer to "why
+# did it curve", separate from how much the rover's NOSE swung on the way.
+if dist0 > 0.05:
+    ux, uy = (gx-sx)/dist0, (gy-sy)/dist0
+    off = max(abs(-(p.pose.position.x-sx)*uy + (p.pose.position.y-sy)*ux)
+              for p in res.path.poses)
+    print("   route bulged %.1f cm off the straight line" % (off*100))
 rclpy.shutdown()
