@@ -53,19 +53,45 @@ controller_server:
 
     progress_checker:
       plugin: nav2_controller::SimpleProgressChecker
-      required_movement_radius: 0.5
-      movement_time_allowance: 15.0
+      # 0.25 m in 40 s, from 0.5 m in 15 s, and the reason is that TURNING IS
+      # NOT MOVEMENT as far as this checker is concerned.
+      #
+      # allow_reversing is false, so a goal behind the rover has to be faced
+      # before it can be approached. This chassis rotates at about 0.21 rad/s
+      # for the 1.0 rad/s it is commanded (see rotate_to_heading_angular_vel),
+      # which is 15 s for a half turn -- the entire old allowance spent standing
+      # still, legitimately, before a wheel has carried it anywhere.
+      #
+      # Measured 2026-08-23: a goal 1.12 m behind-left turned 146 deg, ran out of
+      # allowance mid-turn, was aborted, took a backup recovery, exhausted the
+      # behaviour tree and froze for 18 s having travelled 2.2 cm. Nothing was
+      # wrong with the goal; the checker simply called a legal manoeuvre a stall.
+      required_movement_radius: 0.25
+      movement_time_allowance: 40.0
 
     general_goal_checker:
       plugin: nav2_controller::SimpleGoalChecker
       stateful: true
-      # 5 cm. Was 15, which is a sensible NAVIGATION tolerance -- but the
-      # checker fires the moment it is satisfied, so a 15 cm tolerance makes
-      # every goal land systematically short: the 1 m goal on 2026-08-22 stopped
-      # at 85.7 cm and was declared reached. 5 cm is above the ~2 cm the pose
-      # was tape-confirmed to, so it is asking for precision the estimate can
-      # actually supply rather than making the rover chase its own noise.
-      xy_goal_tolerance: 0.05
+      # 10 cm, and the number is set by the CHASSIS, not by the estimate.
+      #
+      # This is a skid-steer rover: an in-place rotation scrubs all four tyres
+      # sideways and drags the body with it. Measured 2026-08-23 during the final
+      # rotate-to-heading of a 1 m goal, with vx commanded at zero throughout,
+      # the position wandered over a 14 x 20 cm patch.
+      #
+      # At 5 cm the two goal conditions could never be satisfied together: every
+      # rotation that fixed the heading pushed the position back outside
+      # tolerance, and every correction that fixed the position swung the
+      # heading. The rover reached the goal in 7 s and then circled it for 80
+      # more, oscillating between 3 and 10 cm out.
+      #
+      # 10 cm is larger than that disturbance, so `stateful: true` latches the
+      # position check once and the controller is then free to settle the heading
+      # without re-opening it. The cost is honest and worth stating: on this
+      # chassis you can have position precision OR heading precision, and asking
+      # for both to a few centimetres asks the rover to do something its wheels
+      # cannot.
+      xy_goal_tolerance: 0.10
       # 0.25 rad = 14 deg, tightened from 0.5 now that the rover can rotate in
       # place to fix its final heading. At 0.5 the first autonomous goal was
       # declared reached while 23 deg off and still commanding 0.9 rad/s.
@@ -117,7 +143,17 @@ controller_server:
       #
       # 2.0 commanded gives ~0.59 rad/s (34 deg/s) actual, which is a usable
       # in-place turn and well inside the 65 deg/s the chassis has done.
-      # 1.0 commanded is ~0.21 rad/s (12 deg/s) actual. Deliberately modest:
+      # 1.5 commanded is ~0.42 rad/s (24 deg/s) actual, which halves every turn:
+      # a half turn goes from 15 s to 7.5 s. It also matches the velocity
+      # smoother's angular cap, so nothing downstream clips it.
+      #
+      # Kept below the 2.0 that was tried and overshot -- at 2.0 a 1 m goal
+      # finished 23.6 cm off with 59 deg of heading error and fell back on the
+      # backup recovery. RPP predicts its arc from the twist it COMMANDS, and
+      # while commanded and actual differ by 3.4x every prediction is wrong, so
+      # a faster commanded turn overshoots faster.
+      #
+      # Previous note, kept because the reasoning still applies:
       # 2.0 was tried and overshot badly -- 23.6 cm off, 59 deg of heading
       # change, and nav2 fell back on its backup recovery. RPP predicts the arc
       # it will sweep from the twist it COMMANDS, and while commanded and actual
@@ -125,7 +161,7 @@ controller_server:
       # commanded turn just overshoots faster. Until the mapping is corrected
       # (TODO 22) the controller has to be kept slow enough that its own error
       # stays small.
-      rotate_to_heading_angular_vel: 1.0
+      rotate_to_heading_angular_vel: 1.5
       rotate_to_heading_min_angle: 0.6
 
       # 10.0, because RPP clamps its rotate-to-heading output to
