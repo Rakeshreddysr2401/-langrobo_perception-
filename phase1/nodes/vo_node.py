@@ -84,6 +84,12 @@ CAM_Z_DEFAULT = 0.163  # metres above the ground              -- confirmed
 # over a room that is centimetres to a metre or two -- never tens of metres, and
 # never vertical. Beyond these the SLAM optimiser has diverged and the correction
 # is discarded; odom -> base_link is unaffected either way.
+# A ground rover cannot leave the floor. Anything past this in the ODOMETRY
+# pose means the tracker's state is wrong, not that the rover climbed.
+VO_MAX_Z_ODOM = 0.50
+# Do not reset on a single bad frame -- z has been seen recovering on its own.
+Z_BAD_GRACE_S = 3.0
+
 MAX_CORRECTION_Z = 0.30
 MAX_CORRECTION_M = 5.0
 
@@ -229,6 +235,24 @@ def main():
             self.frozen = 0          # consecutive frames with a bit-identical pose
             self.last_pose = None
 
+            # DIVERGENCE WATCH. cuVSLAM's odometry pose has walked off in z four
+            # times: -21.7, +87.7, -40.1, +7.2 m. Measured 2026-08-23, it is not
+            # accumulation -- stationary for 90 s the pose held 0.000 exactly,
+            # and over 4.16 m driven and 5.41 rad turned z stayed inside 4 cm.
+            # So something DISCRETE does it, and the log that would have shown
+            # what was rotated away by the restart that fixed it.
+            #
+            # planar_constraints does NOT guard this. It is a SlamConfig field
+            # and this is the ODOMETRY pose; OdometryConfig has no planar option
+            # at all. Three of those four divergences were wrongly attributed to
+            # that setting being ineffective, when it was never in the path.
+            self.prev_ts = None
+            self.max_gap_s = 0.0
+            self.gaps_over_limit = 0     # frame gaps past max_frame_delta_s
+            self.z_bad_since = None
+            self.resets = 0
+            self.last_reset_log = 0.0
+
             self.pub_odom = self.create_publisher(Odometry, '/vo/odom', 10)
             self.pub_status = self.create_publisher(String, '/vo/status', 1)
             self.tf = TransformBroadcaster(self) if self.publish_tf else None
@@ -338,6 +362,21 @@ def main():
             rimg = self.bridge.imgmsg_to_cv2(rmsg, 'mono8')
             ts = lmsg.header.stamp.sec * 10**9 + lmsg.header.stamp.nanosec
 
+            # cuVSLAM's OdometryConfig.max_frame_delta_s is 1.0 s. A gap past it
+            # is exactly the kind of discrete event that could explain a pose
+            # walking off, and TODO 7 records that this camera drops out. Nothing
+            # measured it before, so it stayed a theory.
+            if self.prev_ts is not None:
+                gap = (ts - self.prev_ts) / 1e9
+                if gap > self.max_gap_s:
+                    self.max_gap_s = gap
+                if gap > 1.0:
+                    self.gaps_over_limit += 1
+                    self.get_logger().warn(
+                        f'frame gap {gap:.2f} s — past cuVSLAM max_frame_delta_s '
+                        f'(1.0 s). Tracking may reset.')
+            self.prev_ts = ts
+
             try:
                 est, slam_pose = self.tracker.track(ts, [limg, rimg])
             except ValueError as e:
@@ -346,7 +385,10 @@ def main():
 
             self.frames += 1
             if est is None or est.world_from_rig is None:
-                return   # tracking lost this frame; report() will show the gap
+                # Tracking lost. Worth naming, because a run of these either side
+                # of a divergence would be the smoking gun.
+                self.get_logger().warn('tracking lost this frame', throttle_duration_sec=2.0)
+                return
             self.tracked += 1
 
             # world_from_rig is a PoseWithCovariance, NOT a Pose — the pose is one
@@ -355,6 +397,50 @@ def main():
             # so we leave Odometry.pose.covariance zeroed rather than publish a
             # number in the wrong frame.
             wfr = est.world_from_rig.pose
+
+            # AUTO-RECOVERY FROM DIVERGENCE.
+            #
+            # A ground rover cannot leave the floor, so a metre of z is proof the
+            # tracker's state is wrong, whatever the landmark count says (95, 73
+            # and 111 healthy landmarks were reported during three of the four
+            # divergences).
+            #
+            # Without this the divergence persists until a human notices and runs
+            # ./rover pose. It does not announce itself: /vo/odom keeps its rate,
+            # every gate stays green, and the fusion node quietly falls back to
+            # dead reckoning. One session ran 21.4 m that way, another 17.8 m
+            # through two autonomous goals.
+            #
+            # Re-creating the tracker resets the odometry ORIGIN, so the pose
+            # jumps. That is a real cost -- it breaks odom continuity and
+            # invalidates a map built in the old frame -- and it is still better
+            # than navigating on dead reckoning nobody knows about. The fusion
+            # node's teleport guard sees the jump for what it is.
+            if abs(wfr.translation[2]) > VO_MAX_Z_ODOM:
+                now = time.time()
+                if self.z_bad_since is None:
+                    self.z_bad_since = now
+                    self.get_logger().error(
+                        f'cuvslam z = {wfr.translation[2]:+.2f} m — a ground rover '
+                        f'cannot be there. landmarks={self.landmarks} '
+                        f'worst_frame_gap={self.max_gap_s * 1000:.0f} ms '
+                        f'gaps_over_1s={self.gaps_over_limit}')
+                elif now - self.z_bad_since > Z_BAD_GRACE_S:
+                    self.get_logger().error(
+                        f'DIVERGED for {Z_BAD_GRACE_S:.0f}s — re-creating the tracker. '
+                        f'The odom origin resets and any map built in it is invalid.')
+                    # Only the tracker. left_info/right_info are static
+                    # calibration; clearing them would make the rebuild depend on
+                    # camera_info arriving again, which is a dependency this does
+                    # not need and cannot verify.
+                    self.tracker = None
+                    self.prev_ts = None
+                    self.z_bad_since = None
+                    self.resets += 1
+                    return
+            elif self.z_bad_since is not None:
+                self.get_logger().warn('cuvslam z recovered on its own')
+                self.z_bad_since = None
 
             # How many landmarks the tracker is holding is the real health signal.
             # A pose being returned is not: a dead tracker returns identity forever
@@ -507,6 +593,9 @@ def main():
                 # accumulated drift, measured rather than estimated.
                 'correction_m': round(self.correction_m, 3),
                 'loop_closures': self.loop_closures,
+                'tracker_resets': self.resets,
+                'worst_frame_gap_ms': round(self.max_gap_s * 1000, 1),
+                'gaps_over_1s': self.gaps_over_limit,
                 'correction_rejected': self.correction_rejected,
                 'frozen_frames': self.frozen,
                 # Rate alone is NOT enough: a dead tracker returns identity at a
