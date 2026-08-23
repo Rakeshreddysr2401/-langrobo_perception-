@@ -62,7 +62,7 @@ there is no drop-off detection. Autonomous runs need a human watching.
 | **[phase2/LAPTOP.md](phase2/LAPTOP.md)** | watching it from a laptop in RViz |
 | **[phase1/teleop/README.md](phase1/teleop/README.md)** | the hold-to-move web control, and its units |
 | **[PLAN.md](PLAN.md)** | the plan of record, and what was settled in the design interview |
-| **[knowledge/](knowledge/)** | the concepts — frames, visual odometry, fusion, costmaps, planners |
+| **[knowledge/](knowledge/)** | the concepts — frames, visual odometry, fusion, costmaps, planners, **and §09: how these faults were actually found** |
 
 ---
 

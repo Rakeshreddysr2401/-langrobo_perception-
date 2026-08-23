@@ -18,6 +18,7 @@ wins and is noted here.
 | [06](06-costmaps-and-inflation.md) | costmaps | how a map becomes something to plan on — **Phase 3** | — |
 | [07](07-planners-and-controllers.md) | planners and controllers | the nav2 split — **Phases 3–4** | — |
 | [08](08-frontier-exploration.md) | frontier exploration | how a robot decides where to look next — **Phase 2+** | — |
+| [09](09-how-these-were-debugged.md) | **method** | how these faults were actually found, and the mistakes that cost sessions | [TODO](../TODO.md) |
 
 ---
 

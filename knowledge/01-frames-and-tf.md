@@ -92,7 +92,7 @@ Everything follows from that:
 
 - open floor must deproject to **z ≈ 0.000**
 - the camera TF is `z = 0.163` because the camera is 16.3 cm above the ground
-- `phase2/launch/nvblox.launch.py`'s obstacle band, `0.10 → 0.22`, is **height above the
+- `phase2/launch/nvblox.launch.py`'s obstacle band, `0.10 → 0.24`, is **height above the
   floor**
 
 ### The 3.7 cm that broke the robot

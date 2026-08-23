@@ -125,8 +125,8 @@ tables and built TSDF/Color/Feature/Freespace/Occupancy/ESDF layers at 5 cm.
 | `voxel_size` | 0.05 m | small enough for a chair leg, large enough that a room fits in GPU memory. Phase 1's 10 cm drift gate was set as two voxels for this reason |
 | `mapping_type` | `static_tsdf` | the dynamic modes track moving objects and cost more; the room is not moving |
 | `esdf_slice_min_height` | **0.10 m** | **the camera sits 16.3 cm up and pitches down 1.3°.** A slice at exactly 0 clips the floor itself and fills the map with phantom obstacles. That mount pitch came from Phase 1's gravity measurement and earns its keep here |
-| `esdf_slice_max_height` | **0.22 m** | **the rover's own height** — see below |
-| `max_integration_distance` | 4.0 m | beyond this the depth is too noisy on this camera to trust into a map |
+| `esdf_slice_max_height` | **0.24 m** | **the rover's own height, tape-measured** — see below |
+| `max_integration_distance` | **3.0 m** | set by the SLICE HEIGHT, not the camera's range — see below |
 | `decay_tsdf_rate_hz` | **0.0** | **the map forgets otherwise** — see below |
 | `use_color` | false | colour is disabled on the camera: with `enable_sync:=false`, enabling it gates the IR pair behind colour alignment and starves the stereo cuVSLAM needs |
 
@@ -138,15 +138,26 @@ collides with**:
 
 | height | |
 |---|---|
-| camera | 17 cm |
-| **rover** | **22 cm** — the number that matters |
-| table | 29 cm — 7 cm of clearance above the rover |
+| camera | 18 cm |
+| **rover** | **24 cm** — tape-measured 2026-08-23, the number that matters |
+| gate bar / table | 29 cm — 5 cm of clearance above the rover |
 
 | band | |
 |---|---|
-| 0 – 10 cm | **skipped.** The camera pitches down 1.3°, so at 3 m the floor itself reads up to 6.8 cm high and would fill the map with phantom obstacles |
-| **10 – 22 cm** | **the obstacle band.** Anything here, the rover hits |
-| above 22 cm | **ignored.** The rover drives under it |
+| 0 – 10 cm | **skipped.** The camera pitches down 1.3°, so at 3 m the floor itself reads up to 6.8 cm high and would fill the map with phantom obstacles. **This is a real blind spot** — a low rail or threshold is invisible and will still stop the wheels |
+| **10 – 24 cm** | **the obstacle band.** Anything here, the rover hits |
+| above 24 cm | **ignored.** The rover drives under it |
+
+**The band was 0.10–0.22 for weeks, set to "the rover's height" before anyone
+measured it.** The rover is 24 cm, so the top 2 cm of it was driving through
+space nothing checked: an obstacle between 22 and 24 cm was invisible to the map
+and could still hit the body. Set the top of the band from a tape measure, not
+from memory.
+
+The principle is exact and worth stating plainly: **the band should cover
+precisely what can strike the rover — no more, no less.** Nothing above 24 cm can
+hit a 24 cm rover, which is what lets it drive under both the table and the gate.
+Nothing below the band can be seen, which is the cost.
 
 With the original 0.60 m ceiling, a 29 cm table was inside the band — so driving
 under one painted obstacles in **every direction**, and the rover was surrounded
@@ -156,6 +167,31 @@ stay flagged, which is what actually needs avoiding.
 Heights are in the `odom` frame, whose z = 0 is where `base_link` started —
 ground level. **Raise this if the rover grows a mast; lower it and it will drive
 into things it cannot clear.**
+
+### The slice height also sets your useful depth range
+
+This is the non-obvious consequence, and it cost a day.
+
+The band is only **14 cm tall**. Stereo depth error grows with the square of
+range — at 5 m this camera's error is ~11.8 cm, most of the band. A distant wall
+has its points smeared vertically right out of the slice, so it is never marked
+solid, the ray passes **through** it, and free space is written beyond.
+
+| range | depth error | vs a 14 cm band |
+|---|---|---|
+| 2 m | 1.9 cm | well inside |
+| 3 m | 4.2 cm | usable |
+| 5 m | 11.8 cm | most of the band |
+
+Observed with the limit at 5 m: an 18 × 17 m blob, walls scattered through the
+middle and none at the edges, 150 m² of "free floor" for one room. Both symptoms,
+one cause. `max_integration_distance` is now **3.0 m**.
+
+**The rule: the useful depth range is set by the SLICE HEIGHT, not the voxel size
+and not the camera's spec range.** Want to see further? You need a taller band —
+and a taller band re-integrates the tabletop. That is a genuine trade, not a knob
+to turn freely. Change the band and recheck the integration distance in the same
+breath.
 
 ### Measured
 

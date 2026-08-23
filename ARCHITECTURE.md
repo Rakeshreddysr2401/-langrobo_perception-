@@ -6,6 +6,28 @@ see [OPERATIONS.md](OPERATIONS.md); for open faults see [TODO.md](TODO.md).
 
 ---
 
+## 0. The stack, and why each piece
+
+| layer | technology | why this one |
+|---|---|---|
+| OS / middleware | **ROS 2 Jazzy**, Fast-DDS | the version Isaac ROS ships against on Orin |
+| camera | **RealSense D555** — PoE **ethernet DDS**, not USB | it is what the rover has. The ethernet transport is the source of several traps: it pings while dead, and subscribing to raw camera topics can take it offline |
+| visual odometry | **cuVSLAM 16.0.0** via the standalone `pyCuVSLAM` wheel | the packaged `isaac_ros_visual_slam` is a **Thor** build and will not run on this Orin. The wheel is the only path |
+| heading | the D555's own **gyro**, complementary-filtered | measured −0.2% to −0.9% error over four 360° turns — better than the wheels can do through scrub |
+| distance | **wheel encoders**, calibrated against a tape | excellent in a straight line, useless mid-turn (§13) |
+| fusion | **hand-written complementary filter**, `phase1/nodes/fusion.py` | *not* an EKF — see §5 for why a 3-sensor planar problem did not need one |
+| mapping | **nvblox** — TSDF → ESDF → 2D slice, GPU | the Orin has the GPU for it, and the ESDF slice is what nav2's costmap layer consumes directly |
+| planning | **nav2** — NavFn planner, Regulated Pure Pursuit controller | RPP steers by *arcs*, which is what a skid-steer rover can execute. DWB samples rotations it cannot |
+| wheels | **ESP32 + micro-ROS** over WiFi UDP, BTS7960 drivers, PID per side | the board sits on the rover; the link to it must be the thing that fails visibly |
+| teleop | a **web page on the Pi 5**, hold-to-move | any phone on the WiFi is a controller and a stop button, with no app to install |
+| visualisation | **RViz2 on a laptop** | the Jetson needs its GPU for nvblox |
+
+**Everything runs in one container** (`rover`) on the Jetson, brought up in
+layers by `./rover`, because a failure in one layer must name itself rather than
+appear as a wall of log with no owner.
+
+---
+
 ## 1. Four machines
 
 ```

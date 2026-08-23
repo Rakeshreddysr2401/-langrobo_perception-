@@ -242,7 +242,7 @@ the access point.
 | costmap topic silent but the node is fine | `always_send_full_costmap: false` — it only sends deltas after the first full map |
 | `Invalid frame ID "odom"` at startup | a race; the costmaps come up before the TF is flowing and recover |
 | rover sits still after a goal | it was told to rotate in place, which it cannot do. See TODO §14 and the `NO-PIVOT` settings |
-| goal rejected as unreachable | `allow_unknown: false` — it will not plan through unmapped space. Drive there first |
+| goal rejected as unreachable | the GOAL cell is blocked, or the rover is standing in one. `logs/around.py` shows which; `logs/where.py` lists what IS reachable |
 
 ### RViz shows nothing
 

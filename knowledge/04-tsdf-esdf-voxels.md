@@ -13,7 +13,7 @@
 >
 > **The ESDF slice is the ROBOT's height, not the camera's range.** The 2D map is
 > a horizontal slice through the TSDF, and anything inside the band is an
-> obstacle. Ours runs 0.10–0.22 m: above the floor (which the camera's 1.3° down
+> obstacle. Ours runs 0.10–0.24 m: above the floor (which the camera's 1.3° down
 > pitch would otherwise read as an obstacle at range) and up to the rover's own
 > 22 cm height. A 29 cm table is then correctly ignored while its legs are not.
 >
