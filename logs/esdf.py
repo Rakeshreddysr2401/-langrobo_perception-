@@ -1,3 +1,18 @@
+"""Is the map good enough to plan on?
+
+nav2 does NOT plan on the occupancy grid you look at -- it plans on the ESDF
+slice, which stores distance-to-nearest-obstacle per cell. A map can look fine
+and still be unplannable if it is peppered with false obstacles, because each
+one projects a halo of cost.
+
+Three numbers, and what they should be after a lap of a room:
+
+    median clearance      above 0.35 m   (0.21 stationary, 0.46 after a lap)
+    cells beyond 1.0 m    above 15%      (3% stationary, 21% after a lap)
+    wall as % of floor    under 10%      (46% stationary, 9% after a lap)
+
+Run it before and after driving. See TODO 17 and 19.
+"""
 import rclpy, time, math, sys
 from rclpy.qos import qos_profile_sensor_data
 from nvblox_msgs.msg import DistanceMapSlice

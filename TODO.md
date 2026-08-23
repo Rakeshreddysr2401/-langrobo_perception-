@@ -4,134 +4,12 @@ Status: 🔴 blocks a gate · 🟠 real, worked around · 🟡 unverified · ⚪
 
 ---
 
-## ✅ 1. `/wheel_state` at 1.000 Hz — FIXED by the firmware flash, verified 2026-08-23
+## 🟡 2. The drift gate has never been run — and it is no longer blocked
 
-**Confirmed fixed after a power cycle on 2026-08-23:** `/wheel_state` sustained
-**20.004 Hz** over a 369-sample window, `/wheel_ticks` 20.5 Hz, `/cmd_vel`
-subscription count 1. Sustained, not a burst — max inter-arrival 0.107 s, so
-nothing like the old 1000.1 ms ± 2.9 ms metronome.
-
-The fix was the firmware change that stops `rclc_executor_spin_some` blocking
-(timeout 0), described below. This entry stayed red long after the flash landed
-because nothing re-checked it; the diagnosis underneath is preserved because the
-reasoning is the useful part.
-
-**This unblocks §2** — the drift gate could not pass without wheel data at rate.
-That gate has still never been run.
-
-### Original diagnosis (kept — the method is the point)
-
-
-
-**The cause is the best-effort output stream on the ESP32, not the firmware
-logic and not the network.** Diagnosed 2026-08-15 afternoon. Several earlier
-theories in this file were wrong and are recorded as dead at the bottom.
-
-### What is ruled out, and by what
-
-| ruled out | evidence |
-|---|---|
-| the flashed binary not matching source | the sweep below reproduces exactly what the source predicts once you account for the executor blocking |
-| a second ESP32 | agent log names its client: `session established … address: 192.168.1.3:47138` |
-| WiFi / power-save | ping to `.3` is 2.4–10 ms, −36 dBm, 866 Mbit/s |
-| the Pi 5 → Jetson DDS hop | same best-effort listener, same instant: Pi 5 **1.000 Hz ±2.9 ms**, Jetson **1.000 Hz ±38.7 ms** |
-| packet loss | ±2.9 ms on a 1000.1 ms gap is a timer; random loss cannot be that regular |
-| burst-then-idle buffering | zero inter-arrival gaps under 100 ms — it is genuinely one message per second |
-| dead encoders | see §10 — both sides verified by hand |
-
-### What it actually is
-
-**`loop()` runs once per inbound message, or once per second if none arrives.**
-`rclc_executor_spin_some(&executor, RCL_MS_TO_NS(5))` blocks until data is
-available rather than returning after its 5 ms timeout. The telemetry publish
-sits immediately after that call, so it can only fire as often as the call
-returns.
-
-Proven by sweeping the rate we publish TO the board, 12 s per step:
-
-| `/cmd_vel` out | `/wheel_state` in | ratio |
-|---|---|---|
-| silent | 1.00 Hz | — |
-| 2 Hz | 3.13 Hz | 1.56 |
-| 5 Hz | 5.08 Hz | 1.02 |
-| 10 Hz | 10.08 Hz | 1.01 |
-| 20 Hz | 11.76 Hz | 0.59 |
-| 40 Hz | 16.44 Hz | 0.41 |
-
-It tracks 1:1 up to 10 Hz then saturates. The 2 Hz row is the giveaway: 2 from
-arriving messages plus ~1 from the idle timeout is exactly the 3.13 observed.
-
-### Workaround, in place now, no flash
-
-Publish zero `/cmd_vel` at 40 Hz and the board keeps turning. `logs/keepalive.py`
-does this and `./rover compare` starts it automatically. Measured **17.1 Hz**,
-gaps 58 ms against the intended 50, no gap over 800 ms. `./rover wheels` passes
-at 17.0 Hz.
-
-All-zero commands cannot cause motion — `pidStep()` returns 0 for both sides —
-they only keep `lastCmdMs` fresh.
-
-**Never run the keepalive while teleoperating.** It publishes to `/cmd_vel`, so
-it would interleave with real commands and make the rover stutter. Hand-pushed
-measurement runs only.
-
-### Proper fix, still to do
-
-Stop `loop()` blocking on the executor. Options, cheapest first:
-
-1. `rclc_executor_spin_some(&executor, 0)` — non-blocking poll, so `loop()` free-runs
-   at its `delay(1)` rate and the 50 ms timer fires properly. One line, but
-   untested: if the timeout is being ignored entirely, zero may block too.
-2. Set a spin period on the executor (`rclc_executor_set_timeout`) explicitly.
-3. Move telemetry into `controlTask`, which provably runs at 50 Hz on its own
-   core. **Risky** — micro-ROS sessions are not thread-safe, so this needs the
-   publish handed to `loop()` rather than called from the task.
-
-Do this next time the board is being flashed anyway; the workaround holds until
-autonomous driving, where nav2's own `/cmd_vel` stream keeps `loop()` fed.
-
-### Confirmed not the cause
-
-Reliable QoS was flashed on 2026-08-15 (`e580d5e`) on the theory that
-best-effort messages sat unflushed in an output stream. `ros2 topic info -v`
-confirms the publisher is now `RELIABLE` and the rate was **still exactly
-1.000 Hz**. The theory was wrong. The change is harmless and has been kept, but
-it is not the fix.
-
-That flash also invalidated the round-trip probe that appeared to show `loop()`
-consuming 19.71 cmd/s with zero lag: micro-ROS keeps a shallow input queue that
-retains the newest message, so "lag 0" appears no matter how slowly `loop()`
-runs. **The sweep above is the measurement to trust**, because it varies the
-input rate instead of assuming queue semantics.
-
-### Dead theories, kept so they are not re-litigated
-
-- ~~"the flashed binary is not built from this source"~~ — the source predicts
-  the observed behaviour exactly once the executor block is accounted for. Cost
-  two pointless reflashes; the lesson is that "the binary must be wrong" is what
-  you reach for when the real mechanism is in a library you did not read.
-- ~~"`loop()` is blocked by `ArduinoOTA.handle()` or the WiFi stack"~~ — right
-  that `loop()` was blocked, wrong about where.
-- ~~"`controlTask` (prio 2, core 1) starves `loopTask` (prio 1, core 1)"~~ —
-  plausible on inspection, but it blocks on `vTaskDelayUntil(20 ms)`, and
-  starvation cannot explain the rate tracking inbound traffic 1:1.
-- ~~"best-effort messages sit unflushed in an output stream"~~ — flashed
-  reliable, publisher confirms `RELIABLE`, rate unchanged at 1.000 Hz.
-- ~~"rate at the Pi 5 is 1 Hz, measured with `ros2 topic hz`"~~ — that tool
-  defaulted to **reliable** QoS, incompatible with what was then a best-effort
-  publisher, and silently received nothing. The number happened to be right;
-  the method was not. Now moot (the publisher is reliable), but measure with
-  `qos_profile_sensor_data` regardless.
-
-**Consequence at 1 Hz, if the keepalive is ever not running:** the wheels are a
-coarse sanity check, not a reference. `compare.py` integrates them trapezoidally
-across gaps up to `WHEEL_MAX_DT`, but the firmware reports *instantaneous*
-velocity measured over one 20 ms control period, so at 1 Hz we point-sample a
-signal that updates 50× faster. At 17 Hz that objection largely goes away.
-
----
-
-## 🔴 2. The drift gate probably cannot pass without the wheels
+> **Unblocked 2026-08-23.** This said the gate could not pass without wheel
+> data, and `/wheel_state` was stuck at 1 Hz. It now runs at 20.004 Hz (§1),
+> so the stated blocker is gone. The gate itself has still never been run, which
+> is why this stays open rather than closing.
 
 2 m out-and-back, clean run (peak 16 cm/s, no teleports):
 
@@ -334,7 +212,71 @@ whether `planar_constraints` is being applied at all — is unexamined.
 
 ---
 
-## 🟠 17. The obstacle slice is 12 cm tall, which caps useful depth range at ~3 m
+
+
+## 🔴 21. cuVSLAM diverges repeatedly, and the fallback is SILENT
+
+Third divergence, 2026-08-22 19:09, found only because a pose reading looked
+1.5 m off and I went looking:
+
+```
+vo_z              -40.087 m     forty metres underground
+vo_implausible      99394       and climbing at ~30/s
+dead_reckoned        3341
+dr_metres           21.409 m    travelled on dead reckoning alone
+```
+
+At ~30 rejections/second, 99394 is about 55 minutes — and `fusion_node` had
+been up 57 minutes. **It had been diverged for essentially the entire session**,
+including both autonomous goal drives.
+
+### The gate works. That is not the problem.
+
+`VO_MAX_Z` caught it and the fused pose never followed cuVSLAM underground.
+Restarting `vo_node` recovered it completely: `vo_z` −40.087 → −0.005,
+`vo_implausible` steady at 0, 110 landmarks, 0 jumps.
+
+**The problem is that nothing said so.** The rover degraded to gyro-plus-wheels
+dead reckoning and carried on looking healthy: `/odom` at 20 Hz, `ready: true`,
+`vo_alive: true`, gates passing, nav2 planning and driving. Every check we run
+routinely was green while the pose quietly ran open-loop for 21 metres.
+
+Worth noting what dead reckoning actually managed: the 1 m autonomous goal read
+95.8 cm and the tape said 93–95. Over a metre it is fine. Over 21 it is not, and
+nothing distinguishes the two on screen.
+
+### What needs doing
+
+- **`./rover fused` does NOT reset cuVSLAM.** It restarts `fusion_node` only.
+  Recovering a diverged tracker needs `./rover pose` first. Easy to get wrong
+  while debugging, and it silently leaves the divergence in place.
+- **Surface it.** `vo_implausible` climbing should be loud — in the `fused` gate,
+  in `./rover status`, and ideally as a red line in `compare.py`. A counter you
+  have to go and ask for is not a warning.
+- **Find out why it diverges.** `planar_constraints = True` was set specifically
+  to make vertical drift impossible and has now failed three times (−21.7 m,
+  +87.7 m, −40.1 m). Either the flag does not do what its name says on this
+  build, or something upstream — extrinsics, the IR emitter, frame conjugation —
+  is feeding it a rotation it cannot reconcile. Nothing here has been examined.
+- **Consider whether the gate is too blunt.** It rejects on absolute z. At the
+  moment of divergence the x/y estimate may still be usable, and throwing the
+  whole pose away forces dead reckoning. Rejecting on z *rate* rather than z
+  *value* would keep more good data — but this is a design change, not a tweak.
+
+### Cost this session
+
+The map and the odom origin were both discarded to recover, because resetting
+the pose invalidates a map built in the old frame.
+
+---
+
+## ✅ 17. The slice height caps the useful depth range — FIXED, and re-measured since
+
+> **Closed 2026-08-23.** Integration distance is 3.0 m and the band is now
+> 0.10–0.24 m, set from a tape measure: the rover is 24 cm tall, so the old
+> 0.22 m top left 2 cm of it unprotected. The rule below still holds — the
+> useful depth range is set by the SLICE HEIGHT, so re-check the integration
+> distance whenever the band changes.
 
 A real room loop produced an 18 × 17 m blob with walls scattered through the
 **middle** and none at the edges, claiming 150 m² of free floor for a room
@@ -366,8 +308,14 @@ SLICE HEIGHT, not by the voxel size or the camera's spec range. Any change to
 when it was applied and no loop has been run since.
 
 ---
+## ✅ 18. nav2 would not plan past ~0.9 m — CAUSE FOUND IN §19, not the map
 
-## 🔴 18. nav2's first goal: it will not plan past ~0.9 m, because the map noise seals it in
+> **Resolved 2026-08-23, and the diagnosis below was WRONG.** This entry blamed
+> map noise. Rebuilding the map fixed every map metric (§17) and nav2 still could
+> not plan a metre. The real cause was the costmap layer double-counting a
+> distance gradient — see §19. Kept because the measurements are sound and only
+> the conclusion was not; it is a good example of a plausible cause that survived
+> two sessions because it fit the symptoms.
 
 First goal ever sent to nav2, 2026-08-22. All four servers active, `/cmd_vel`
 free, route clear. `compute_path_to_pose` returned **NO_VALID_PATH (208)**,
@@ -435,60 +383,130 @@ raw 1–252 → 1–98, unknown → −1. A first pass at this read 99 as ordina
 inflation and concluded the route was clear; it was blocked.
 
 ---
+## ✅ 1. `/wheel_state` at 1.000 Hz — FIXED by the firmware flash, verified 2026-08-23
 
-## 🔴 21. cuVSLAM diverges repeatedly, and the fallback is SILENT
+**Confirmed fixed after a power cycle on 2026-08-23:** `/wheel_state` sustained
+**20.004 Hz** over a 369-sample window, `/wheel_ticks` 20.5 Hz, `/cmd_vel`
+subscription count 1. Sustained, not a burst — max inter-arrival 0.107 s, so
+nothing like the old 1000.1 ms ± 2.9 ms metronome.
 
-Third divergence, 2026-08-22 19:09, found only because a pose reading looked
-1.5 m off and I went looking:
+The fix was the firmware change that stops `rclc_executor_spin_some` blocking
+(timeout 0), described below. This entry stayed red long after the flash landed
+because nothing re-checked it; the diagnosis underneath is preserved because the
+reasoning is the useful part.
 
-```
-vo_z              -40.087 m     forty metres underground
-vo_implausible      99394       and climbing at ~30/s
-dead_reckoned        3341
-dr_metres           21.409 m    travelled on dead reckoning alone
-```
+**This unblocks §2** — the drift gate could not pass without wheel data at rate.
+That gate has still never been run.
 
-At ~30 rejections/second, 99394 is about 55 minutes — and `fusion_node` had
-been up 57 minutes. **It had been diverged for essentially the entire session**,
-including both autonomous goal drives.
+### Original diagnosis (kept — the method is the point)
 
-### The gate works. That is not the problem.
 
-`VO_MAX_Z` caught it and the fused pose never followed cuVSLAM underground.
-Restarting `vo_node` recovered it completely: `vo_z` −40.087 → −0.005,
-`vo_implausible` steady at 0, 110 landmarks, 0 jumps.
 
-**The problem is that nothing said so.** The rover degraded to gyro-plus-wheels
-dead reckoning and carried on looking healthy: `/odom` at 20 Hz, `ready: true`,
-`vo_alive: true`, gates passing, nav2 planning and driving. Every check we run
-routinely was green while the pose quietly ran open-loop for 21 metres.
+**The cause is the best-effort output stream on the ESP32, not the firmware
+logic and not the network.** Diagnosed 2026-08-15 afternoon. Several earlier
+theories in this file were wrong and are recorded as dead at the bottom.
 
-Worth noting what dead reckoning actually managed: the 1 m autonomous goal read
-95.8 cm and the tape said 93–95. Over a metre it is fine. Over 21 it is not, and
-nothing distinguishes the two on screen.
+### What is ruled out, and by what
 
-### What needs doing
+| ruled out | evidence |
+|---|---|
+| the flashed binary not matching source | the sweep below reproduces exactly what the source predicts once you account for the executor blocking |
+| a second ESP32 | agent log names its client: `session established … address: 192.168.1.3:47138` |
+| WiFi / power-save | ping to `.3` is 2.4–10 ms, −36 dBm, 866 Mbit/s |
+| the Pi 5 → Jetson DDS hop | same best-effort listener, same instant: Pi 5 **1.000 Hz ±2.9 ms**, Jetson **1.000 Hz ±38.7 ms** |
+| packet loss | ±2.9 ms on a 1000.1 ms gap is a timer; random loss cannot be that regular |
+| burst-then-idle buffering | zero inter-arrival gaps under 100 ms — it is genuinely one message per second |
+| dead encoders | see §10 — both sides verified by hand |
 
-- **`./rover fused` does NOT reset cuVSLAM.** It restarts `fusion_node` only.
-  Recovering a diverged tracker needs `./rover pose` first. Easy to get wrong
-  while debugging, and it silently leaves the divergence in place.
-- **Surface it.** `vo_implausible` climbing should be loud — in the `fused` gate,
-  in `./rover status`, and ideally as a red line in `compare.py`. A counter you
-  have to go and ask for is not a warning.
-- **Find out why it diverges.** `planar_constraints = True` was set specifically
-  to make vertical drift impossible and has now failed three times (−21.7 m,
-  +87.7 m, −40.1 m). Either the flag does not do what its name says on this
-  build, or something upstream — extrinsics, the IR emitter, frame conjugation —
-  is feeding it a rotation it cannot reconcile. Nothing here has been examined.
-- **Consider whether the gate is too blunt.** It rejects on absolute z. At the
-  moment of divergence the x/y estimate may still be usable, and throwing the
-  whole pose away forces dead reckoning. Rejecting on z *rate* rather than z
-  *value* would keep more good data — but this is a design change, not a tweak.
+### What it actually is
 
-### Cost this session
+**`loop()` runs once per inbound message, or once per second if none arrives.**
+`rclc_executor_spin_some(&executor, RCL_MS_TO_NS(5))` blocks until data is
+available rather than returning after its 5 ms timeout. The telemetry publish
+sits immediately after that call, so it can only fire as often as the call
+returns.
 
-The map and the odom origin were both discarded to recover, because resetting
-the pose invalidates a map built in the old frame.
+Proven by sweeping the rate we publish TO the board, 12 s per step:
+
+| `/cmd_vel` out | `/wheel_state` in | ratio |
+|---|---|---|
+| silent | 1.00 Hz | — |
+| 2 Hz | 3.13 Hz | 1.56 |
+| 5 Hz | 5.08 Hz | 1.02 |
+| 10 Hz | 10.08 Hz | 1.01 |
+| 20 Hz | 11.76 Hz | 0.59 |
+| 40 Hz | 16.44 Hz | 0.41 |
+
+It tracks 1:1 up to 10 Hz then saturates. The 2 Hz row is the giveaway: 2 from
+arriving messages plus ~1 from the idle timeout is exactly the 3.13 observed.
+
+### Workaround, in place now, no flash
+
+Publish zero `/cmd_vel` at 40 Hz and the board keeps turning. `logs/keepalive.py`
+does this and `./rover compare` starts it automatically. Measured **17.1 Hz**,
+gaps 58 ms against the intended 50, no gap over 800 ms. `./rover wheels` passes
+at 17.0 Hz.
+
+All-zero commands cannot cause motion — `pidStep()` returns 0 for both sides —
+they only keep `lastCmdMs` fresh.
+
+**Never run the keepalive while teleoperating.** It publishes to `/cmd_vel`, so
+it would interleave with real commands and make the rover stutter. Hand-pushed
+measurement runs only.
+
+### Proper fix, still to do
+
+Stop `loop()` blocking on the executor. Options, cheapest first:
+
+1. `rclc_executor_spin_some(&executor, 0)` — non-blocking poll, so `loop()` free-runs
+   at its `delay(1)` rate and the 50 ms timer fires properly. One line, but
+   untested: if the timeout is being ignored entirely, zero may block too.
+2. Set a spin period on the executor (`rclc_executor_set_timeout`) explicitly.
+3. Move telemetry into `controlTask`, which provably runs at 50 Hz on its own
+   core. **Risky** — micro-ROS sessions are not thread-safe, so this needs the
+   publish handed to `loop()` rather than called from the task.
+
+Do this next time the board is being flashed anyway; the workaround holds until
+autonomous driving, where nav2's own `/cmd_vel` stream keeps `loop()` fed.
+
+### Confirmed not the cause
+
+Reliable QoS was flashed on 2026-08-15 (`e580d5e`) on the theory that
+best-effort messages sat unflushed in an output stream. `ros2 topic info -v`
+confirms the publisher is now `RELIABLE` and the rate was **still exactly
+1.000 Hz**. The theory was wrong. The change is harmless and has been kept, but
+it is not the fix.
+
+That flash also invalidated the round-trip probe that appeared to show `loop()`
+consuming 19.71 cmd/s with zero lag: micro-ROS keeps a shallow input queue that
+retains the newest message, so "lag 0" appears no matter how slowly `loop()`
+runs. **The sweep above is the measurement to trust**, because it varies the
+input rate instead of assuming queue semantics.
+
+### Dead theories, kept so they are not re-litigated
+
+- ~~"the flashed binary is not built from this source"~~ — the source predicts
+  the observed behaviour exactly once the executor block is accounted for. Cost
+  two pointless reflashes; the lesson is that "the binary must be wrong" is what
+  you reach for when the real mechanism is in a library you did not read.
+- ~~"`loop()` is blocked by `ArduinoOTA.handle()` or the WiFi stack"~~ — right
+  that `loop()` was blocked, wrong about where.
+- ~~"`controlTask` (prio 2, core 1) starves `loopTask` (prio 1, core 1)"~~ —
+  plausible on inspection, but it blocks on `vTaskDelayUntil(20 ms)`, and
+  starvation cannot explain the rate tracking inbound traffic 1:1.
+- ~~"best-effort messages sit unflushed in an output stream"~~ — flashed
+  reliable, publisher confirms `RELIABLE`, rate unchanged at 1.000 Hz.
+- ~~"rate at the Pi 5 is 1 Hz, measured with `ros2 topic hz`"~~ — that tool
+  defaulted to **reliable** QoS, incompatible with what was then a best-effort
+  publisher, and silently received nothing. The number happened to be right;
+  the method was not. Now moot (the publisher is reliable), but measure with
+  `qos_profile_sensor_data` regardless.
+
+**Consequence at 1 Hz, if the keepalive is ever not running:** the wheels are a
+coarse sanity check, not a reference. `compare.py` integrates them trapezoidally
+across gaps up to `WHEEL_MAX_DT`, but the firmware reports *instantaneous*
+velocity measured over one 20 ms control period, so at 1 Hz we point-sample a
+signal that updates 50× faster. At 17 Hz that objection largely goes away.
 
 ---
 
@@ -830,9 +848,11 @@ change needed. `logs/calibrate_encoders.py <cm>` repeats it.
    those are different quantities. Calibrate on a straight forward push against
    a tape, and against nothing else.
 
----
 
-## ✅ 12. Encoders — both sides verified good (2026-08-15)
+### The earlier, narrower check that led here
+
+Before the tape calibration above, each side was verified in isolation by
+hand. Kept because it rules out something the calibration does not: crosstalk.
 
 Rover lifted, each wheel spun by hand in isolation, watching `/wheel_state`
 (`x = velL`, `y = velR`, computed in the 50 Hz control task on its own core):
@@ -850,6 +870,8 @@ SIGNAL" simply because samples arrive once a second and the test's phase
 boundaries did not line up with which wheel was being spun. Any hand test on
 this rig must name one wheel and hold the others still —
 `logs/spin_one.py` does that.
+
+---
 
 ---
 

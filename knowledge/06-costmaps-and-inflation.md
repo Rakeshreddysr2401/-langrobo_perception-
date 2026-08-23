@@ -150,7 +150,7 @@ with 7.3 s gaps. `nodes/depth_to_cloud.py` was written to replace it with a real
 10 Hz source.
 
 ⚠️ **Unverified on this rig:** `depth_to_cloud.py`'s rate has never been measured
-here (nothing in this repo has run yet). `./rover.sh l4` now gates on it. See
+here (nothing in this repo has run yet). `./rover map` now gates on it. See
 `TODO.md §3`, and `TODO.md §14` for the separate problem that this node is a
 second subscriber on the camera's fragile depth stream.
 

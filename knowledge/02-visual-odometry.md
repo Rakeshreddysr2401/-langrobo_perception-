@@ -94,7 +94,7 @@ Measured 2026-08-09:
 | ON | 100 cm | **26 cm** | ~4× under |
 | OFF | 100 cm | **97 cm** | 3% |
 
-Hence `depth_module.emitter_enabled:=0` in `rover.sh`. Passive-stereo depth stays
+Hence `depth_module.emitter_enabled:=0` in `rover`. Passive-stereo depth stays
 metrically correct either way (140 cm wall reads 1.40 m), it is just noisier on
 textureless surfaces. **Localization beats pretty depth.**
 
@@ -113,7 +113,7 @@ a pose that stopped updating.
 
 This is why:
 
-- `./rover.sh status` measures **rates**, not whether a topic exists
+- `./rover status` measures **rates**, not whether a topic exists
 - `/vo/status` reports landmarks at all — it cross-checks cuVSLAM against
   `/cmd_vel` and `/wheel_odom` and publishes `/odom/health`
 - task 02's gate is a **tape measure**, not "is it publishing"

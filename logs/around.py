@@ -1,3 +1,14 @@
+"""What does nav2's costmap look like right where the rover is standing?
+
+The first question when a goal fails with NO_VALID_PATH. NavFn cannot expand a
+wavefront from a blocked or unknown cell, so if the rover's OWN cell is bad,
+every goal fails in every direction and the goal itself is innocent.
+
+Reads /global_costmap/costmap, which nav2 publishes through a translation table:
+raw 253 INSCRIBED arrives as 99 and raw 254 LETHAL as 100, with ordinary
+inflation compressed into 1-98 and unknown as -1. Reading 99 as "high inflation,
+traversable" says a walled-off route is clear -- see TODO 19.
+"""
 import rclpy, math, time
 from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy, HistoryPolicy, qos_profile_sensor_data
 from nav_msgs.msg import OccupancyGrid, Odometry

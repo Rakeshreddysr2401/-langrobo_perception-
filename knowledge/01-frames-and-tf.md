@@ -111,7 +111,7 @@ Consequences, in order:
 6. the rover covered **0.9 cm in 30 seconds** and nav2 aborted
 
 One wrong number in a static transform, six layers away from the symptom.
-**Re-run `./rover.sh floor` after any camera remount.**
+**Re-run `./rover compare` (floor height check — see TODO §6, never measured) after any camera remount.**
 
 ---
 
@@ -129,7 +129,7 @@ ros2 run tf2_ros tf2_echo map base_link
 | pose flickers between two answers | **two publishers on one edge** |
 | everything is offset by a constant | a static transform is wrong — measure it |
 
-`./rover.sh status` shows the age of `map → odom` and `odom → base_link` for
+`./rover status` shows the age of `map → odom` and `odom → base_link` for
 exactly this reason. A transform that exists but is 4 seconds old is worse than
 one that is missing, because consumers will happily use it.
 

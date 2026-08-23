@@ -1,4 +1,4 @@
-# Sensor fusion and the EKF
+# Sensor fusion, and why this rover has no EKF
 
 **Used by:** Phase 1 (pose).
 **Code:** `phase1/nodes/fusion.py`, `phase1/nodes/gyro_node.py`  ·  **What we built instead of an EKF:** [ARCHITECTURE.md](../ARCHITECTURE.md) §5
@@ -114,7 +114,7 @@ just wrong.
 
 | Symptom | Meaning |
 |---|---|
-| `/odometry/filtered` missing | EKF did not start — `./rover.sh logs ekf` |
+| `/odometry/filtered` missing | EKF did not start — `./rover logs fused` |
 | z drifts from 0.000 | you are on raw cuVSLAM, not the EKF |
 | yaw ignores a real pivot | the gyro is not arriving, or is in the wrong frame |
 | output jitters at rest | a sensor's covariance is over-confident |

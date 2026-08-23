@@ -2,9 +2,9 @@
 
 **Nothing here has been built or tested from this repo.** These files are a
 *record* of where `orin-nav:1.1` came from, copied in on 2026-08-11 as insurance
-against `../langrobo_perception/` disappearing. `rover.sh` does not read them.
+against `../langrobo_perception/` disappearing. `rover` does not read them.
 
-## The image `rover.sh` actually runs
+## The image `rover` actually runs
 
 | | |
 |---|---|

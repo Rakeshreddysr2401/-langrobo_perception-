@@ -10,7 +10,8 @@
 #   ./rover fused      the fused pose -> /odom + TF, what nav2 consumes
 #   ./rover map        nvblox — build the room as it drives (Phase 2)
 #   ./rover nav        nav2 — click a goal, it plans and drives there (Phase 3)
-#   ./rover rviz       view it (prefer a laptop — see phase2/LAPTOP.md)
+#   ./rover rviz       view it on the Jetson's own screen (costs GPU)
+#   ./rover view       RViz on the laptop — finds it on DHCP, checks it renders
 #   ./rover logs <n>   tail a layer's log (camera|vo|gyro|fused)
 #   ./rover stop       tear the container down
 #
@@ -22,6 +23,7 @@ set -eo pipefail
 
 IMAGE=${IMAGE:-orin-nav:1.1}
 NAME=${NAME:-rover}
+LAPTOP_USER=${LAPTOP_USER:-rakhi24}   # LAPTOP_IP is DISCOVERED, not fixed: DHCP moves it
 SRC=/opt/rover
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOSTSRC="$REPO/phase1"
@@ -281,11 +283,85 @@ nav)
 # ── rviz ────────────────────────────────────────────────────────────────────
 rviz)
   need_container
-  echo "[rviz] on the Jetson's own display. Prefer the laptop — see phase2/LAPTOP.md;"
+  echo "[rviz] on the Jetson's own display. Prefer ./rover view on the laptop —"
   echo "       rviz2 here competes with cuVSLAM for the GPU and the pose rate dips."
   xhost +local:docker >/dev/null 2>&1 || true
   docker exec -it -e DISPLAY=:0 "$NAME" bash -lc \
-    "$ENVSET rviz2 -d $SRC2/rviz/rover.rviz"
+    "$ENVSET rviz2 -d $SRC2/rviz/rover_live.rviz"
+  ;;
+
+# ── the laptop view ─────────────────────────────────────────────────────────
+view)
+  # The laptop is on DHCP and MOVES: .10 on 2026-08-21, .17 on 2026-08-22. So
+  # find it rather than hardcode it. It is the host that answers ssh AND has the
+  # view script — the Jetson and the Pi 5 both answer ssh too.
+  echo "[view] RViz on the laptop"
+  ip="${LAPTOP_IP:-}"
+  if [ -z "$ip" ]; then
+    printf "  looking for the laptop"
+    for i in $(seq 2 40); do
+      cand="192.168.1.$i"
+      [ "$cand" = "$(hostname -I | tr ' ' '\n' | grep '^192\.168\.1\.' | head -1)" ] && continue
+      if timeout 1 bash -c "echo > /dev/tcp/$cand/22" 2>/dev/null; then
+        if timeout 6 ssh -o BatchMode=yes -o ConnectTimeout=3 "$LAPTOP_USER@$cand" \
+             'test -f ~/rover_live.sh' 2>/dev/null; then
+          ip="$cand"; break
+        fi
+      fi
+      printf "."
+    done
+    echo
+  fi
+  [ -n "$ip" ] || die "no laptop found. Is it on, and awake? Set LAPTOP_IP=x.x.x.x to skip the search."
+  echo "  found at $ip"
+
+  # Push the config every time. The laptop used to hold its own copy, which
+  # drifted from the repo's and made "I fixed the RViz config" untrue on the
+  # only machine that renders it. The repo is the single source; the laptop is
+  # a display.
+  scp -q -o BatchMode=yes "$(dirname "$0")/phase2/rviz/rover_live.rviz" \
+      "$LAPTOP_USER@$ip:~/rover_live.rviz" 2>/dev/null \
+    && echo "  config synced from the repo" \
+    || echo "  ! could not sync the config — the laptop may be showing an old one"
+
+  # A desktop session must exist. RViz over ssh with nobody logged in renders
+  # into nothing and exits 0 — it looks exactly like a data fault, and it cost
+  # an evening once. Xwayland's cmdline is the authoritative source for both the
+  # display number and the auth cookie; on Wayland `loginctl -p Display` is EMPTY.
+  xw=$(timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$ip" 'pgrep -a Xwayland 2>/dev/null | head -1' 2>/dev/null)
+  if [ -z "$xw" ]; then
+    echo "  ✗ nobody is logged in at the laptop desktop."
+    echo "    RViz cannot render into a login screen. Log in there, then re-run."
+    exit 1
+  fi
+  disp=$(echo "$xw" | grep -oE ' :[0-9]+' | head -1 | tr -d ' ')
+  auth=$(echo "$xw" | sed -nE 's/.* -auth ([^ ]+).*/\1/p')
+  echo "  display ${disp:-:0}"
+
+  # pgrep -x, never -f: -f matches our own ssh command line and always "succeeds".
+  if timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$ip" 'pgrep -x rviz2 >/dev/null' 2>/dev/null; then
+    echo "  already running — look at the laptop screen"
+  else
+    timeout 25 ssh -o BatchMode=yes "$LAPTOP_USER@$ip" \
+      "DISPLAY=${disp:-:0} XAUTHORITY=$auth XDG_RUNTIME_DIR=/run/user/\$(id -u) \
+       setsid nohup bash ~/rover_live.sh >/tmp/rviz.log 2>&1 </dev/null & sleep 12" >/dev/null 2>&1
+    if timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$ip" 'pgrep -x rviz2 >/dev/null' 2>/dev/null; then
+      echo "  started"
+    else
+      echo "  ✗ rviz2 did not stay up. Its error is ON THE LAPTOP:"
+      timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$ip" 'tail -8 /tmp/rviz.log' 2>/dev/null | sed 's/^/      /'
+      exit 1
+    fi
+  fi
+
+  # Running is not the same as receiving. A blank RViz still shows as running.
+  echo "  subscriptions (0 means it is connected to nothing):"
+  for t in /rover/model /fusion/path /nvblox_node/static_occupancy_grid; do
+    c=$(timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$ip" \
+        "source /opt/ros/jazzy/setup.bash; export ROS_DOMAIN_ID=0; unset ROS_DISCOVERY_SERVER; \
+         timeout 6 ros2 topic info $t 2>/dev/null | grep -oP 'Subscription count: \K[0-9]+'" 2>/dev/null)
+    printf "      %-42s %s\n" "$t" "${c:-0}"
+  done
   ;;
 
 # ── compare ─────────────────────────────────────────────────────────────────

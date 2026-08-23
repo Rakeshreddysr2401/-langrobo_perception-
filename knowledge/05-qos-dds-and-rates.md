@@ -97,7 +97,7 @@ ROS 2 has no master. Nodes find each other by **multicast**, and only talk if
 they share a `ROS_DOMAIN_ID` (ours is `0`, set everywhere).
 
 Two variables can silently break this, and both are cleared before every command
-in `rover.sh`:
+in `rover`:
 
 ```bash
 unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE
@@ -145,7 +145,7 @@ So `./rover status` measures **rates** against thresholds. Its own
 header says the old version printed publisher counts and never once caught a real
 failure.
 
-`rover.sh` uses the same idea for `assert_rate`, which is how each layer refuses
+`rover` uses the same idea for `assert_rate`, which is how each layer refuses
 to start on a broken one.
 
 | Signal | What it proves |
@@ -164,11 +164,11 @@ to start on a broken one.
 |---|---|
 | subscriber gets nothing, topic exists | **QoS mismatch** — `ros2 topic info -v` |
 | node invisible to others | `ROS_DOMAIN_ID`, stale `ROS_DISCOVERY_SERVER` |
-| `ros2 topic hz` empty on an image topic | NITROS — trust `./rover.sh status` |
+| `ros2 topic hz` empty on an image topic | NITROS — trust `./rover status` |
 | rate sags with low CPU load | the **camera** is dying, not the Orin |
 | everything fine then all dead at once | camera went offline — power-cycle |
 
 ---
 
 **See also:** [`02-visual-odometry.md`](02-visual-odometry.md) (silent freezing),
-`FACTS.md §1`.
+`TODO.md §1`, which has the full diagnosis.

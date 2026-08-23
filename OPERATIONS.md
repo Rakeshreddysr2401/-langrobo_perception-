@@ -256,7 +256,7 @@ rviz2 ~/rover.rviz           # WRONG -- silently ignored
 `rviz2` ignores a bare config path. Without `-d` it starts with its **defaults**:
 Fixed Frame `map`, which does not exist on this rover, and **zero displays**. A
 blank window, no error, and the ROS graph shows `/rviz` connected while
-subscribing to nothing. Use `~/rviz_rover.sh` on the laptop, which cannot get
+subscribing to nothing. Use `./rover view` on the laptop, which cannot get
 this wrong.
 
 | symptom | cause |
