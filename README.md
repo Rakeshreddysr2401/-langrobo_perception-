@@ -59,6 +59,7 @@ there is no drop-off detection. Autonomous runs need a human watching.
 | **[PHASE2.md](PHASE2.md)** | mapping — nvblox, the map, and seeing it |
 | **[PHASE3.md](PHASE3.md)** | navigation — nav2, and everything shaped by the pivot fault |
 | **[TODO.md](TODO.md)** | open faults, and the dead theories kept so they are not re-litigated |
+| **[READINESS.md](READINESS.md)** | the cross-cutting view — every subsystem's measured values against what is missing, and **what actually blocks unattended operation** |
 | **[phase2/LAPTOP.md](phase2/LAPTOP.md)** | watching it from a laptop in RViz |
 | **[phase1/teleop/README.md](phase1/teleop/README.md)** | the hold-to-move web control, and its units |
 | **[PLAN.md](PLAN.md)** | the plan of record, and what was settled in the design interview |

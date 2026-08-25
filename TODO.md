@@ -2,6 +2,10 @@
 
 Status: 🔴 blocks a gate · 🟠 real, worked around · 🟡 unverified · ⚪ accepted
 
+One problem per entry, in the order they were found. For the **cross-cutting**
+view — each subsystem's measured values against what is missing, and which of
+these actually block unattended operation — see **[READINESS.md](READINESS.md)**.
+
 ---
 
 ## 🟡 2. The drift gate has never been run — and it is no longer blocked
