@@ -282,6 +282,102 @@ the pose invalidates a map built in the old frame.
 
 ---
 
+## ✅ 22. The divergence guard measured FORWARD TRAVEL and called it height — FIXED 2026-08-26
+
+> **This is not §21.** §21 is a real cuVSLAM divergence and is still open. This
+> was the *recovery* firing on healthy tracking and doing the damage itself.
+
+The operator reported the RViz track coming back **beside** the outbound leg on
+the same path. It was not drift. It was the odom origin being reset roughly
+every 50 cm of driving.
+
+`vo_node`'s auto-recovery tested `wfr.translation[2]` — the **optical** z, taken
+before the frame conjugation. `base_from_optical` maps optical **+z to base +x**:
+
+| optical | base |
+|---|---|
+| +x (right) | −y |
+| +y (down) | **−z ← height lives here** |
+| +z (forward) | **+x ← the guard was reading this** |
+
+So the guard read forward travel and called it altitude. Every ~50 cm tripped
+`VO_MAX_Z_ODOM = 0.50`, and after the 3 s grace it re-created the tracker —
+which **resets the odometry origin**, breaks odom continuity, and invalidates the
+map. The recovery for a silent failure was itself a silent failure.
+
+Measured 2026-08-26, one session, rover driving normally:
+
+| | |
+|---|---|
+| tracker rebuilds | **15** |
+| reported "z" at trip | ±0.50, ±0.51 — i.e. half a metre driven |
+| landmarks at those trips | 197, 174, 167, 159, 152, 142 — **healthy** |
+| real base-frame height, throughout | **0.038 m** |
+| fusion `jumps` / `dr_metres` | 85 / 1.76 m |
+| GPU / thermals | 3–32 %, 53 °C — not a resource problem |
+
+The tell was that `/fusion/status` and `/vo/status` disagreed. Fusion's `vo_z`
+reads the **published** `/vo/odom` z, which is correctly conjugated, and sat at
+0.002–0.038 m the whole time. Only `vo_node`'s own guard saw metres.
+
+**Fix:** conjugate into `base_link` *before* the guard and test `T[2,3]`. The
+pose matrix was already being computed twenty lines further down; it just moved
+up, so the guard and the published pose now reason about the same axis.
+
+**Why nothing caught it:** `self_test()` covered the conjugation thoroughly —
+six cases, including mount yaw against two real pushes — but never the guard.
+`VO_MAX_Z_ODOM` appeared exactly twice in the file: its definition and that one
+comparison. Test 7 now asserts that 4 m forward does **not** trip the guard and
+4 m of altitude does.
+
+Genuine divergence (§21) is unaffected and still open — this only stops the
+recovery firing when nothing is wrong.
+
+**Verified on the floor the same evening.** Driving the room after the fix:
+resets fell from **15 to 3**, and the three that remain are the honest kind —
+they tripped at 2, 4, 12, 13 and 14 landmarks, i.e. texture collapse (§3), not
+at healthy 197. The false-positive class is gone.
+
+---
+
+## ✅ 23. Loop closure was being thrown away over a vertical it cannot have — FIXED 2026-08-26
+
+The complaint that started this: driving a lap and coming back along the same
+path drew a **second line beside the first** in RViz. §22 was most of it. This
+is the rest, and it is why the two lines never converged.
+
+`_publish_correction` rejected the whole `map -> odom` correction if its z
+exceeded `MAX_CORRECTION_Z = 0.30`. Measured 2026-08-26 over one room drive:
+
+| | |
+|---|---|
+| corrections accepted | 15 |
+| corrections **rejected** | **291** |
+| shape of every rejection | 0.4–0.5 m total, **z = ±0.4 m** |
+| `MAX_CORRECTION_M` | 5.0 — never the binding constraint |
+
+So all 291 failed on the vertical alone, and the x/y/**yaw** part went in the bin
+with it. That planar part is exactly what pulls a return leg back onto its
+outbound one, which is why loop closure was running (15 closures) and visibly
+achieving nothing.
+
+**Fix:** flatten the correction onto the floor *before* judging it — z to 0,
+rotation reduced to yaw — then test the **planar** magnitude. This rover has
+three degrees of freedom; a correction's z, roll and pitch are the optimiser's
+drift, not information.
+
+**It does not weaken the guard.** The 2026-08-22 divergence corrected
+`[-10.5, -22.2, 87.7] m`; its planar magnitude is **24.6 m**, still far over
+`MAX_CORRECTION_M`, so it is still rejected on horizontal evidence alone. The
+vertical threshold was never what caught it. Verified against five cases
+including that one and a planar-only blowup.
+
+A large vertical is still the best early warning of optimiser divergence, so it
+is now counted and logged as `correction_flattened` in `/vo/status` rather than
+acted on.
+
+---
+
 ## ✅ 17. The slice height caps the useful depth range — FIXED, and re-measured since
 
 > **Closed 2026-08-23.** Integration distance is 3.0 m and the band is now

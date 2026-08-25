@@ -179,6 +179,30 @@ def self_test():
               f"y {measured[1] * 100:+.1f} cm -> {corrected[1] * 100:+.1f} cm "
               f"(x {corrected[0] * 100:.1f} cm)")
 
+    # 7. THE DIVERGENCE GUARD MUST TEST HEIGHT, NOT FORWARD TRAVEL.
+    #    The guard used to read wfr.translation[2] — optical z — which lands on
+    #    base +x. Driving 4 m forward looked like 4 m of altitude and rebuilt the
+    #    tracker, resetting the odom origin roughly every 50 cm. Nothing here
+    #    covered it, so it survived until the RViz track came back visibly
+    #    doubled. These two cases fail against the old axis and pass against the
+    #    conjugated one.
+    T = np.eye(4); T[:3, 3] = [0, 0, 4.0]        # 4 m along OPTICAL z = forward
+    fwd = (B @ T @ Binv)[:3, 3]
+    check("4 m forward -> base +x, zero height", fwd, [4.0, 0, 0], tol=1e-6)
+
+    T = np.eye(4); T[:3, 3] = [0, -4.0, 0]       # 4 m along OPTICAL -y = up
+    up = (B @ T @ Binv)[:3, 3]
+    check("4 m up -> base +z", up, [0, 0, 4.0], tol=1e-6)
+
+    # And the guard's own verdict on each, which is the thing that regressed.
+    for label, v, want_trip in (("4 m forward", fwd, False), ("4 m up", up, True)):
+        tripped = bool(abs(v[2]) > VO_MAX_Z_ODOM)
+        good = tripped == want_trip
+        ok &= good
+        print(f"  [{'ok' if good else 'FAIL'}] guard on {label}: "
+              f"{'trips' if tripped else 'passes'} "
+              f"(want {'trips' if want_trip else 'passes'})")
+
     print(f"\n  self-test: {'PASS' if ok else 'FAIL'}")
     return 0 if ok else 1
 
@@ -263,6 +287,10 @@ def main():
             self.correction_m = 0.0
             self.loop_closures = 0
             self.correction_rejected = 0
+            # Corrections whose vertical was implausible but whose planar part
+            # was kept. Climbing means the SLAM optimiser is drifting in z while
+            # still being useful in x/y -- worth seeing, not worth acting on.
+            self.correction_flattened = 0
             self._last_lc_len = 0
 
             # camera_info is a low-rate metadata topic, safe to hold open.
@@ -398,6 +426,28 @@ def main():
             # number in the wrong frame.
             wfr = est.world_from_rig.pose
 
+            # CONJUGATE FIRST. Everything below — the divergence guard included —
+            # must reason in base_link, not in the camera's optical frame.
+            #
+            # This used to happen further down, after the guard, and the guard
+            # paid for it: it tested wfr.translation[2], which is OPTICAL z, and
+            # base_from_optical maps optical +z to base +x. It was testing
+            # FORWARD TRAVEL and calling it height. Every ~50 cm driven tripped
+            # "a ground rover cannot be there" and rebuilt the tracker, and every
+            # rebuild reset the odom origin.
+            #
+            # Measured 2026-08-26: 15 rebuilds in one session, the reported "z"
+            # clustering on +-0.50/0.51 with 197, 174 and 167 landmarks — healthy
+            # tracking, half a metre of driving. Meanwhile the real base-frame
+            # height sat at 0.038 m the whole time. The parallel return track in
+            # RViz was those origin resets, not drift.
+            R = np.eye(4)
+            R[:3, :3] = Rotation.from_quat(list(wfr.rotation)).as_matrix()
+            R[:3, 3] = list(wfr.translation)
+
+            T = self.B @ R @ self.Binv          # <- the whole point of this node
+            base_z = float(T[2, 3])             # height above the floor, in base_link
+
             # AUTO-RECOVERY FROM DIVERGENCE.
             #
             # A ground rover cannot leave the floor, so a metre of z is proof the
@@ -416,12 +466,12 @@ def main():
             # invalidates a map built in the old frame -- and it is still better
             # than navigating on dead reckoning nobody knows about. The fusion
             # node's teleport guard sees the jump for what it is.
-            if abs(wfr.translation[2]) > VO_MAX_Z_ODOM:
+            if abs(base_z) > VO_MAX_Z_ODOM:
                 now = time.time()
                 if self.z_bad_since is None:
                     self.z_bad_since = now
                     self.get_logger().error(
-                        f'cuvslam z = {wfr.translation[2]:+.2f} m — a ground rover '
+                        f'cuvslam base_link z = {base_z:+.2f} m — a ground rover '
                         f'cannot be there. landmarks={self.landmarks} '
                         f'worst_frame_gap={self.max_gap_s * 1000:.0f} ms '
                         f'gaps_over_1s={self.gaps_over_limit}')
@@ -466,11 +516,8 @@ def main():
             self.frozen = self.frozen + 1 if cur == self.last_pose else 0
             self.last_pose = cur
 
-            R = np.eye(4)
-            R[:3, :3] = Rotation.from_quat(list(wfr.rotation)).as_matrix()
-            R[:3, 3] = list(wfr.translation)
-
-            T = self.B @ R @ self.Binv          # <- the whole point of this node
+            # T was computed above, before the divergence guard, so that the guard
+            # could test base_link height rather than optical forward travel.
             q = Rotation.from_matrix(T[:3, :3]).as_quat()   # xyzw
 
             od = Odometry()
@@ -534,7 +581,42 @@ def main():
 
             T_map = self.B @ S @ self.Binv
             corr = T_map @ np.linalg.inv(T_odom)
+
+            # PROJECT THE CORRECTION ONTO THE FLOOR BEFORE JUDGING IT.
+            #
+            # This rover has three degrees of freedom: x, y, yaw. A correction's
+            # z, roll and pitch are not information, they are the SLAM optimiser's
+            # vertical drift, and they were getting the useful part thrown away
+            # with them.
+            #
+            # Measured 2026-08-26, driving a room: 291 corrections rejected
+            # against 15 accepted, and EVERY rejection had the same shape --
+            # 0.4-0.5 m of total correction with z = +-0.4 m. MAX_CORRECTION_M is
+            # 5.0, so the magnitude was never the problem; they failed
+            # MAX_CORRECTION_Z = 0.30 on the vertical alone. The x/y/yaw part --
+            # exactly what pulls a return leg back onto its outbound one -- was
+            # discarded 291 times over a number that cannot be real.
+            #
+            # Flattening first also keeps the guard honest rather than weakening
+            # it. The 2026-08-22 divergence corrected [-10.5, -22.2, 87.7] m; its
+            # PLANAR magnitude is 24.6 m, still far over MAX_CORRECTION_M, so it
+            # is still rejected on the horizontal evidence alone. The vertical
+            # threshold was never what caught it.
+            z_raw = float(corr[2, 3])
+            corr[2, 3] = 0.0
+            yaw = math.atan2(corr[1, 0], corr[0, 0])
+            corr[:3, :3] = Rotation.from_euler('z', yaw).as_matrix()
             mag = float(np.linalg.norm(corr[:3, 3]))
+
+            # A large vertical is still the best early warning that the SLAM
+            # optimiser is diverging, so it is reported rather than acted on.
+            if abs(z_raw) > MAX_CORRECTION_Z:
+                self.correction_flattened += 1
+                self.get_logger().warn(
+                    f'SLAM correction had z={z_raw:+.2f} m — flattened to the '
+                    f'floor; using its {mag:.2f} m planar part. '
+                    f'({self.correction_flattened} so far)',
+                    throttle_duration_sec=30.0)
 
             # THE SLAM POSE NEEDS THE SAME PLAUSIBILITY CHECK AS THE ODOMETRY ONE.
             # Measured 2026-08-22: after a room loop the correction came out as
@@ -551,10 +633,13 @@ def main():
             # The odom frame was untouched throughout -- z exactly 0.000 -- which
             # is the separation earning its keep: the garbage stayed in the frame
             # nothing critical consumes.
-            if abs(corr[2, 3]) > MAX_CORRECTION_Z or mag > MAX_CORRECTION_M:
+            # z is now 0 by construction, so this judges the PLANAR correction
+            # only -- the one number a ground rover can actually be wrong about.
+            if mag > MAX_CORRECTION_M:
                 self.correction_rejected += 1
                 self.get_logger().warn(
-                    f'SLAM correction implausible ({mag:.1f} m, z={corr[2, 3]:+.1f} m) '
+                    f'SLAM correction implausible ({mag:.1f} m planar, '
+                    f'z was {z_raw:+.1f} m) '
                     f'— not publishing map->odom. Odometry is unaffected.',
                     throttle_duration_sec=10.0)
                 return
@@ -597,6 +682,7 @@ def main():
                 'worst_frame_gap_ms': round(self.max_gap_s * 1000, 1),
                 'gaps_over_1s': self.gaps_over_limit,
                 'correction_rejected': self.correction_rejected,
+                'correction_flattened': self.correction_flattened,
                 'frozen_frames': self.frozen,
                 # Rate alone is NOT enough: a dead tracker returns identity at a
                 # perfect 30 Hz. Landmarks are what say it is really tracking.
