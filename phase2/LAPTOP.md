@@ -37,11 +37,27 @@ clients — check whether the Jetson can be pinged at `192.168.1.15`.
 
 ## 4. Run RViz
 
-Copy `phase2/rviz/rover.rviz` from this repo to the laptop, then:
+The laptop holds `~/rover_live.sh` and `~/rover_live.rviz`, both pushed from this
+repo — see [LAPTOP_FILES.md](LAPTOP_FILES.md). In a terminal **on the laptop's
+desktop**:
 
 ```bash
-rviz2 -d rover.rviz
+bash ~/rover_live.sh
 ```
+
+The script sets everything in §2 itself, so it does not matter whether this shell
+has been sourced. It must be a real desktop terminal, not ssh: RViz needs a
+logged-in session to render into.
+
+From the Jetson, `./rover view` does the same thing remotely — it finds the
+laptop on DHCP, pushes the current config, and refuses if nobody is logged in.
+That is the normal path; the command above is for when you are sitting at the
+laptop.
+
+**Do not run `rviz2 ~/rover_live.rviz`.** The `-d` is load-bearing: `rviz2`
+silently ignores a bare config path and starts with its defaults — Fixed Frame
+`map`, zero displays. A blank window and no error. `rover_live.sh` exists so
+this cannot happen; see [LAPTOP_FILES.md](LAPTOP_FILES.md).
 
 ### What it shows
 
@@ -76,7 +92,7 @@ publisher, so these are worth knowing:
 | `/global_costmap/costmap` | **Transient Local** | nav2 publishes latched |
 | `/fusion/path` | **Transient Local** | so a late RViz gets the whole track |
 
-They are opposite, and both are already set correctly in `rover.rviz`.
+They are opposite, and both are already set correctly in `rover_live.rviz`.
 
 ### What the nvblox mesh is not here
 
@@ -90,10 +106,17 @@ what nav2 plans on anyway.
 RViz also runs on the Jetson itself, with a monitor attached:
 
 ```bash
+./rover rviz
+```
+
+That is the maintained path — it sets the environment and the `-d` for you. The
+equivalent by hand, if you need to vary something:
+
+```bash
 xhost +local:docker
 docker exec -it -e DISPLAY=:0 rover bash -lc \
   'source /opt/ros/jazzy/setup.bash; export ROS_DOMAIN_ID=0; \
-   unset ROS_DISCOVERY_SERVER; rviz2 -d /opt/rover/../phase2/rviz/rover.rviz'
+   unset ROS_DISCOVERY_SERVER; rviz2 -d /opt/rover/../phase2/rviz/rover_live.rviz'
 ```
 
 It competes with cuVSLAM for the GPU, so expect the pose rate to dip. Fine for a

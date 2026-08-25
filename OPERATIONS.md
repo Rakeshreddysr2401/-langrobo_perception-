@@ -249,15 +249,21 @@ the access point.
 **Check this first: was it started with `-d`?**
 
 ```bash
-rviz2 -d ~/rover.rviz        # correct
-rviz2 ~/rover.rviz           # WRONG -- silently ignored
+bash ~/rover_live.sh          # correct -- on the laptop, in a desktop terminal
+rviz2 -d ~/rover_live.rviz    # correct, the long way
+rviz2 ~/rover_live.rviz       # WRONG -- silently ignored
 ```
 
 `rviz2` ignores a bare config path. Without `-d` it starts with its **defaults**:
 Fixed Frame `map`, which does not exist on this rover, and **zero displays**. A
 blank window, no error, and the ROS graph shows `/rviz` connected while
-subscribing to nothing. Use `./rover view` on the laptop, which cannot get
-this wrong.
+subscribing to nothing. Use `./rover view` from the Jetson, or `bash
+~/rover_live.sh` on the laptop — neither can get this wrong.
+
+**`./rover view` needs somebody logged in at the laptop desktop.** RViz started
+over ssh into a login screen renders into a void and exits 0. The launcher
+refuses in that case and says so rather than reporting success; log in there and
+re-run, or start it on the laptop by hand with the command above.
 
 | symptom | cause |
 |---|---|

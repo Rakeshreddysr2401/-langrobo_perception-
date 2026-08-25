@@ -174,7 +174,8 @@ a point 17 cm in front of itself.
 | `phase1/nodes/fusion_node.py` | wraps `fusion.py` → `/odom`, TF, `/fusion/status` |
 | `phase1/nodes/compare.py` | the measurement instrument: side-by-side rows, gates, CSV |
 | `phase2/launch/nvblox.launch.py` | nvblox: depth + `/odom` → TSDF, mesh, 2D grid |
-| `phase2/rviz/rover.rviz` | the RViz view, standard message types only |
+| `phase2/rviz/rover_live.rviz` | the RViz view, standard message types only |
+| `phase2/rviz/rover_live.sh` | launches RViz on the laptop with the `-d` that is load-bearing |
 | `phase3/config/nav2.yaml` | nav2, with every NO-PIVOT adaptation marked |
 | `phase3/bt/*.xml` | behaviour trees with Spin removed |
 | `phase1/nodes/values.py` | one-shot readout of every sensor |
