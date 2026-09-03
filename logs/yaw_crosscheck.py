@@ -17,6 +17,25 @@ TODO 4 predicts will be worst.
 
 Safety: hard motion timeout, stop published on every exit path, and it aborts if
 vo_node re-creates the tracker mid-run (the pose origin would move under it).
+
+CIRCULARITY, FOUND ON THE FLOOR 2026-09-02 -- READ BEFORE TRUSTING THE GATE
+    The motion stops when the FUSED pose's own accumulated yaw reaches the
+    target. That makes the printed "err vs target" for the FUSED row
+    meaningless as a pass/fail gate: fused is both the thing driving the stop
+    decision and the thing being graded against it, so a few degrees of
+    control-loop overshoot is all it can ever show, regardless of whether the
+    rover physically rotated 360 deg or something quite different. A run on
+    this rover read fused's own error as +4.34 deg while the operator watched
+    it stop nearly 40 deg past where it started -- the number and the floor
+    disagreed, and only the floor is ground truth.
+    The other three rows (gyro, cuvslam, wheels) are NOT self-referential --
+    none of them decided when to stop -- so their spread against each other
+    and against fused is still real signal. Only fused's own "error" was ever
+    circular.
+    Fix: the script now asks the operator -- who is required to watch this
+    spin anyway -- what they actually observed, and grades every source
+    against THAT, not against the assumed 360. If you skip the prompt, the
+    old target-only numbers still print, now labelled UNVERIFIED.
 """
 import json
 import math
@@ -158,19 +177,45 @@ def main():
     print()
     if aborted:
         print(f'  ABORTED: {aborted}')
-    print(f'  ── yaw over {dt:.1f} s ' + '─' * 34)
-    print(f'  {"source":10} {"degrees":>10} {"err vs target":>15}')
     rows = [('gyro', math.degrees(n.gyro_yaw)),
             ('cuvslam', math.degrees(c_acc)),
             ('fused', math.degrees(f_acc)),
             ('wheels', math.degrees(n.wheel_yaw))]
+
+    # FUSED chose when to stop this motion -- see the CIRCULARITY note at the
+    # top of the file. Its own "error vs target" below is not a real
+    # measurement of anything; it is control-loop overshoot. Only a number
+    # from OUTSIDE all four sources -- the operator, who watched it happen --
+    # can actually grade fused. Ask now, while it is standing there.
+    print(f'  ── which way is it actually facing? ' + '─' * 21)
+    print(f'  The motion stopped because the FUSED pose said it hit '
+          f'{TARGET_DEG:.0f} deg. That does not prove the rover did.')
+    resp = input(f'  Degrees off from where it started (0 = dead on, + = spun '
+                 f'past it, Enter to skip): ').strip()
+    true_deg = None
+    if resp:
+        try:
+            true_deg = TARGET_DEG + float(resp)
+        except ValueError:
+            print('  (not a number -- skipping the ground-truth comparison)')
+
+    label = 'err vs OBSERVED' if true_deg is not None else 'err vs target (UNVERIFIED)'
+    ref = true_deg if true_deg is not None else TARGET_DEG
+    print(f'\n  ── yaw over {dt:.1f} s ' + '─' * 34)
+    print(f'  {"source":10} {"degrees":>10} {label:>24}')
     for name, deg in rows:
-        print(f'  {name:10} {deg:10.2f} {deg - TARGET_DEG:+15.2f}')
+        flag = '  <- decided the stop, not graded' if (name == 'fused' and true_deg is None) else ''
+        print(f'  {name:10} {deg:10.2f} {deg - ref:+24.2f}{flag}')
 
     spread = max(d for _, d in rows) - min(d for _, d in rows)
     print(f'\n  spread across sources   {spread:.2f} deg')
-    print(f'  GATE (TODO 5): |error| <= 10 deg on the fused row -> '
-          f'{"PASS" if abs(rows[2][1] - TARGET_DEG) <= 10 else "FAIL"}')
+    if true_deg is not None:
+        print(f'  GATE (TODO 5): |error| <= 10 deg on the fused row, vs the '
+              f'OBSERVED {true_deg:.0f} deg -> '
+              f'{"PASS" if abs(rows[2][1] - true_deg) <= 10 else "FAIL"}')
+    else:
+        print(f'  GATE (TODO 5): not graded -- no observed ground truth was given, '
+              f'and fused cannot grade itself.')
 
     dxy_f = math.hypot(o1.position.x - o0.position.x, o1.position.y - o0.position.y)
     dxy_c = math.hypot(v1.position.x - v0.position.x, v1.position.y - v0.position.y)

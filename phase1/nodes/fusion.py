@@ -315,6 +315,7 @@ class PoseFusion:
         self.vo_n = 0
         self.vo_last_msg = 0.0
         self.vo_speed = 0.0
+        self.vo_speed_t = 0.0        # when vo_speed was last ACTUALLY updated
         self.vo_peak = 0.0
         self.vo_path_raw = 0.0
         self.landmarks = -1
@@ -483,6 +484,7 @@ class PoseFusion:
                 self._deadreckon()
             else:
                 self.vo_speed = speed
+                self.vo_speed_t = time.time()
                 self.vo_peak = max(self.vo_peak, speed)
                 self._fuse(px, py, pth)
         self.vo_prev = (t, px, py, pth)
@@ -681,11 +683,29 @@ class PoseFusion:
         needs BOTH independent witnesses to agree there is no motion: the wheels
         (which cannot be fooled by a textureless scene) and cuVSLAM (which cannot
         be fooled by wheels spinning on a slippery floor).
+
+        FOUND ON THE FLOOR 2026-09-02: it could still be fooled, because
+        `vo_speed` is a WITNESS THAT GOES SILENT, not one that reports "unknown".
+        It is only ever written inside on_vo's accepted branch -- never during a
+        low-landmark dropout or a rejected jump -- so a landmark dip mid-turn
+        freezes it at whatever it read a moment before, often near zero right as
+        a rotation begins. A hand-rotated ~90 deg turn, landmarks dipping
+        repeatedly throughout it (vo_dropped +28 that run), was read by cuVSLAM
+        as ~88 deg and by FUSED as ~2 deg: `_still()` was reading a stale "not
+        moving" off a witness that had stopped testifying, adapted gyro_bias
+        toward the real, large turn rate the whole time, and ate the rotation.
+        Same failure the docstring above already worried about, from an angle it
+        didn't cover: not "cuVSLAM is fooled", but "cuVSLAM went quiet and we
+        kept using its last answer".
+
+        Fix: a witness that has not spoken recently does not get to vote "still".
         """
         if self.wheel_n == 0 or self.vo_n == 0:
             return False
         if time.time() - self.wheel_last_msg > 1.0:
             return False                      # no fresh wheel data; do not guess
+        if time.time() - self.vo_speed_t > COVER_STALE_S:
+            return False                      # vo_speed is stale; do not guess
         velL, velR = self.wheel_prev
         if abs(velL) > STILL_WHEEL_MS or abs(velR) > STILL_WHEEL_MS:
             return False
