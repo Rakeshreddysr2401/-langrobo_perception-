@@ -4,7 +4,8 @@
 WHAT IT OWNS
     /odom            nav_msgs/Odometry   the fused pose, with covariance
     TF odom -> base_link                 taken over from vo_node
-    /fusion/path     nav_msgs/Path       where it has been -- the line in RViz
+    /fusion/path     nav_msgs/Path       where it has been, in `odom`
+    /fusion/path_map nav_msgs/Path       the same track in `map` -- see below
     /fusion/status   std_msgs/String     JSON health, for humans and for logging
 
 WHY IT TAKES THE TF FROM vo_node
@@ -23,6 +24,30 @@ THE ALGORITHM IS NOT HERE
     It is in fusion.py, unchanged, so that the thing measured over two days of
     tape-measured runs is the thing that ships. compare.py grades the same
     module. See its docstring for what each sensor is trusted for and why.
+
+TWO PATHS, AND WHY THE SECOND ONE EXISTS
+    /fusion/path is stamped `odom`, and `odom` is continuous by definition: it
+    never jumps, and it never gets corrected. So a loop closure -- which is the
+    only thing that ever removes drift -- is invisible on it BY CONSTRUCTION.
+    The rover can close a loop, take a 28 cm correction, and the green line on
+    screen does not move by a pixel. That is not a rendering bug; it is what
+    `odom` means.
+
+    /fusion/path_map is the same track with each point transformed through
+    map -> odom AT THE MOMENT IT WAS RECORDED. Old points therefore do NOT move
+    when a new correction arrives, so the two lines separate exactly where the
+    estimate was corrected, and by exactly how much. Drift stops being a number
+    in a status string and becomes the gap between two lines you can measure
+    on screen with the RViz ruler.
+
+    Re-transforming the WHOLE path on every publish was the obvious alternative
+    and it is useless: it slides the entire track rigidly, so the two lines stay
+    parallel and the correction is invisible again in a new way.
+
+    It is published only once a map -> odom transform actually exists. Before
+    the first closure there is no `map` frame, and a Path stamped with a frame
+    nothing publishes makes RViz raise a display error that reads exactly like
+    a dead publisher.
 
 COVARIANCE IS MEASURED, NOT GUESSED
     nav2 weights a pose by its covariance, so a confident wrong pose is worse
@@ -43,6 +68,7 @@ import sys
 
 import rclpy
 from rclpy.node import Node
+from rclpy.time import Time as RclTime
 from rclpy.qos import (qos_profile_sensor_data, QoSProfile,
                        DurabilityPolicy, ReliabilityPolicy, HistoryPolicy)
 from geometry_msgs.msg import Vector3, Quaternion, TransformStamped
@@ -50,7 +76,8 @@ from nav_msgs.msg import Odometry, Path
 from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import Imu
 from std_msgs.msg import String
-from tf2_ros import TransformBroadcaster
+from tf2_ros import TransformBroadcaster, Buffer, TransformListener
+from tf2_ros import LookupException, ConnectivityException, ExtrapolationException
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from fusion import PoseFusion, LOW_LANDMARKS          # noqa: E402
@@ -106,6 +133,21 @@ class FusionNode(Node):
         self.path = Path()
         self.path.header.frame_id = 'odom'
         self._path_anchor = None
+
+        # The `map`-framed twin. Same QoS and the same reasoning: a viewer that
+        # connects late must get the track it missed, not an empty screen.
+        self.pub_path_map = self.create_publisher(
+            Path, '/fusion/path_map',
+            QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                       durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                       history=HistoryPolicy.KEEP_LAST))
+        self.path_map = Path()
+        self.path_map.header.frame_id = 'map'
+        # Listening, not broadcasting. map -> odom belongs to vo_node's loop
+        # closure; this node only reads it to place the corrected track.
+        self.tf_buf = Buffer()
+        self.tf_listener = TransformListener(self.tf_buf, self)
+        self._map_seen = False
 
         self.create_subscription(Odometry, '/vo/odom', self._vo, qos_profile_sensor_data)
         self.create_subscription(Imu, '/gyro/base', self._gyro, qos_profile_sensor_data)
@@ -244,10 +286,61 @@ class FusionNode(Node):
         if len(self.path.poses) > PATH_MAX:
             self.path.poses.pop(0)
         self.path.header.stamp = od.header.stamp
+        self._append_path_map(ps)
+
+    def _map_from_odom(self):
+        """The live loop-closure correction, or None before the first closure.
+
+        LATEST, not the pose's own stamp. The correction is a slow-moving frame
+        offset published at closure rate, so asking for it at an exact past time
+        forces TF to extrapolate between two points that may be seconds apart --
+        which raises ExtrapolationException on a transform that is, physically,
+        perfectly well defined. Time(0) means "the newest you have", and for a
+        frame that changes only when a loop closes that is the right question.
+        """
+        try:
+            t = self.tf_buf.lookup_transform('map', 'odom', RclTime())
+        except (LookupException, ConnectivityException, ExtrapolationException):
+            return None
+        return t.transform
+
+    def _append_path_map(self, ps):
+        """Place one already-recorded pose into `map`, at today's correction."""
+        tr = self._map_from_odom()
+        if tr is None:
+            return
+        if not self._map_seen:
+            self._map_seen = True
+            self.get_logger().info(
+                'map -> odom is live — /fusion/path_map now shows the '
+                'loop-closure-corrected track')
+
+        # Planar, like every correction this stack publishes. A 2D rotation and
+        # an offset is the whole transform; pulling in tf2_geometry_msgs to do
+        # it in 3D would add a dependency for arithmetic that is two lines.
+        c = math.cos(yaw_of(tr.rotation))
+        sn = math.sin(yaw_of(tr.rotation))
+        x, y = ps.pose.position.x, ps.pose.position.y
+
+        m = PoseStamped()
+        m.header.stamp = ps.header.stamp
+        m.header.frame_id = 'map'
+        m.pose.position.x = tr.translation.x + c * x - sn * y
+        m.pose.position.y = tr.translation.y + sn * x + c * y
+        m.pose.position.z = 0.0
+        qz, qw = quat_of(yaw_of(ps.pose.orientation) + yaw_of(tr.rotation))[2:]
+        m.pose.orientation.z = qz
+        m.pose.orientation.w = qw
+        self.path_map.poses.append(m)
+        if len(self.path_map.poses) > PATH_MAX:
+            self.path_map.poses.pop(0)
+        self.path_map.header.stamp = ps.header.stamp
 
     def _publish_path(self):
         if self.path.poses:
             self.pub_path.publish(self.path)
+        if self.path_map.poses:
+            self.pub_path_map.publish(self.path_map)
 
     def _report(self):
         h = self.f.health()
