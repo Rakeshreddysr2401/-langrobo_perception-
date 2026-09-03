@@ -216,14 +216,22 @@ fused)
   echo "  checking the pose layer is up before building on it..."
   assert_rate /vo/odom 10 "visual odometry" || die "no pose — run ./rover pose first"
   kill_match 'fusion_node.py'
+  kill_match 'rover_marker.py'
   echo "[fused] PoseFusion -> /odom, and TF odom -> base_link"
   echo "        vo_node runs with publish_tf:=false; only one thing may own a"
   echo "        transform, and the raw cuvslam pose is the one that teleports."
   dexec "python3 $SRC/nodes/fusion_node.py > /tmp/fused.log 2>&1"
+  # The rover's body, on /rover/model. It belongs to this layer because it is
+  # drawn in base_link and base_link is what this layer starts publishing. It
+  # was never started by ANY layer until 2026-08-26, so RViz's "Rover" display
+  # had been empty since it was written and `./rover status` showed a permanent
+  # `--` on the view row. Nothing was broken; nothing had ever been run.
+  dexec "python3 $SRC2/nodes/rover_marker.py > /tmp/marker.log 2>&1"
   sleep 4
   echo
   echo "  GATE fused:"
   assert_rate /odom 15 "fused odom" || true
+  assert_rate /rover/model 0.5 "rover body" || true
   echo
   echo "  Health, live:  ./rover compare"
   echo "  Raw status:    ros2 topic echo /fusion/status"
