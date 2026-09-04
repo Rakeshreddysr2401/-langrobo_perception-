@@ -61,6 +61,7 @@ there is no drop-off detection. Autonomous runs need a human watching.
 | **[TODO.md](TODO.md)** | open faults, and the dead theories kept so they are not re-litigated |
 | **[READINESS.md](READINESS.md)** | the cross-cutting view — every subsystem's measured values against what is missing, and **what actually blocks unattended operation** |
 | **[JETSON_LOAD.md](JETSON_LOAD.md)** | the box itself — power mode, disk, what's running, and what's dev tooling vs. the rover |
+| **[VOICE_PLACEMENT.md](VOICE_PLACEMENT.md)** | why STT/TTS moved to the Pi5 — the full-stack GPU/RAM measurement that forced the call, and where the build lives |
 | **[phase2/LAPTOP.md](phase2/LAPTOP.md)** | watching it from a laptop in RViz |
 | **[phase1/teleop/README.md](phase1/teleop/README.md)** | the hold-to-move web control, and its units |
 | **[PLAN.md](PLAN.md)** | the plan of record, and what was settled in the design interview |
