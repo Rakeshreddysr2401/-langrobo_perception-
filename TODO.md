@@ -993,3 +993,67 @@ At boot its clock resumes at its last known value, so `systemctl status` reports
 service start times hours or days wrong until NTP corrects it. Use `uptime -s`.
 This nearly caused a misdiagnosis: a service that had started 40 seconds earlier
 appeared to be "3 days old".
+
+---
+
+## 🔴 24. Wheels went silent again — ESP32 has no active micro-ROS session (2026-09-06)
+
+Found while dry-running the plan for VLM-driven goals: "say 'go to the red
+bottle', a VLM turns the color frame into coordinates, something publishes
+`/goal_pose`, nav2 drives there." Enabled color on the D555
+(`enable_color:=true`, `rgb_camera.color_profile:=424x240x15`) so the Pi 5 has
+a frame to hand the VLM, then re-ran the whole stack to check nothing else
+broke: cuVSLAM (28.6 Hz, 121 landmarks, 0 implausible), nvblox and nav2 all
+came up clean — the new stream shares no topic with any of them.
+
+Then published a 0.68 m / 0.15 m goal to `/goal_pose` to test the other half:
+does a published topic actually move the rover? `bt_navigator` accepted it
+instantly, `controller_server` issued real velocity commands (`linear.x 0.18`,
+`angular.z -0.26`, replanning every cycle) — the nav2 plumbing this idea
+depends on is correct. But the FUSED pose (cuVSLAM-backed, so this is ground
+truth) never translated: x/y sat at 0.00/0.00 for the whole run, only yaw
+drifted a couple of degrees. `controller_server` eventually hit "Failed to
+make progress" and cycled into a retry loop; `bt_navigator` was killed to stop
+it rather than let it spin uselessly.
+
+`/wheel_state` was 0 Hz throughout — checked on **both** the Jetson and the
+Pi 5, so it is not a DDS-domain quirk local to one machine. On the Pi 5,
+`ros2 node list` shows only `/pi5_tts_node` — no ESP32 micro-ROS client node
+exists. The board answers ping (192.168.1.3) and `MicroXRCEAgent` is running
+on the Pi 5 (`:8888`), so the network and the agent process are both fine —
+the micro-ROS session between them is what's missing.
+
+**This is a regression, not a repeat of §1.** §1 was fixed and confirmed at
+20.004 Hz on 2026-08-23. Sometime in the two weeks since, that session dropped
+to nothing. Cause unexamined — the next step is the same one that fixed §1:
+physical access to the board, starting with a plain power-cycle before
+assuming a reflash is needed again.
+
+**Blocks:** all driving, autonomous or VLM-triggered, until the ESP32 session
+is re-established. nav2 itself is not the problem — it plans and commands
+correctly. The wheels just do not turn.
+
+---
+
+## 🟡 25. `planner_server` segfaulted once on nav2 bring-up, self-recovered on retry (2026-09-06)
+
+First `./rover nav` after the color change: `planner_server` died with exit
+code -11 about 15 s after activating —
+
+```
+[ERROR] [planner_server-2]: process has died [pid 8517, exit code -11, ...]
+[lifecycle_manager]: Have not received a heartbeat from planner_server.
+[lifecycle_manager]: CRITICAL FAILURE: SERVER planner_server IS DOWN ...
+```
+
+— and the lifecycle manager tore down the rest of nav2 in response. Not
+memory pressure: 2.6 GB available and the container at ~2.1 GB, both before
+and after. A second `./rover nav` came up clean and both costmaps (global
+0.8 Hz, local 1.7 Hz) stayed healthy for the rest of the session, including
+through §24's drive test.
+
+Only seen once so far, so this is logged unverified rather than diagnosed.
+Leading guess is a nav2 lifecycle race at startup — the `nvblox_layer`
+costmap plugin subscribing right as nvblox is still settling — but nothing
+here confirms that. Worth checking for a pattern if `planner_server` dies
+again on a future bring-up.

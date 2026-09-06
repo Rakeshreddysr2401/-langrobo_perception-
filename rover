@@ -98,7 +98,7 @@ camera)
          exec ros2 launch realsense2_camera rs_launch.py camera_name:=camera0 \
             enable_infra1:=true enable_infra2:=true depth_module.infra_profile:=896x504x30 \
             depth_module.emitter_enabled:=false depth_module.laser_power:=0.0 \
-            enable_depth:=true enable_color:=false \
+            enable_depth:=true enable_color:=true rgb_camera.color_profile:=424x240x15 \
             enable_motion:=true enable_sync:=false > /tmp/camera.log 2>&1'
   t=0
   until cam_ready; do
@@ -196,16 +196,19 @@ wheels)
   echo
   assert_rate /wheel_state 15 "wheel_state" && { echo; echo "  Wheels are live."; exit 0; }
   echo
-  echo "  ✗ Wheel odometry is not usable. Known state as of 2026-08-15:"
-  echo "      /wheel_state arrives at a metronomic 1.000 Hz (sigma 3.4 ms over 55 samples)."
-  echo "      Packet loss is ruled out by that regularity; the ESP32 is connected"
-  echo "      in one stable micro-ROS session. But rover_firmware_v2.ino has NO"
-  echo "      1 Hz publish path — telemetry is EXECUTE_EVERY_N_MS(50,...) = 20 Hz."
-  echo "      => the flashed binary does not match the repo source."
+  echo "  ✗ Wheel odometry is not usable. Known state as of 2026-09-06 (TODO §24):"
+  echo "      /wheel_state is SILENT — 0 Hz, not the old 1 Hz mismatch from §1."
+  echo "      'ros2 node list' on the Pi 5 shows no ESP32 micro-ROS client at all"
+  echo "      (only /pi5_tts_node). The board answers ping at 192.168.1.3 and"
+  echo "      MicroXRCEAgent is running on the Pi 5 (:8888), so this is the"
+  echo "      micro-ROS session itself, not the network or the agent process."
+  echo "      This is a REGRESSION from the 20.004 Hz confirmed fixed 2026-08-23 —"
+  echo "      cause unknown. nav2 will still plan and issue /cmd_vel correctly;"
+  echo "      the wheels just do not turn. Try a power-cycle of the ESP32 first."
   echo
   echo "    Neither the Jetson nor the Pi 5 has a flashing toolchain or USB serial,"
-  echo "    so this needs a reflash from your own machine. OTA is compiled in;"
-  echo "    the board is now at 192.168.1.3 (it moved off .12)."
+  echo "    so a reflash (if it comes to that) needs your own machine. OTA is"
+  echo "    compiled in."
   echo
   echo "    compare still runs without it — the wheels row just stays empty."
   ;;

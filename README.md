@@ -37,15 +37,23 @@ the route crosses a blocked cell, or if anything else owns `/cmd_vel`.
 
 | | why it matters |
 |---|---|
+| 🔴 **wheels are off-line again** (§24) | ESP32 has no active micro-ROS session — `/wheel_state` is 0 Hz on both the Jetson and the Pi 5. nav2 plans and issues `/cmd_vel` correctly; nothing turns. Blocks all driving, VLM-triggered goals included |
 | 🔴 **cuVSLAM diverges, silently** (§21) | three times so far. The pose drops to dead reckoning and every gate stays green. Check `vo_z` after every bring-up |
 | 🔴 **obstacle avoidance untested** | no goal has yet been driven with something deliberately in the way. The costmap stops it *in theory* |
 | 🟠 **loop closure never fires** (§16) | drift is never corrected, so range is limited to what raw odometry carries — about a room |
 | 🟡 **the estimate has one measurement** (§15) | one tape reading. A −22° heading error from a loop test is still unexplained |
-| 🟡 **the drift gate has never been run** (§2) | it was blocked on wheel telemetry, which now works |
+| 🟡 **the drift gate has never been run** (§2) | it was blocked on wheel telemetry — regressed again 2026-09-06, see §24 |
 
 **Blind spots that no amount of tuning fixes.** The rover sees nothing below
 10 cm, nothing above 24 cm, nothing outside 87°, and **nothing downward at all** —
 there is no drop-off detection. Autonomous runs need a human watching.
+
+**2026-09-06 — color camera on, for a VLM object-locator.** The D555 now also
+streams RGB (`enable_color:=true`, 424x240x15) so the Pi 5 can hand a frame to
+a VLM: "go to the red bottle" → coordinates → `/goal_pose` → nav2 drives
+there. Verified both halves of that idea separately — cuVSLAM/nvblox/nav2 are
+unaffected by the extra stream, and nav2 correctly accepts a published goal
+and drives on it — but the wheels don't currently turn either way. See §24.
 
 ---
 
