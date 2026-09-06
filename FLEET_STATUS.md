@@ -151,3 +151,92 @@ actual test rather than an assumption.
 Unchanged and worth repeating: the rover is blind below 10 cm, above 24 cm,
 outside 87°, and **downward** — there is no drop-off detection at all. Tapping
 MANUAL on the phone cancels the active nav2 goal; that is the stop.
+
+---
+
+# Voice bring-up attempt — 2026-09-06, same session
+
+Asked to start the Pi 5 voice stack and reconnect the mic. **Blocked, and the
+blocker is physical, not software.** Everything on the software side checked
+out; there is simply no audio hardware attached to the Pi 5 right now.
+
+## What passed
+
+- **No conflict with the Jetson.** `fleet_role.sh voice status` -> `jetson
+  voice: stopped`, and no whisper/kokoro/ai_stack processes on the Jetson.
+  The doc's "never run this alongside the Jetson's ai_stack voice role"
+  precondition is satisfied.
+- **API keys present** in `~/ros2_ws/.env` on the Pi 5: `SARVAM_API_KEY`,
+  `SONIOX_API_KEY` (plus OPENAI/LANGSMITH/LANGCHAIN/TAVILY).
+- **Config read** (`pi5_voice_pkg/config/voice_params.yaml`):
+  `stt_provider: sarvam`, `tts_provider: sarvam_translate`,
+  `wake_detector: openwakeword`, `wake_word: hey_jarvis`, `require_wake: true`,
+  `bt_mac: D6:AA:BB:59:EF:B6`, `bt_profile: hfp`.
+
+## What blocked it
+
+**The boAt Stone 650 is not reachable.**
+
+```
+bluetoothctl info D6:AA:BB:59:EF:B6
+    Paired: no      Bonded: no      Trusted: yes      Connected: no
+
+bluetoothctl connect D6:AA:BB:59:EF:B6
+    Failed to connect: org.bluez.Error.Failed br-connection-page-timeout
+```
+
+`br-connection-page-timeout` means the speaker never answered the connection
+page — it is powered off, out of range, or already connected to another device
+(a phone will hold it). An 18 s inquiry scan did **not** see it: it appears in
+`bluetoothctl devices` only as a remembered pairing, not as a live result.
+
+**And there is no fallback mic.** The documented wired-headset fallback path is
+not plugged in either:
+
+```
+arecord -l          ->  (no capture hardware devices at all)
+pactl list short sources  ->  auto_null.monitor   [dummy]
+pactl list short sinks    ->  auto_null           [dummy]
+```
+
+`auto_null` is PipeWire's placeholder sink, which is what you get when no real
+output device exists. So at this moment the Pi 5 has **neither a microphone nor
+a speaker**. Starting `voice_launch.py` now would bring both nodes up against
+no device — `bt_audio.ensure()` never raises by design, so they would start and
+then be unable to open an input stream. Not started, deliberately.
+
+## To unblock (physical, ~1 minute)
+
+1. Power on the boAt Stone 650, and if a phone is holding it, disconnect it
+   there first — a Bluetooth speaker will only page-answer for one host.
+2. Then, on the Pi 5:
+   ```bash
+   bluetoothctl connect D6:AA:BB:59:EF:B6
+   bluetoothctl info D6:AA:BB:59:EF:B6 | grep -E 'Paired|Connected'
+   ```
+   Want `Paired: yes`, `Connected: yes`. `bt_audio.ensure()` handles the
+   `hfp` profile switch and the PipeWire default-sink/source wiring itself.
+3. Then the launch, which is one command:
+   ```bash
+   cd ~/ros2_ws && source /opt/ros/jazzy/setup.bash && source install/setup.bash
+   ros2 launch pi5_voice_pkg voice_launch.py
+   ```
+4. Say **"hey jarvis"** first — `require_wake: true`, so nothing is transcribed
+   until the wake word fires.
+
+A wired USB headset in the Pi 5 also works and skips steps 1-2 entirely.
+
+## Two things to know before the first utterance
+
+- **It will answer in Telugu.** `tts_provider: sarvam_translate` translates the
+  English reply text to Telugu speech. That is the verified-working config from
+  2026-09-04, not a misconfiguration — but set `tts_provider: local` (Kokoro)
+  for English if that is not what is wanted right now.
+- **The first turn may take 50-108 s, and that is not a fault.** Documented
+  cold-start behaviour (KV cache cold, or a stale HTTP connection to the Mac
+  mini). Warm turns are ~1.5 s. Ask a second time before concluding voice is
+  broken; barge-in correctly abandons the stuck turn.
+
+## Still true
+
+Telegram remains the working channel today and needs none of the above.
