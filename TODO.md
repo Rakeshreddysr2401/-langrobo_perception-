@@ -996,7 +996,7 @@ appeared to be "3 days old".
 
 ---
 
-## 🔴 24. Wheels went silent again — ESP32 has no active micro-ROS session (2026-09-06)
+## ✅ 24. Wheels went silent again — FIXED by a full power-cycle, verified 2026-09-06
 
 Found while dry-running the plan for VLM-driven goals: "say 'go to the red
 bottle', a VLM turns the color frame into coordinates, something publishes
@@ -1033,6 +1033,12 @@ assuming a reflash is needed again.
 is re-established. nav2 itself is not the problem — it plans and commands
 correctly. The wheels just do not turn.
 
+**Fixed, same day.** All devices (Jetson, Pi 5, ESP32, camera) power-cycled
+together. `/wheel_state` came back at ~20 Hz and `wheels_alive: true` on the
+very next bring-up — no reflash needed, so whatever dropped the micro-ROS
+session was recoverable by power alone. See §26 for the drive that confirms
+it end to end.
+
 ---
 
 ## 🟡 25. `planner_server` segfaulted once on nav2 bring-up, self-recovered on retry (2026-09-06)
@@ -1057,3 +1063,38 @@ Leading guess is a nav2 lifecycle race at startup — the `nvblox_layer`
 costmap plugin subscribing right as nvblox is still settling — but nothing
 here confirms that. Worth checking for a pattern if `planner_server` dies
 again on a future bring-up.
+
+**Update 2026-09-06, later same day:** two more `./rover nav` bring-ups (after
+the full power-cycle in §24, and again after killing `bt_navigator` in §26)
+both came up clean. Three clean bring-ups against one crash — still not
+enough to call this fixed, but no repeat yet.
+
+---
+
+## ✅ 26. First autonomous drive since the wheels came back — succeeded, after one stall (2026-09-06)
+
+All devices power-cycled (Jetson, Pi 5, ESP32, D555). Full bring-up clean,
+including §24's wheels and §25's nav2. Published a goal 0.7 m ahead:
+`bt_navigator` accepted it, `controller_server` drove — real translation this
+time, x: 0.00 → 0.42 → 0.53 m — but then stalled, oscillating between
+0.53–0.58 m for ~25 s while yaw drifted 0° → −11.8° on a goal that needed no
+turn. `controller_server` hit "Failed to make progress" and retried, stalling
+the same way again. Killed `bt_navigator` to stop the loop and asked the user
+to physically check the floor — **confirmed clear**, and nvblox's own map
+agreed: no occupied cell anywhere in the corridor ahead (x 0.2–1.5 m,
+y ±0.3 m). So not a mapped obstacle, and probably not an obstacle at all.
+
+Relaunched nav2 and re-issued the remaining distance as a fresh goal (current
+position → +0.7 m). This time it drove straight through with no stall —
+`Reached the goal!` / `Goal succeeded` in ~7 s, arriving at x: 0.566 → 1.194 m
+(0.63 of the 0.70 m requested, inside `general_goal_checker`'s tolerance).
+`/fusion/status` right after: `vo_implausible: 0`, `jumps: 0`,
+`dead_reckoned: 51` samples / `dr_metres: 0.068` — a brief, harmless VO
+dropout covered by dead reckoning, not a divergence.
+
+**Read together with §13 (skid-steer scrub) and §14 (pivot duty):** the yaw
+drift during the stalled run, on a goal that was purely straight-line, looks
+like the same per-side scrub already documented there rather than anything
+new. Not reproduced on the second attempt, so logged as a one-off rather than
+chased further — worth a second look if a future goal stalls the same way
+(oscillating translation + unwanted yaw drift, no mapped obstacle).
