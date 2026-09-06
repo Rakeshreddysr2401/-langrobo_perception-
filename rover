@@ -10,6 +10,7 @@
 #   ./rover fused      the fused pose -> /odom + TF, what nav2 consumes
 #   ./rover map        nvblox — build the room as it drives (Phase 2)
 #   ./rover nav        nav2 — click a goal, it plans and drives there (Phase 3)
+#   ./rover vlm        VLM pixel -> Nav2 goal bridge, for the Pi 5 brain (Phase 4)
 #   ./rover rviz       view it on the Jetson's own screen (costs GPU)
 #   ./rover view       RViz on the laptop — finds it on DHCP, checks it renders
 #   ./rover logs <n>   tail a layer's log (camera|vo|gyro|fused)
@@ -29,6 +30,7 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOSTSRC="$REPO/phase1"
 SRC2=/opt/rover2
 SRC3=/opt/rover3
+SRC4=/opt/rover4
 CAM_NS=/camera/camera0
 
 # The cuvslam wheel ships its own libcuvslam.so and CUDA-12 userspace libs, and
@@ -75,6 +77,7 @@ start_container(){
     -v "$HOSTSRC":$SRC:ro \
     -v "$REPO/phase2":$SRC2:ro \
     -v "$REPO/phase3":$SRC3:ro \
+    -v "$REPO/phase4":$SRC4:ro \
     -v "$REPO/logs":/logs \
     "$IMAGE" -c 'sleep infinity' >/dev/null
   sleep 2
@@ -99,6 +102,7 @@ camera)
             enable_infra1:=true enable_infra2:=true depth_module.infra_profile:=896x504x30 \
             depth_module.emitter_enabled:=false depth_module.laser_power:=0.0 \
             enable_depth:=true enable_color:=true rgb_camera.color_profile:=424x240x15 \
+            align_depth.enable:=true \
             enable_motion:=true enable_sync:=false > /tmp/camera.log 2>&1'
   t=0
   until cam_ready; do
@@ -291,6 +295,32 @@ nav)
   echo "  Log: ./rover logs nav"
   ;;
 
+# ── vlm ─────────────────────────────────────────────────────────────────────
+# The Jetson half of "go to the red bottle": the Pi 5 brain's VLM picks a
+# pixel in the color frame, this turns that pixel into a Nav2 goal. See
+# phase4/nodes/pixel_to_goal.py for the full contract and why it's odom-
+# framed, not map-framed like the code it bridges to expects.
+vlm)
+  need_container
+  echo "  checking the fused pose is up before bridging vision to a goal..."
+  assert_rate /odom 15 "fused odom" || die "no fused pose — run ./rover fused"
+  kill_match 'image_bridge.py|pixel_to_goal.py'
+  echo "[vlm] image_bridge — color frame -> JPEG, for the Pi 5's look()/VLM"
+  dexec "exec python3 $SRC4/nodes/image_bridge.py > /tmp/image_bridge.log 2>&1"
+  echo "[vlm] pixel_to_goal — VLM pixel + depth -> odom-frame Nav2 goal"
+  dexec "exec python3 $SRC4/nodes/pixel_to_goal.py > /tmp/pixel_to_goal.log 2>&1"
+  sleep 4
+  echo
+  echo "  GATE vlm:"
+  assert_rate /camera/color/image_raw/compressed 2 "compressed color (for Pi5)" || true
+  rexec "n=\$(ros2 topic info /vision/pixel_query 2>/dev/null | awk '/Subscription count/{print \$3}'); \
+         printf '      %-22s %7s        (want >= 1)   %s\n' 'pixel_to_goal listening' \"\${n:-0}\" \"\$([ \"\${n:-0}\" -ge 1 ] && echo OK || echo FAIL)\""
+  echo
+  echo "  This does not drive anything by itself — it only answers queries."
+  echo "  The Pi 5's approach_described_object() tool is what triggers a drive."
+  echo "  Log: ./rover logs image_bridge   or   ./rover logs pixel_to_goal"
+  ;;
+
 # ── rviz ────────────────────────────────────────────────────────────────────
 rviz)
   need_container
@@ -417,6 +447,7 @@ status)
       "map:/nvblox_node/static_occupancy_grid:1" \
       "nav:/global_costmap/costmap:0.5" \
       "nav:/local_costmap/costmap:1" \
+      "vlm:/camera/color/image_raw/compressed:2" \
       "view:/rover/model:0.5"; do
     l=${row%%:*}; rest=${row#*:}; t=${rest%:*}; want=${rest##*:}
     r=$(rate_of "$t")
