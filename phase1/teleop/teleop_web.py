@@ -16,7 +16,15 @@ MODE switch on the page:
     your control (overrides nav2).
 
 Publishes DIRECTLY to /cmd_vel (bypasses safety_guard) — drive by sight. Speed
-constants below are tunable (rover caps: vx<=0.22 m/s, wz<=0.90 rad/s).
+constants below are tunable. The caps this line used to quote (vx<=0.22 m/s,
+wz<=0.90 rad/s) were inherited from the old open-loop firmware and are
+contradicted by the constants immediately below and by the measurements in
+their comment: full pivot authority is 2 * MAX_WHEEL_VEL / WHEEL_BASE_M
+= 2 * 0.86 / 0.34 = 5.06 rad/s, and WZ is deliberately set just under it
+because 2.0 rad/s could not break the tyres loose sideways at all. The real
+limits are: vx <= 0.86 m/s and wz <= 5.06 rad/s mechanically, vx ~0.20 m/s and
+wz ~2.0 rad/s before cuVSLAM tracking starts to suffer (OPERATIONS.md §2).
+Those two do not overlap for pivots — that tension is real, not a typo.
 """
 import json
 import threading

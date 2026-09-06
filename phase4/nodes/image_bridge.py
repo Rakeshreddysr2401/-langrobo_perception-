@@ -71,6 +71,14 @@ class ImageBridge(Node):
         now = time.monotonic()
         if now - self._last_pub < self._min_period:
             return
+        # Nobody listening → don't decode, don't JPEG-encode, don't publish.
+        # This ran flat out whenever the color stream was up, whether or not
+        # the Pi 5 brain existed: a cv_bridge conversion plus a JPEG encode of
+        # an 896x504 frame, five times a second, forever, on a Jetson already
+        # at 96-99% GPU with 1.6 GB RAM free (JETSON_LOAD.md). It also kept
+        # ~250-400 KB/s of WiFi busy for an audience of zero.
+        if self._pub.get_subscription_count() == 0:
+            return
         try:
             cv_img = self._bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
         except Exception as e:

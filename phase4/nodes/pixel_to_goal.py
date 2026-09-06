@@ -34,9 +34,15 @@ different, fuller perception stack (Isaac ROS detections_3d, a pan/tilt
 head) this rover does not have. This rover's Nav2 runs in `odom` only —
 single session, no relocalisation, documented in rover's nav) case and
 README/TODO. The goal published here is in odom to match what Nav2 here
-actually understands; _nav_worker's hardcoded frame_id "map" needs the
-matching one-line fix ("odom") on the Pi 5 side for start_nav_to_pose to
-work at all on this rig — see TODO.
+actually understands.
+
+The Pi 5 side is fixed and no longer needs watching in three places: goals,
+TF pose reads and detection frames all now come from one constant,
+ROS2Bridge.NAV_FRAME (default "odom", override with LANGROBO_NAV_FRAME).
+Two of those three had been corrected by hand on 2026-09-06 and the third —
+on_detections, which demanded "map" — was missed and silently dropped every
+detection it was given. If this node's output frame ever changes, change
+NAV_FRAME to match and nothing else.
 
 DEPTH: aligned_depth_to_color, not the raw depth stream. Color and depth are
 different sensors with different intrinsics/FOV (and, since the color
@@ -57,11 +63,11 @@ Run:  python3 pixel_to_goal.py
 """
 import json
 import math
+import os
 import time
 
 import numpy as np
 import rclpy
-from rclpy.duration import Duration
 from rclpy.node import Node
 from rclpy.time import Time
 from cv_bridge import CvBridge
@@ -70,10 +76,12 @@ from sensor_msgs.msg import CameraInfo, Image
 from std_msgs.msg import String
 from tf2_ros import Buffer, TransformListener
 
-# Mirrors langrobo_core/tools/approach.py's _STANDOFF_M — kept in sync by
-# hand, different repos/machines. If one changes, the approach distance for
-# described-object goals and YOLO-class goals will disagree.
-_STANDOFF_M = 0.45
+# Mirrors langrobo_core/tools/approach.py's _STANDOFF_M — different repos, on
+# different machines, so it cannot be imported. It reads the SAME environment
+# variable that side does, so exporting LANGROBO_STANDOFF_M once (here and on
+# the Pi 5) keeps described-object goals and YOLO-class goals agreeing without
+# editing two files in two repos and hoping.
+_STANDOFF_M = float(os.environ.get('LANGROBO_STANDOFF_M', '0.45'))
 _MAX_SENSOR_AGE_S = 1.5   # camera_info / depth older than this = stale, refuse
 
 # aligned_depth_to_color is only ~55% valid overall (measured 2026-09-06,
@@ -216,9 +224,17 @@ class PixelToGoal(Node):
         y_cam = (v - cy) * depth_m / fy
         z_cam = depth_m   # optical-frame convention: Z forward, X right, Y down
 
+        # NO TIMEOUT. This runs in _on_query, i.e. inside the single-threaded
+        # executor's callback — the very thread the TransformListener needs in
+        # order to consume /tf and fill the buffer. Blocking here cannot
+        # succeed: the buffer can only be filled by the thread we are blocking,
+        # so a 0.5s timeout was a guaranteed 0.5s stall followed by the same
+        # failure. Latest-available (Time()) is right anyway — cuVSLAM
+        # publishes odom->base_link at 20 Hz and the depth frame this pixel
+        # came from is already gated at _MAX_SENSOR_AGE_S.
         try:
             cam_to_odom = self._tf_buffer.lookup_transform(
-                'odom', info.header.frame_id, Time(), timeout=Duration(seconds=0.5))
+                'odom', info.header.frame_id, Time())
         except Exception as e:
             self._reply(req_id, False, reason=f"tf_failed:{type(e).__name__}")
             return

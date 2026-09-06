@@ -1218,3 +1218,72 @@ Worth caring about because remote bring-up of the Pi 5 (voice, the brain) goes
 over exactly this link, and because it will look like "the Pi 5 crashed" when
 it has not. If it recurs, worth checking whether the Jetson's wired interface
 can carry the Pi 5 link instead of the Wi-Fi radio.
+
+---
+
+## 🔴 30. The Pi 5 brain asks this rover for four things it never answers (2026-09-06)
+
+Read both repos side by side as one system for the first time. The rover is
+not the problem; the **seam** is. Four topics `pi5_ros2_ws`'s `ros2_bridge.py`
+speaks have no counterpart here at all — not a stopped node, not a container
+that is down: no code anywhere in this repo that publishes or subscribes them.
+
+| topic | what it powers on the brain side |
+|---|---|
+| `/vision/detections_3d` | `approach_object`, `where_is`, `list_known_objects`, `scan_surroundings`'s object report, **the whole `world_model` service** |
+| `/vision/target` + `/vision/target_result` | `navigate_to_visible_object` (the mono visual-servo fallback) |
+| `/servo_pan`, `/servo_tilt` | `point_camera` — `rover_firmware_v2.ino` declares three subscriptions and none of them are servos, and there is no mount |
+| `/audio/music_*` | every tool in `tools/music.py` |
+
+This is the same shape as §21 and the `map`-frame fault: **it presents as
+healthy.** Nothing errors. `approach_object("chair")` searches, finds nothing,
+and answers *"I haven't seen one before either, so I have nowhere to go"* —
+about a chair it is looking straight at.
+
+The consequence worth acting on: **`approach_described_object` (VLM pixel →
+`phase4/nodes/pixel_to_goal.py`) is the only working object-approach path on
+this rover**, and it costs a VLM round-trip (~10–40 s) per look. A detector
+publishing
+
+```json
+{"frame": "odom", "objects": [{"label": "chair", "x": 1.2, "y": -0.4, "z": 0.3, "conf": 0.8}]}
+```
+
+on `/vision/detections_3d` would light up five brain-side tools at once, at
+roughly zero query cost. `"frame"` must be `odom` — the brain now drops (and
+logs) anything else.
+
+**Fixed here the same day:**
+
+- `pixel_to_goal._on_query` called `lookup_transform(..., timeout=Duration(0.5))`
+  **from inside the executor callback thread** — the same single thread the
+  `TransformListener` needs in order to consume `/tf` and fill the buffer. It
+  could not succeed: a guaranteed 0.5 s stall followed by the same failure.
+  Latest-available (`Time()`) now, matching the `base_link` lookup right below
+  it, which never had the timeout.
+- `image_bridge` re-encoded 896×504 JPEGs at 5 Hz forever, whether or not
+  anything was subscribed — on a box at 96–99 % GPU with 1.6 GB free
+  (JETSON_LOAD.md), plus ~250–400 KB/s of Wi-Fi for an audience of zero. It
+  checks `get_subscription_count()` first now.
+- `teleop_web.py`'s docstring quoted caps (`vx<=0.22`, `wz<=0.90`) that its own
+  constants and comment directly contradict — inherited from the open-loop
+  firmware.
+
+**Still open, and it needs one measurement here.** The brain's drive
+calibration was written for the pre-`v2` open-loop firmware: it commanded
+0.28 m/s while assuming the robot physically moved at 0.60 m/s, so every
+`move_robot` distance came out **2.1× short** (`F:20` drove ~9 cm). Fixed on
+that side. But it raises a question about *this* repo:
+
+> `phase3/config/nav2.yaml`'s `velocity_smoother` caps angular at 1.5 rad/s.
+> `phase1/teleop/teleop_web.py` measured that **2.0 rad/s cannot break this
+> chassis's tyres loose sideways at all** — a pivot command becomes a
+> forward/backward curve, which is how 10.7 m of "room loop" fitted inside a
+> 1.8 m box on 2026-08-22. If that holds, **Nav2's in-place rotations are
+> curving too**, and that would quietly explain heading error which survives a
+> good position fix.
+>
+> One test settles it: command a pure rotation through Nav2 and watch whether
+> the base translates.
+
+Full cross-repo writeup: **`pi5_ros2_ws/INTEGRATION_GAPS.md`**.
