@@ -24,6 +24,7 @@ finishing 4.9 cm and 3.6 cm from the target against a 5 cm tolerance, in 6 s and
 
 ```bash
 ./rover camera && ./rover pose && ./rover fused && ./rover map && ./rover nav
+./rover vlm                                    # phase 4: VLM pixel -> nav2 goal
 ./rover view                                   # RViz on the laptop
 
 docker exec -it rover bash -lc 'source /opt/ros/jazzy/setup.bash; \
@@ -56,6 +57,24 @@ and drives on it. The wheels didn't turn either way at first (§24), but a
 full power-cycle of every device fixed that same day: a 0.7 m autonomous goal
 was planned and driven end to end, `Goal succeeded`, no divergence (§26).
 
+**2026-09-06 (later) — the VLM bridge landed, and the fleet was checked live.**
+`./rover vlm` is a real layer now: `phase4/nodes/image_bridge.py` publishes the
+color frame as JPEG for the Pi 5's `look()`, and `phase4/nodes/pixel_to_goal.py`
+turns a VLM-picked pixel into an odom-frame nav2 goal. The matching Pi 5 fix
+went in the same day — `ros2_bridge.py` had `frame_id = "map"` hardcoded in
+both `get_current_pose()` and `_nav_worker()`, and **this rover has no map
+frame**, so every `navigate_to_pose`/`approach_*` call had been failing
+silently since it was written. Both are `"odom"` now.
+
+All five boxes were then checked live and all five answered — including the
+**Mac mini, which is not idle**: it serves `gemma-4-12B` (multimodal) to the
+Pi 5's brain and is reachable from both machines. Every rate passes its gate
+except depth, at 8.3 Hz against 10 (§27). Full readout: **[FLEET_STATUS.md](FLEET_STATUS.md)**.
+
+**Talking to it: Telegram works today, voice does not.** The Pi 5 voice stack
+is built and was verified end-to-end earlier the same day, but it cannot start
+right now — the Pi 5 has neither a microphone nor a speaker attached (§28).
+
 ---
 
 ## Where to look
@@ -68,6 +87,7 @@ was planned and driven end to end, `Goal succeeded`, no divergence (§26).
 | **[PHASE2.md](PHASE2.md)** | mapping — nvblox, the map, and seeing it |
 | **[PHASE3.md](PHASE3.md)** | navigation — nav2, and everything shaped by the pivot fault |
 | **[TODO.md](TODO.md)** | open faults, and the dead theories kept so they are not re-litigated |
+| **[FLEET_STATUS.md](FLEET_STATUS.md)** | every box checked live — Jetson, Pi 5, Mac mini, ESP32, D555 — and what blocks voice |
 | **[READINESS.md](READINESS.md)** | the cross-cutting view — every subsystem's measured values against what is missing, and **what actually blocks unattended operation** |
 | **[JETSON_LOAD.md](JETSON_LOAD.md)** | the box itself — power mode, disk, what's running, and what's dev tooling vs. the rover |
 | **[VOICE_PLACEMENT.md](VOICE_PLACEMENT.md)** | why STT/TTS moved to the Pi5 — the full-stack GPU/RAM measurement that forced the call, and where the build lives |

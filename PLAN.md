@@ -95,3 +95,12 @@ if error accumulates as you move.
   arrive together. Worth checking whether that seam is real.
 - The mac mini VLM, and what "intelligently" means beyond autonomy.
 
+  **Answered, in part, 2026-09-06.** The Mac mini is no longer "not active"
+  as line 19 above still says (that line is left as written — it is the
+  original ask, recorded verbatim). It sits at `192.168.1.6`
+  (`singireddys-mac-mini.local:8080`) serving `gemma-4-12B-it-Q4_K_M` over a
+  llama.cpp OpenAI-compatible endpoint, capabilities `["completion",
+  "multimodal"]`, and it is the LLM **and** VLM behind the Pi 5's
+  `agent_node` — `primary_available: true`, reachable from both the Pi 5 and
+  the Jetson. What "intelligently" means beyond autonomy is still open.
+

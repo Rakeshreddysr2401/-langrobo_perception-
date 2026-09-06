@@ -1098,3 +1098,123 @@ like the same per-side scrub already documented there rather than anything
 new. Not reproduced on the second attempt, so logged as a one-off rather than
 chased further — worth a second look if a future goal stalls the same way
 (oscillating translation + unwanted yaw drift, no mapped obstacle).
+
+---
+
+## 🟠 27. Depth stream at 8.3 Hz, under its 10 Hz gate (2026-09-06)
+
+`./rover status` during the fleet check:
+
+```
+camera  /camera/camera0/depth/image_rect_raw     8.3   want 10   LOW
+camera  /camera/camera0/infra1/image_rect_raw   25.8   want 15   OK
+```
+
+IR is fine, so this is not the camera falling over — it is depth specifically.
+
+**Nothing downstream is broken by it right now.** nvblox publishes at 4.8 Hz,
+both costmaps pass, `/odom` is 20 Hz, cuVSLAM is tracking cleanly. Logged
+because it is the first rate to sit under a gate in a while, and because of
+what it feeds: `pixel_to_goal.py` reads `aligned_depth_to_color` to turn a
+VLM pixel into a metric goal. A slow depth stream there means a staler depth
+sample behind each goal, which is exactly the kind of thing that gets blamed
+on the VLM later.
+
+**Leading theory: the `align_depth.enable:=true` added the same day.** That
+makes the driver reproject depth into the colour frame itself, which is real
+per-frame work it was not doing before. Colour was also enabled that day
+(`enable_color:=true`, 424x240x15). Both landed together, so neither is
+isolated yet.
+
+**Not yet done:** measure depth with `align_depth` off and colour still on, to
+split the two. If alignment is the cost, the question is whether 8.3 Hz is
+good enough for the VLM path (probably — goals are issued at human pace, not
+at frame rate) or whether the colour profile should drop instead.
+
+---
+
+## 🔴 28. Voice cannot start — the Pi 5 has no audio hardware attached (2026-09-06)
+
+Tried to bring up `pi5_voice_pkg`. **Everything in software passed:**
+
+- `fleet_role.sh voice status` → `jetson voice: stopped`, no whisper/kokoro
+  processes on the Jetson, so the "never run both" precondition is met.
+- `SARVAM_API_KEY` and `SONIOX_API_KEY` both present in `~/ros2_ws/.env`.
+- Config reads clean: `stt_provider: sarvam`, `tts_provider: sarvam_translate`,
+  `wake_detector: openwakeword`, `wake_word: hey_jarvis`, `require_wake: true`.
+
+**The hardware is the blocker.**
+
+```
+bluetoothctl info D6:AA:BB:59:EF:B6
+    Paired: no    Bonded: no    Trusted: yes    Connected: no
+bluetoothctl connect D6:AA:BB:59:EF:B6
+    Failed to connect: org.bluez.Error.Failed br-connection-page-timeout
+```
+
+Two 15–18 s inquiry scans never saw the boAt Stone; it shows in
+`bluetoothctl devices` only as a remembered pairing. **The Pi 5's own adapter
+is healthy** and was ruled out: `Powered: yes`, `rfkill` neither soft nor hard
+blocked, `hci0: UP RUNNING PSCAN`, `TX bytes:68432 errors:0` — those TX bytes
+are connection pages going out unanswered. The Pi is calling; the Stone is not
+picking up.
+
+The documented wired fallback is not present either:
+
+```
+arecord -l                 ->  no capture hardware devices at all
+pactl list short sinks     ->  auto_null       (PipeWire's placeholder)
+```
+
+So the Pi 5 currently has **neither a microphone nor a speaker**.
+
+**`Paired: no` is the part that matters.** The bond is gone, not just the
+connection — that is the post-reboot behaviour `PI5_VOICE.md` already
+documents. `connect` cannot work against it because bluez holds no key, so
+this needs a real re-pair with the speaker in **pairing mode** (not merely
+powered on — powered on alone, it will chase its last host). Sequence:
+
+```bash
+bluetoothctl remove D6:AA:BB:59:EF:B6      # clear the stale record first
+bluetoothctl --timeout 20 scan on | grep -i stone
+bluetoothctl pair D6:AA:BB:59:EF:B6 && bluetoothctl trust D6:AA:BB:59:EF:B6 \
+  && bluetoothctl connect D6:AA:BB:59:EF:B6
+```
+
+A USB headset in the Pi 5 skips all of it — `bt_audio.ensure()` falls back to
+whatever device exists.
+
+**The nodes were deliberately NOT launched.** `bt_audio.ensure()` never raises
+by design; it logs a status dict and carries on with whatever device it had.
+Against no device, both nodes would have come up looking green while being
+completely deaf — a worse failure mode than not starting them.
+
+**Two things to know before the first utterance, neither a fault:**
+`tts_provider: sarvam_translate` means it answers in **Telugu** (set
+`tts_provider: local` for English Kokoro); and the first turn can take
+50–108 s cold (KV cache, or a stale HTTP connection to the Mac mini) against
+~1.5 s warm — ask twice before concluding voice is broken.
+
+**Telegram is unaffected and remains the working channel.**
+
+---
+
+## 🟡 29. SSH to the Pi 5 goes intermittently unresponsive (2026-09-06)
+
+During the fleet check the first several `ssh rakhi24@192.168.1.16` sessions
+ran fine, then every one hung and timed out — for several minutes — before
+recovering on its own. Throughout the outage:
+
+- `ping` succeeded (0% loss, though `rtt max` 51 ms with `mdev` 25 ms — jittery)
+- TCP to port 22 **connected** — so sshd was listening and reachable
+- the hang was after the TCP handshake, i.e. in the SSH session itself
+
+Not diagnosed. **First suspect is Wi-Fi contention:** the Jetson reaches the
+Pi 5 over `wlP1p1s0`, and that same radio is carrying the DDS traffic for the
+whole stack — camera, VO, costmaps — while the stack is up. An SSH session is
+small and latency-sensitive and would be the first thing to starve.
+
+Worth caring about because remote bring-up of the Pi 5 (voice, the brain) goes
+over exactly this link, and because it will look like "the Pi 5 crashed" when
+it has not. If it recurs, worth checking whether the Jetson's wired interface
+can carry the Pi 5 link instead of the Wi-Fi radio.

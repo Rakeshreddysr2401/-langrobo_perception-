@@ -18,6 +18,7 @@ own layer instead of hiding in a wall of log.
 ./rover fused       # + the fused pose -> /odom and TF
 ./rover map         # + nvblox: build the room as it drives
 ./rover nav         # + nav2: plan a route and drive it
+./rover vlm         # + the VLM bridge: a picked pixel -> a nav2 goal (phase 4)
 ```
 
 | command | what it proves |
@@ -27,6 +28,7 @@ own layer instead of hiding in a wall of log.
 | `./rover fused` | `/odom` ≥15 Hz, TF `odom → base_link` owned by exactly one node |
 | `./rover map` | the occupancy grid publishing, and how much is mapped |
 | `./rover nav` | both costmaps carrying obstacle data, all servers activated |
+| `./rover vlm` | compressed colour ≥2 Hz, and `pixel_to_goal` subscribed to `/vision/pixel_query` |
 
 **Restarting `fused` destroys the map.** The pose origin resets, so the old
 geometry would land in the wrong place. Restart `map` whenever you restart
