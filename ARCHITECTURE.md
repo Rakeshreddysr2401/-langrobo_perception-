@@ -180,6 +180,8 @@ a point 17 cm in front of itself.
 | `phase3/bt/*.xml` | behaviour trees with Spin removed |
 | `phase1/nodes/values.py` | one-shot readout of every sensor |
 | `phase1/firmware/rover_firmware_v2.ino` | ESP32: PID, encoders, telemetry |
+| `phase1/firmware/HARDWARE.md` | the drivetrain itself — wiring, motor/encoder specs, direction flags, bench results |
+| `phase1/firmware/FLASHING.md` | how to flash it, and why the last flash was needed |
 
 ### Why `fusion.py` is separate from `fusion_node.py`
 
