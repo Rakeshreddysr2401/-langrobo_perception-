@@ -74,7 +74,7 @@ Build Cache    38   TOTAL  23.6 GB   ACTIVE 0
 
 | file | size | what it is |
 |---|---|---|
-| `rtabmap.db` | 5.3 G | **live — keep** |
+| `rtabmap.db` | 5.3 G | **"live" was written before this rover ran cuVSLAM** — nothing in `./rover` starts RTAB-Map, so re-check before keeping 5.3 G for it |
 | `rtabmap.db.reset-20260718-102456` | 7.0 G | a reset backup, 47 days stale |
 | `rtabmap.db.corrupt-19700101-053115` | 1.4 G | epoch-timestamped — a crash artifact from a clock-less boot |
 | `rtabmap.db.corrupt-20260717-121422` | 967 M | another crash backup |
@@ -83,7 +83,11 @@ Build Cache    38   TOTAL  23.6 GB   ACTIVE 0
 | `rtabmap_sim.db` | 2.6 G | simulation DB — keep if sim is still used, else archive |
 
 None of these are referenced from `~/rover` (`TODO.md`, `READINESS.md`) — they
-predate this repo's tracked history. Worth a tar-and-move-off-device rather
+predate this repo's tracked history, and they predate the localiser it
+actually uses: this rover runs **cuVSLAM**, and no launch path in `./rover`
+starts RTAB-Map at all. The "live — keep" note above was inherited from the
+earlier design; treat the whole directory as reclaimable until something
+demonstrates otherwise. Worth a tar-and-move-off-device rather
 than outright deletion, in case a corrupt-file postmortem is still wanted.
 
 **Low-priority, small:**
