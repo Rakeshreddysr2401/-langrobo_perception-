@@ -1618,3 +1618,67 @@ server. A WiFi dropout on the Pi 5 side would produce exactly the decay-then-
 recover signature observed, and would have nothing to do with Jetson DDS load or
 with `/cmd_vel` publisher count. **That is now the first hypothesis to test**,
 ahead of the publisher-count one above.
+
+
+---
+
+## 🔴 34. Nav2 fails to reach anything — controller one run, planner the next (2026-09-10)
+
+Three consecutive `approach_described_object` attempts at a white bucket ~1.6 m
+away. None arrived. **This is the thing actually blocking use of the robot** —
+everything else fixed today was about being *told* what happened.
+
+### Two different failures, not one
+
+**Run A (01:09:44 → 01:10:19) — the controller.** The rover visibly drove up,
+reversed, drove up, reversed, drove up, stopped:
+
+```
+follow_path Aborting ×4  →  Running backup  →  completed
+follow_path Aborting ×2
+follow_path Aborting ×2  →  Running backup  →  completed
+follow_path Aborting ×4  →  Running backup  →  completed
+bt_navigator: Goal failed
+```
+
+**Run B (01:31:03 → 01:31:10) — the planner.** No movement at all:
+
+```
+compute_path_to_pose Aborting ×6
+behavior_server: Running backup → backup FAILED
+bt_navigator: Goal failed
+```
+
+A had a path and could not follow it. B could not compute one. Run B was also
+in MANUAL for part of it, which is now guarded — so B needs re-running before
+being taken at face value.
+
+### The hypothesis worth testing first
+
+Nav2 here has **rotate-to-heading and spin recovery disabled**, on the recorded
+grounds that this rover cannot turn in place (`./rover nav`, TODO 14). But
+teleop's `left`/`right` **do** pivot it — `MOVES` counter-rotates the wheels,
+and the comment there calls it "pivot in place (both wheels counter-rotate)".
+
+If it can pivot, that config is a stale assumption, and it explains run A
+exactly: the standoff goal needs a heading nav2 has been forbidden to turn to,
+so `follow_path` aborts and `backup` runs instead, forever, until the BT gives
+up. **Check whether the rover can still pivot before changing anything** — the
+teleop comment is old too, and TODO 14 was presumably written for a reason.
+
+For run B, suspect the goal pose itself: `_STANDOFF_M` is 0.45 m, and the map
+is ~74% unknown. A goal inside the bucket's inflation radius, or in unknown
+space, is unplannable and would abort exactly like that.
+
+### Confounder now removed
+
+Both runs happened with **LangGraph Studio running beside the brain**, two
+graphs publishing `/cmd_vel` (see the Studio commit). Whether that contributed
+is untested. Studio is stopped; the next run is the first clean measurement.
+
+### Next
+
+1. Re-run with Studio down and teleop in AUTO — clean baseline.
+2. `./rover logs nav` for which of the two failures it is.
+3. Test a hand pivot via teleop, then revisit the rotate-to-heading config.
+4. If it is the planner, print the goal pose and check it against the costmap.
