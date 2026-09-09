@@ -1244,7 +1244,7 @@ can carry the Pi 5 link instead of the Wi-Fi radio.
 
 ---
 
-## 🔴 30. The cuVSLAM honesty gate reported "ok — tracking" while cuVSLAM was dead (2026-09-09)
+## ✅ 30. The cuVSLAM honesty gate reported "ok — tracking" while cuVSLAM was dead — FIXED, verified 2026-09-09
 
 The check that exists specifically to catch a silent pose failure passed a pose
 whose tracker was **not running at all**.
@@ -1308,16 +1308,43 @@ publishing a confidently wrong pose, so freshness looks fine. It is false of
 The check was written for the first failure mode and, in the process, dismissed
 the one field that cleanly catches the second.
 
-### Fix
+### The fix
 
-`health.py` should test `vo_alive` as its own failure, separately from the
-divergence test, and exit non-zero on it — so the layer gates that call it
-(`fused`, and the refusal in `map`) inherit the catch. Worth logging the
-distinction it prints, too: "diverged" and "not running" want different fixes,
-though both start with `./rover pose`.
+`health.py` now reads `vo_alive` as its own failure, checked **before** the
+divergence test — because once the tracker is dead, `vo_z` and
+`vo_implausible` are frozen garbage and testing them first would report the
+wrong fault.
 
-Until then: **`./rover status`'s `cuvslam` line does not prove the tracker is
-alive.** Read the `/vo/odom` rate row next to it.
+It is sampled **across the window, not once**. A single false reading is the
+~1 s dropout of §31, not a death, so:
+
+| `vo_alive` across ~4 samples | verdict | rc |
+|---|---|---|
+| all false | `✗ NOT RUNNING` — frozen numbers, `./rover pose` THEN `./rover fused` | 1 |
+| some false | `ok`, plus a dropout warning pointing at §31 | 0 |
+| all true | `ok — tracking, not dead reckoning` | 0 |
+| field absent | `ok`, plus a warning that this fusion_node cannot report it | 0 |
+
+The low-landmark warning is now suppressed when the tracker is not alive — that
+count is frozen too, and "drive where there is texture" is bad advice for a
+process that is not running.
+
+**Both gates inherit it**, because both propagate the exit code: `./rover fused`
+prints the do-not-map warning (`rover:255`), and `./rover map` now **refuses**
+(`rover:276`) on a dead tracker, which is exactly what it failed to do above.
+
+### Verified
+
+Against the live stack: `ok — tracking`, rc 0 — no regression. Then against a
+synthetic `/fusion/status` on an isolated `ROS_DOMAIN_ID`, so the running stack
+was never disturbed, all four rows of that table reproduced:
+
+```
+DEAD    (vo_alive 0)        ✗ NOT RUNNING — ... in any of 4 samples.    rc=1
+FLICKER (vo_alive 1,1,0,1)  ok  + ! vo dropped out in 1 of 4 samples    rc=0
+HEALTHY (vo_alive 1)        ok — tracking, not dead reckoning           rc=0
+OLD     (field absent)      ok  + ! does not publish vo_alive           rc=0
+```
 
 ---
 

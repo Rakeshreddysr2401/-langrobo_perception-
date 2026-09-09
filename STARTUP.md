@@ -103,19 +103,32 @@ way before anyone noticed.
   corrupts the map permanently rather than degrading it.
 - `./rover compare` shows a red banner live and in its verdict.
 
-### It catches divergence. It does NOT catch a dead tracker.
+### It catches two different failures, and says which
 
-The check reads `vo_z`, `vo_implausible`, `dr_metres` and `landmarks` — all
-last-known values that **freeze** rather than disappear when `vo_node` stops
-publishing. On 2026-09-09 it printed `ok — tracking, not dead reckoning` with
-no cuVSLAM node running at all, and `./rover map` built on that pose without
-refusing. `dr_metres` is the field that would have caught it, and it reads 0.00
-until the rover actually drives — so a stationary rover with a dead tracker
-looks exactly like a healthy one, which is the state every bring-up is in.
+Earlier on 2026-09-09 it caught only one. It printed `ok — tracking, not dead
+reckoning` with no cuVSLAM node running at all, and `./rover map` built on that
+pose without refusing — because the four fields it read (`vo_z`,
+`vo_implausible`, `dr_metres`, `landmarks`) are last-known values that **freeze**
+rather than disappear when `vo_node` stops. At a standstill a dead tracker read
+identically to a healthy one. Fixed the same day (TODO 30); it now also reads
+`vo_alive`, and both failures print distinctly:
 
-**So read the `/vo/odom` rate row next to the `cuvslam` line.** If it is `0.0`
-and the `cuvslam` line still says `ok`, believe the rate. Fix is the same:
-`./rover pose` **then** `./rover fused`. Full detail in [TODO.md](TODO.md) §30.
+```
+✗ DIVERGED      cuVSLAM is publishing a confidently wrong pose
+✗ NOT RUNNING   cuVSLAM is publishing nothing; the numbers above are frozen
+```
+
+**Both are fixed the same way** — `./rover pose` **then** `./rover fused` — and
+both now make `./rover map` refuse rather than smear the map.
+
+You may also see this, which is *not* a failure and does not block a gate:
+
+```
+! vo dropped out in 1 of 4 samples — frame gaps past max_frame_delta_s (1.0 s)
+```
+
+That is the load-related stall in [TODO.md](TODO.md) §31 — tracking recovers in
+~1 s. Worth watching before a long autonomous run, not worth stopping for.
 
 What you want to see:
 
