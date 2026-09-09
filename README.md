@@ -16,6 +16,10 @@ Four phases, each standing on the one before it:
 
 Phases 2–4 must also work in unfamiliar places; that is the point of the goal.
 
+> **Just powered everything back on?** Follow **[STARTUP.md](STARTUP.md)** — the
+> five boxes, the layer order, what to do physically when one fails, and the
+> LangGraph Studio link. It is the one document to follow after a power cycle.
+
 ## Where it actually stands (2026-08-23)
 
 **It navigates.** Autonomous goals of 1.00 m and 1.20 m were planned and driven,

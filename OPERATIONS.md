@@ -9,6 +9,10 @@ misbehaves. For *why* anything is the way it is see
 
 ## 1. Bring-up
 
+> Coming back from a power cycle? **[STARTUP.md](STARTUP.md)** is the shorter
+> path: it covers all five boxes, not just the Jetson stack, and ends with the
+> Studio link. This section is the reference for what each layer proves.
+
 Run these **in order**. Each checks the layer beneath it, so a failure names its
 own layer instead of hiding in a wall of log.
 
