@@ -238,6 +238,35 @@ when the command is `pkill` — see §6.
 **Teleop must be in AUTO before any autonomous motion.** In MANUAL the rover
 crawls, stalls, and it looks exactly like a controller fault.
 
+### The four services, and the one that needs you
+
+All of it is systemd on the Pi 5, which §5 never actually named:
+
+| unit | what it is |
+|---|---|
+| `langrobo-brain` | the LangGraph `agent_node` |
+| `langrobo-teleop` | the `:8091` hold-to-move web page |
+| `langrobo-microros` | the **ESP32 <-> Pi 5 WiFi UDP bridge** — see §4 and TODO §33 |
+| `langrobo-discovery` | Fast DDS Discovery Server, the Pi 5 <-> Jetson meeting point |
+
+After changing anything under `~/ros2_ws/src/langrobo_core`, the brain must be
+restarted to see it — `langrobo_core` is imported straight from `src/`, so there
+is **no colcon build step** for it, but the running process holds the old code.
+
+```bash
+ssh 192.168.1.16 'sudo systemctl restart langrobo-brain'
+```
+
+**That needs a password** — `sudo -n` fails, so it cannot be scripted or run by
+an agent on your behalf. Type it yourself. Confirm it actually took, because a
+piped `sudo` failure is easy to miss:
+
+```bash
+ssh 192.168.1.16 'systemctl show -p ExecMainStartTimestamp langrobo-brain'
+```
+
+A PID that did not change means the restart did not happen.
+
 ---
 
 ## 6. LangGraph Studio — the link you asked for
