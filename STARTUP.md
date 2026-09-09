@@ -156,6 +156,10 @@ crawls, stalls, and it looks exactly like a controller fault.
 Not started at boot. `agent_node` runs the graph in-process and needs no server;
 Studio is a **separate dev server** you start by hand.
 
+The launcher lives at `~/ros2_ws/start_studio.sh` on the Pi 5, and a
+version-controlled copy is in [`phase4/pi5/`](phase4/pi5/) — if the Pi 5 is ever
+reflashed, `scp` it back from there.
+
 ### Start it on the Pi 5
 
 ```bash
@@ -242,7 +246,47 @@ Plus, off the Jetson:
 
 ---
 
-## 8. Before anything drives
+## 8. What this does NOT restore
+
+Following this document gets you a **working rig**, not the *identical* state you
+left. The difference is deliberate in some places and a known gap in others.
+
+**Comes back exactly:**
+
+- every layer and its rates, the honesty of the pose, the ESP32 link
+- the Pi 5 brain and teleop — they start at boot
+- Studio's own episodic store (`~/.langrobo/qdrant_studio` persists on disk)
+- the Pi 5's `.env`, including `STUDIO_MODEL=default`
+
+**Does NOT come back, by design:**
+
+- **The map.** nvblox builds in the `odom` frame and is discarded on shutdown —
+  phase 2c ("a map that survives a power cycle") is deferred by choice. You
+  start with an empty grid and it grows as you drive.
+- **The odom origin.** It resets to wherever the rover is when `./rover fused`
+  starts. Saved locations (`kitchen`, `entrance`, …) are coordinates in that
+  frame, so **they only mean anything relative to this session's start pose.**
+  If you moved the rover while it was off, they point somewhere else.
+
+**Does not come back, and is a real gap:**
+
+- **Anything living only on the Pi 5's SD card.** The Studio launcher is now
+  version-controlled in [`phase4/pi5/`](phase4/pi5/), and teleop in
+  [`phase1/teleop/`](phase1/teleop/) — but `~/ros2_ws` itself (the whole
+  `langrobo_core` / `langrobo_ros` tree, and `.env` with its API keys) is **not
+  in this repo** and has no backup here. A reflash loses it.
+
+**Varies between power cycles:**
+
+- **Whether the ESP32 reconnects on its own.** It did on 2026-09-09 with no
+  intervention; other sessions have needed a physical power-cycle. §4 tells you
+  which you got.
+- **The laptop's IP** — DHCP. `./rover view` finds it.
+- **Studio is not started at boot** — §6 every time.
+
+---
+
+## 9. Before anything drives
 
 - **A human watches, every time.** The rover is blind below 10 cm, above 24 cm,
   outside 87°, and **downward** — there is no drop-off detection at all.
