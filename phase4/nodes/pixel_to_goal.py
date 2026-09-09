@@ -21,7 +21,30 @@ been publishing into the void since it was written):
     out  /vision/pixel_result  std_msgs/String, JSON:
          {"id": ..., "ok": true,
           "goal": {"x": <odom metres>, "y": <odom metres>, "yaw": <radians>},
-          "depth_m": ...}
+          "depth_m": ...,
+          "object": {"x": <odom metres>, "y": <odom metres>},
+          "relative": {"forward_m": ..., "left_m": ..., "bearing_deg": ...}}
+
+         "goal" is NOT where the object is: it is _STANDOFF_M (0.45 m) SHORT
+         of it, on the robot->object line, so nav2 parks in front rather than
+         inside it. Anything answering "where is the chair" must read
+         "object"/"relative" — using "goal" understates every distance by the
+         standoff and was the reason those two fields were added (2026-09-10).
+
+         "object" is the object itself in odom. "relative" is the same point in
+         base_link terms for a human answer: +forward_m ahead, +left_m to the
+         robot's left, bearing_deg = atan2(left, forward), 0 straight ahead and
+         positive counter-clockwise.
+
+         depth_m and forward_m are NOT the same number and neither is wrong.
+         depth_m is the raw sensor value: the Z-forward component in the camera
+         optical frame (perpendicular distance to the image plane, which is what
+         a RealSense depth pixel stores — not a straight-line range). forward_m
+         is measured from base_link, which sits 0.17 m BEHIND the camera (the
+         static TF in ./rover pose), so for an object near the optical axis
+         forward_m ~= depth_m + 0.17. Verified live 2026-09-10: depth 1.19 ->
+         forward 1.36. Report forward_m/left_m to a human ("how far from the
+         robot"); depth_m is the sensor reading behind it.
          or
          {"id": ..., "ok": false, "reason": "..."}
          ground_pixel() has its own 4 s timeout and treats a silent query as
@@ -112,6 +135,14 @@ def compute_standoff_goal(rx, ry, ox, oy, standoff):
         return rx, ry, yaw
     scale = (dist - standoff) / dist
     return rx + dx * scale, ry + dy * scale, yaw
+
+
+def _yaw_from_quat(q) -> float:
+    """Yaw (radians) about Z from quaternion q. Same manual extraction as
+    fusion_node's — no tf2_geometry_msgs in the frozen image, see the module
+    docstring."""
+    return math.atan2(2.0 * (q.w * q.z + q.x * q.y),
+                      1.0 - 2.0 * (q.y * q.y + q.z * q.z))
 
 
 def _rotate_by_quat(x: float, y: float, z: float, q) -> tuple:
@@ -253,9 +284,24 @@ class PixelToGoal(Node):
         ry = base_tf.transform.translation.y
 
         gx, gy, yaw = compute_standoff_goal(rx, ry, ox, oy, _STANDOFF_M)
+
+        # Robot-relative view of the SAME object point, for tools that answer
+        # "how far / which way is it" instead of driving there. Done here rather
+        # than on the Pi 5 because the Pi 5 would have to reconstruct it from
+        # `goal`, which is standoff-shortened — it would be wrong by 0.45 m and
+        # wrong in a way that looks plausible.
+        r_yaw = _yaw_from_quat(base_tf.transform.rotation)
+        dx, dy = ox - rx, oy - ry
+        forward = dx * math.cos(r_yaw) + dy * math.sin(r_yaw)
+        left = -dx * math.sin(r_yaw) + dy * math.cos(r_yaw)
+
         self._reply(req_id, True,
                    goal={"x": round(gx, 3), "y": round(gy, 3), "yaw": round(yaw, 4)},
-                   depth_m=round(depth_m, 2))
+                   depth_m=round(depth_m, 2),
+                   object={"x": round(ox, 3), "y": round(oy, 3)},
+                   relative={"forward_m": round(forward, 2),
+                             "left_m": round(left, 2),
+                             "bearing_deg": round(math.degrees(math.atan2(left, forward)), 1)})
 
 
 def main():
