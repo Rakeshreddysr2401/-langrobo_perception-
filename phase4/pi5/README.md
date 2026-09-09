@@ -12,6 +12,30 @@ scp phase4/pi5/start_studio.sh 192.168.1.16:~/ros2_ws/start_studio.sh
 ssh 192.168.1.16 'chmod +x ~/ros2_ws/start_studio.sh'
 ```
 
+## It is not the only launcher — read this first
+
+The Pi 5 repo (`github.com/Rakeshreddysr2401/pi5_ros2_ws`) already ships
+`./scripts/dev.sh` and `./scripts/dev_voice.sh`, and they predate this script.
+`dev.sh` starts a micro-ROS agent alongside Studio and uses the Fast DDS
+Discovery Server at `127.0.0.1:11811`; `dev_voice.sh` adds STT/TTS so you can
+speak to the graph while stepping it.
+
+| | `scripts/dev.sh` | `start_studio.sh` |
+|---|---|---|
+| micro-ROS agent | starts one (UDP 8888) | none — assumes one is already up |
+| discovery | `ROS_DISCOVERY_SERVER=127.0.0.1:11811` | plain SUBNET, matching the running `agent_node` |
+| episodic memory | default store — **empty if the brain holds it** | its own `~/.langrobo/qdrant_studio` |
+| written for | brain **stopped**, Studio the only client | brain **already running** |
+
+`dev.sh`'s own header warns against running it while `langrobo-brain` is up —
+both drive `/cmd_vel` and both bind micro-ROS UDP 8888. That warning applies to
+this script too for `/cmd_vel`: with `agent_node` running you get two publishers.
+Deliberate here, but know it.
+
+**If you are stopping the brain to work in Studio, use `dev.sh`** — it is the
+richer, older, better-integrated path. This script exists for observing the live
+robot without disturbing it.
+
 ## What it starts
 
 `langgraph dev`, serving the agent graph on `127.0.0.1:2024` — the same graph

@@ -157,8 +157,21 @@ Not started at boot. `agent_node` runs the graph in-process and needs no server;
 Studio is a **separate dev server** you start by hand.
 
 The launcher lives at `~/ros2_ws/start_studio.sh` on the Pi 5, and a
-version-controlled copy is in [`phase4/pi5/`](phase4/pi5/) — if the Pi 5 is ever
-reflashed, `scp` it back from there.
+version-controlled copy is in [`phase4/pi5/`](phase4/pi5/).
+
+**The Pi 5 repo also has its own `./scripts/dev.sh`**, which predates this one
+and does more: it starts a micro-ROS agent alongside Studio and uses the Fast
+DDS Discovery Server on `127.0.0.1:11811` (see that repo's `NETWORKING.md`).
+There is also `./scripts/dev_voice.sh`, which adds STT/TTS so you can talk to
+the graph while stepping it.
+
+Use `dev.sh` when the brain is **stopped** and Studio is your only client —
+that is what it is written for, and its header warns against running it
+alongside `langrobo-brain` because both drive `/cmd_vel` and both bind
+micro-ROS UDP 8888. `start_studio.sh` is the variant for the situation we are
+actually in: `agent_node` already running, so **no** micro-ROS agent, plain
+SUBNET discovery to match the running brain, and a separate episodic store.
+Read §6's warning about two `/cmd_vel` publishers before using either.
 
 ### Start it on the Pi 5
 
@@ -268,13 +281,17 @@ left. The difference is deliberate in some places and a known gap in others.
   frame, so **they only mean anything relative to this session's start pose.**
   If you moved the rover while it was off, they point somewhere else.
 
-**Does not come back, and is a real gap:**
+**Backed up, but not in this repo:**
 
-- **Anything living only on the Pi 5's SD card.** The Studio launcher is now
-  version-controlled in [`phase4/pi5/`](phase4/pi5/), and teleop in
-  [`phase1/teleop/`](phase1/teleop/) — but `~/ros2_ws` itself (the whole
-  `langrobo_core` / `langrobo_ros` tree, and `.env` with its API keys) is **not
-  in this repo** and has no backup here. A reflash loses it.
+- **`~/ros2_ws` on the Pi 5 is its own git repo** —
+  `github.com/Rakeshreddysr2401/pi5_ros2_ws`, branch `dev-1.2.8-refactor-test`.
+  The whole `langrobo_core` / `langrobo_ros` brain tree is version-controlled
+  there, so a reflash is a `git clone`, not a loss. (An earlier draft of this
+  section claimed it was unbacked-up. It was wrong.)
+- **`.env` is the exception, and correctly so** — it is gitignored on the Pi 5
+  because it holds the LangSmith / Sarvam / Soniox / OpenAI keys. `example.env`
+  is tracked as the template. **This is the one thing with no backup anywhere**:
+  if that SD card dies you re-issue keys. Worth a copy somewhere safe.
 
 **Varies between power cycles:**
 
