@@ -318,7 +318,101 @@ library's entity caps have been exceeded. Drop `/rover_diag` first, then
 
 ---
 
-## 7. Safety
+## 7. The brain — LangGraph Studio on the Pi 5
+
+The agent graph the Pi 5 runs can be opened in LangGraph Studio: every node,
+every tool call and every handover, live. Useful for reading the agentic flow
+rather than inferring it from Telegram replies.
+
+### It is not started by anything
+
+Nothing on the Pi 5 starts it at boot — `agent_node` runs the graph in-process
+and needs no server. Studio is a **separate dev server** you start by hand.
+
+```bash
+ssh 192.168.1.16
+cd ~/ros2_ws
+source /opt/ros/jazzy/setup.bash && source install/setup.bash
+export ROS_DOMAIN_ID=0 RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
+       ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET
+unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE
+setsid nohup ~/.local/bin/langgraph dev --no-browser --allow-blocking \
+    --host 127.0.0.1 --port 2024 > /tmp/langgraph_dev.log 2>&1 < /dev/null &
+```
+
+Run it **from `~/ros2_ws`** — that is where `langgraph.json` and `.env` live, and
+the CLI reads both from the working directory. `langgraph` is at
+`~/.local/bin/` and is **not** on a non-interactive ssh PATH, so spell the path
+out. Match those ROS vars to `agent_node`'s: the Pi 5 uses plain SUBNET
+discovery, and a stale `ROS_DISCOVERY_SERVER` gives you a bridge that starts
+cleanly and silently sees no robot.
+
+`--allow-blocking` is needed because the graph does synchronous ROS and HTTP
+work; without it the server raises on the first blocking call.
+
+Stop it with `pkill -f 'langgraph dev'`. Log: `/tmp/langgraph_dev.log`.
+
+### Reaching the UI
+
+It binds to localhost deliberately. Tunnel from the machine with the browser:
+
+```bash
+ssh -N -L 2024:localhost:2024 rakhi24@192.168.1.16
+```
+
+then open `https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024`.
+
+**The tunnel is not just convenience.** Studio is served over HTTPS, so a
+browser blocks it calling `http://192.168.1.16:2024` as mixed content.
+`http://127.0.0.1` is exempt as a secure context, so tunnelling is what makes
+the hosted UI work at all. `langgraph dev --tunnel` is the alternative and puts
+a public HTTPS URL in front of the robot's agent for the life of the process.
+
+Health checks, through the same tunnel:
+
+```bash
+curl localhost:2024/ok       # {"ok":true}
+curl localhost:2024/info     # versions and feature flags
+curl -XPOST localhost:2024/assistants/search \
+     -H 'Content-Type: application/json' -d '{}'
+```
+
+The graph is `agent`, from `graph_studio.py:graph` via `langgraph.json`.
+
+### Three things that surprise you
+
+- **A `navigate` turn in the browser drives the real rover.**
+  `graph_studio.py` attaches a real `ROS2Bridge` whenever ROS is sourced, and
+  `ros2 node list` then shows `/studio_bridge` alongside `/agent_node` — two
+  bridges that can both publish `/cmd_vel`. Everything in §8 applies: a human
+  watches, and MANUAL on the phone is the stop. To read flows **without** that
+  risk, start it in a shell where ROS is *not* sourced: it falls back to
+  `StubBridge` and tool calls are logged instead of published.
+- **Episodic memory is unavailable while `agent_node` is running.** Embedded
+  Qdrant is single-process and the robot holds
+  `~/.langrobo/qdrant`, so Studio logs `Storage folder … is already accessed by
+  another instance` and starts without recall. Harmless; the fix would be a
+  Qdrant server rather than embedded.
+- **`watchfiles` logs "N changes detected" every ~10 s and nothing is
+  reloading.** `langgraph dev` writes its own `.langgraph_api/*.pckl`
+  checkpoints inside the directory it watches. Confirm a real reload by looking
+  for a second `ROS2 bridge active` in the log — one occurrence means it has
+  imported the graph once.
+
+### LangSmith, which needs none of this
+
+`.env` sets `LANGCHAIN_TRACING_V2=true` and `LANGCHAIN_PROJECT=pi5`, so real
+turns through `agent_node` are **already** traced to smith.langchain.com with no
+server running and nothing tunnelled. For reading past flows that is the lower
+effort path; Studio is for driving the graph yourself.
+
+Note `STUDIO_MODEL=gpt-4o-mini` while `STUDIO_PROVIDER=llamacpp`. The name is
+passed through to llama.cpp, which serves Gemma whatever it says — harmless, but
+do not trust the model field when reading a trace.
+
+---
+
+## 8. Safety
 
 - **Hand-pushing is always safe.** `pidStep()` returns 0 below 0.01 m/s and
   `driveSide()` with zero duty coasts rather than brakes, so the wheels
