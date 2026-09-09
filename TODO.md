@@ -1542,3 +1542,64 @@ Two honest caveats:
 there is no mount. `/audio/music_*` is Pi 5-side. Both are unchanged.
 
 Full cross-repo writeup: **`pi5_ros2_ws/INTEGRATION_GAPS.md`**.
+
+---
+
+## 🟠 33. The ESP32 wheel link decayed to nothing mid-bring-up, then recovered on its own (2026-09-09)
+
+The link came up healthy after the power cycle, **died during bring-up while
+nothing was being driven, and came back by itself** with no power-cycle and no
+intervention. Whole sequence measured on one bring-up:
+
+| when | `/wheel_state` | `/cmd_vel` subs |
+|---|---|---|
+| after `./rover map` | 15.9 → 14.8 → 11.3 Hz, max gap 0.732 s | 1 |
+| after `./rover vlm`, minutes later | "does not appear to be published yet" | 0 |
+| confirming | Publisher count **0** | **0** |
+| after `./rover status`, ~10 min later | **20.0 Hz**, 228-sample window, std dev 0.029 | **1** |
+
+The three `hz` windows in row 1 are the interesting part: not a clean drop, a
+**monotonic decay** across ~45 s before the session died outright.
+
+### This is a transient, not the firmware-retry fault
+
+Worth stating plainly because an earlier draft of this entry got it wrong and
+said the rover could not drive and needed a physical power-cycle. **It did not.**
+The documented ESP32 fault is that old firmware *never* retries the agent
+connection — a link that is down stays down until the board is power-cycled.
+This one restored its own micro-ROS session. So it is a **different failure**,
+and power-cycling on sight of it is the wrong reflex: it would have "fixed"
+something that was already fixing itself, and hidden the real behaviour.
+
+### Why it still matters
+
+The window is silent in the worst direction. nav2 keeps planning and publishing
+`/cmd_vel` into a topic with **no subscriber**, every gate on the Jetson stays
+green, and the rover simply never moves. That reads as a controller fault or as
+teleop being in MANUAL, and it is neither. If a drive had been commanded in that
+window it would have failed for a reason nothing on the Jetson reports.
+
+`/cmd_vel` publisher count climbed across the same period — 2, then 6 — as nav2,
+the brain and `/studio_bridge` attached. Whether that load on the DDS link is
+*causal* or merely concurrent is **not established**, and should not be asserted
+either way on one observation. It is the most obvious thing to test first.
+
+### What is not known
+
+- Whether it reproduces. **One observation.**
+- What the recovery was triggered by, if anything — it was noticed at the next
+  `./rover status`, so the true recovery time is somewhere in a ~10 min window.
+- Whether DDS load from attaching publishers has anything to do with it.
+
+### What was done
+
+- `STARTUP.md` §4 gained a subsection: the §4 wheel check is a reading, not a
+  guarantee — re-check **after the last layer is up** and again before driving.
+- No code change, and **no power-cycle advice** — the correct response to seeing
+  this is to re-check, not to reach for the board.
+
+### Next time it happens
+
+Capture the micro-ROS agent log *while it is down* — the session teardown and
+re-establish reasons are the evidence this entry does not have. Do **not**
+power-cycle first; that destroys the only interesting state.

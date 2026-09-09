@@ -71,11 +71,26 @@ object in plain view. It is distinct from `vlm`: `vlm` answers a VLM's
 recognises continuously at roughly zero query cost.
 
 Those tools exist on `pi5_ros2_ws`'s **`dev-1.2.8-refactor-test`**. They were
-deliberately removed on **`dev-1.3.0-minimal`**, along with `world_model` and
-the `on_detections` handler — that cut keeps vision on `look` + the VLM approach
-path. On the minimal brain `/vision/detections_3d` has no subscriber, and
-running `detect` costs GPU for nobody. Check which branch the Pi 5 is on before
-adding it to the order. See [TODO.md](TODO.md) §32.
+deliberately removed on the **`minimal`** line — `dev-1.3.0-minimal` and
+`dev-1.3.1-minimal` both — along with `world_model` and the `on_detections`
+handler; that cut keeps vision on `look` + the VLM approach path. On a minimal
+brain `/vision/detections_3d` has no subscriber, and running `detect` costs GPU
+for nobody. See [TODO.md](TODO.md) §32.
+
+**Check the brain before adding `detect` to the order, and check it by what it
+subscribes to, not by the branch name.** `dev-1.3.1-minimal` still *mentions*
+`/vision/detections_3d` in `ros2_bridge.py` and `tools/approach.py`, but both
+are only comments describing the contract — the handler is gone. Verified
+2026-09-09: the bridge's three real subscriptions are `/vision/pixel_result`,
+`/voice/tts_speaking` and the compressed colour image, and
+`langrobo_core/tools/` has no `world_model`. The grep that answers it:
+
+```bash
+ssh 192.168.1.16 'grep -n create_subscription \
+  ~/ros2_ws/src/langrobo_ros/langrobo_ros/ros2_bridge.py'
+```
+
+If `/vision/detections_3d` is not in that output, skip `detect`.
 
 **Do not stop at `nav`.** `vlm` is what lets the Pi 5 brain *see* — without it
 `look()` and `approach_described_object()` are silently dead, the brain answers
@@ -172,6 +187,32 @@ If it is 0 Hz or subs 0, the ESP32 did not reconnect its micro-ROS session —
 retry the agent connection. It usually comes back on its own after a power
 cycle; it did on 2026-09-09 with no intervention.
 
+### It can also link, rot, and then come back — do not power-cycle on sight
+
+On 2026-09-09 the link came up healthy after the power cycle — `/cmd_vel` subs
+**1**, `/wheel_state` publishing — then **decayed and died while the stack was
+still being brought up**: 15.9 → 14.8 → 11.3 Hz across three consecutive
+`ros2 topic hz` windows, max gap 0.732 s, and minutes later publishers **0**,
+subs **0**. Nothing was driven at any point. Roughly ten minutes later it was
+back at a steady **20.0 Hz**, subs **1**, with **no power-cycle and no
+intervention**.
+
+**So this is not the firmware-retry fault above, and the fix above is the wrong
+reflex.** That fault leaves a dead link dead until the board is power-cycled;
+this one restored its own micro-ROS session. Power-cycling on sight of it
+"fixes" something already recovering and destroys the evidence.
+
+What to do instead: a green wheel check at §4 is a reading, not a guarantee —
+**re-check after the last layer is up, and again before anything drives.** The
+symptom of missing the window is the worst one available: nav2 plans a route and
+publishes `/cmd_vel` into a topic with no subscriber, so the rover never moves
+while every gate on the Jetson stays green. That looks like a controller fault
+or like teleop in MANUAL, and it is neither.
+
+Cause is not established — one observation. `/cmd_vel` publishers climbed 2 → 6
+over the same period as nav2, the brain and `/studio_bridge` attached, so DDS
+load is the first thing to test, not the answer. See [TODO.md](TODO.md) §33.
+
 ---
 
 ## 5. Pi 5 — teleop and the brain
@@ -255,6 +296,41 @@ tunnel is what makes it `127.0.0.1` on your laptop.
 
 Check the tunnel from your laptop: `curl localhost:2024/ok` → `{"ok":true}`.
 
+### When there is no laptop
+
+The tunnel is not a laptop thing — it must simply run **on whichever machine has
+the browser**, because `127.0.0.1` is the only address a browser will let an
+HTTPS page call over plain HTTP. Pick the box you will actually be looking at:
+
+**On the Jetson** (it has `firefox`, and this is the usual fallback):
+
+```bash
+setsid nohup ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 \
+    -L 2024:localhost:2024 rakhi24@192.168.1.16 \
+    > /tmp/studio_tunnel.log 2>&1 < /dev/null &
+curl -s http://127.0.0.1:2024/ok        # {"ok":true} — verified 2026-09-09
+```
+
+Then open the §6 Step 2 link in a browser **on the Jetson**. `ExitOnForwardFailure`
+is what makes a failed forward fail loudly instead of leaving a live ssh session
+with a dead tunnel; the keepalive stops the flaky Pi 5 link (TODO §29) from
+silently dropping it mid-session.
+
+Note the Jetson's `DISPLAY` is empty over ssh — you need its physical monitor,
+or `ssh -X`. If neither is available, **that closes the Studio path** and
+LangSmith below is the answer, not a workaround.
+
+**A phone cannot do this.** No ssh tunnel, so no `127.0.0.1`, so Studio will not
+load — the teleop page on `:8091` is the only phone-facing thing here.
+
+### If you only want to read what the brain did, skip all of it
+
+LangSmith needs no tunnel, no server and no browser on any particular machine —
+[smith.langchain.com](https://smith.langchain.com), project **`pi5`**. Drive a
+real turn through Telegram and read the trace. For *reading* flows this is the
+lower-effort path and always has been; Studio is only worth the tunnel when you
+want to **step the graph yourself**.
+
 ### Stopping it
 
 ```bash
@@ -332,7 +408,10 @@ left. The difference is deliberate in some places and a known gap in others.
 **Backed up, but not in this repo:**
 
 - **`~/ros2_ws` on the Pi 5 is its own git repo** —
-  `github.com/Rakeshreddysr2401/pi5_ros2_ws`, branch `dev-1.2.8-refactor-test`.
+  `github.com/Rakeshreddysr2401/pi5_ros2_ws`. The branch actually checked out
+  moves: it was `dev-1.2.8-refactor-test`, and on 2026-09-09 it was
+  `dev-1.3.1-minimal`. Read it, do not assume it —
+  `ssh 192.168.1.16 'cd ~/ros2_ws && git rev-parse --abbrev-ref HEAD'`.
   The whole `langrobo_core` / `langrobo_ros` brain tree is version-controlled
   there, so a reflash is a `git clone`, not a loss. (An earlier draft of this
   section claimed it was unbacked-up. It was wrong.)
