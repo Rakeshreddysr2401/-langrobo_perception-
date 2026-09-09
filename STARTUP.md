@@ -156,7 +156,7 @@ crawls, stalls, and it looks exactly like a controller fault.
 Not started at boot. `agent_node` runs the graph in-process and needs no server;
 Studio is a **separate dev server** you start by hand.
 
-The launcher lives at `~/ros2_ws/start_studio.sh` on the Pi 5, and a
+The launcher lives at `~/ros2_ws/scripts/start_studio.sh` on the Pi 5, and a
 version-controlled copy is in [`phase4/pi5/`](phase4/pi5/).
 
 **The Pi 5 repo also has its own `./scripts/dev.sh`**, which predates this one
@@ -176,7 +176,7 @@ Read §6's warning about two `/cmd_vel` publishers before using either.
 ### Start it on the Pi 5
 
 ```bash
-ssh 192.168.1.16 'setsid nohup ~/ros2_ws/start_studio.sh \
+ssh 192.168.1.16 'setsid nohup ~/ros2_ws/scripts/start_studio.sh \
     > /tmp/langgraph_dev.log 2>&1 < /dev/null &'
 ```
 

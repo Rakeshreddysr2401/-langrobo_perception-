@@ -320,7 +320,7 @@ truncating that JSON, so anything grepping it reads nothing.
   `dr_metres` — those are on `/fusion/status`. The Phase 1 instrument had no way
   to know, which is why it stayed quiet through four divergences.
 - **LangGraph Studio brought up on the Pi 5** — see OPERATIONS.md §7, plus
-  `~/ros2_ws/start_studio.sh` on the Pi. Studio now gets its own episodic store
+  `~/ros2_ws/scripts/start_studio.sh` on the Pi. Studio now gets its own episodic store
   (`~/.langrobo/qdrant_studio`) instead of starting with none, and
   `STUDIO_MODEL` was corrected from `gpt-4o-mini` to `default` so traces stop
   claiming an OpenAI model when llama.cpp is serving Gemma.

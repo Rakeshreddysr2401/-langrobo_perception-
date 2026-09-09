@@ -1,15 +1,16 @@
 # Pi 5 — LangGraph Studio launcher
 
-**This runs on the Pi 5, not the Jetson.** It is copied here so it is
-version-controlled; the live copy is `~/ros2_ws/start_studio.sh` on
-`192.168.1.16`.
+**This runs on the Pi 5, not the Jetson, and its canonical home is the Pi 5's
+own repo** — `github.com/Rakeshreddysr2401/pi5_ros2_ws`, at
+`scripts/start_studio.sh` alongside `dev.sh` and `dev_voice.sh`. A reflash is a
+`git clone` of that repo, not a restore from here.
 
-`STARTUP.md` §6 and `OPERATIONS.md` §7 both tell you to run it, so if the Pi 5
-is ever reflashed this file is what puts it back:
+This copy is a **mirror**, kept because `STARTUP.md` §6 and `OPERATIONS.md` §7
+tell you to run it and the reasoning below is worth having next to the rover
+docs. If the two ever disagree, **the Pi 5 repo wins.** To re-sync this copy:
 
 ```bash
-scp phase4/pi5/start_studio.sh 192.168.1.16:~/ros2_ws/start_studio.sh
-ssh 192.168.1.16 'chmod +x ~/ros2_ws/start_studio.sh'
+scp 192.168.1.16:~/ros2_ws/scripts/start_studio.sh phase4/pi5/start_studio.sh
 ```
 
 ## It is not the only launcher — read this first

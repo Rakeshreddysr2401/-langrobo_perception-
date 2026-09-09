@@ -334,11 +334,11 @@ Nothing on the Pi 5 starts it at boot — `agent_node` runs the graph in-process
 and needs no server. Studio is a **separate dev server** you start by hand.
 
 ```bash
-ssh 192.168.1.16 'setsid nohup ~/ros2_ws/start_studio.sh \
+ssh 192.168.1.16 'setsid nohup ~/ros2_ws/scripts/start_studio.sh \
     > /tmp/langgraph_dev.log 2>&1 < /dev/null &'
 ```
 
-`~/ros2_ws/start_studio.sh` on the Pi 5 holds the environment, and holds it for
+`~/ros2_ws/scripts/start_studio.sh` on the Pi 5 holds the environment, and holds it for
 a reason — every line in it is something that fails quietly if you get it wrong:
 
 - **It `cd`s to `~/ros2_ws` itself.** The CLI reads `langgraph.json` and `.env`
