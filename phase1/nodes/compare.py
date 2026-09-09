@@ -357,6 +357,13 @@ class Compare(Node):
         self.fs_imp_first = None    # first seen, so "climbing" is measurable
         self.fs_dr_m = 0.0          # metres carried on dead reckoning
         self.fs_diverged = False    # latched: a run that diverged is not clean
+        # The evidence AS IT WAS when the latch tripped. Reset cuVSLAM and the
+        # live fields come back inside their limits, so a red line quoting them
+        # reads as its own refutation -- "DIVERGED, vo_z +0.01 m, 0 rejected".
+        # The latch is still right; it is the numbers beside it that have to
+        # keep pointing at what actually tripped it.
+        self.fs_div_z = None
+        self.fs_div_imp = None
 
         self.create_subscription(Odometry, '/vo/odom', self._vo, qos_profile_sensor_data)
         self.create_subscription(Vector3, '/wheel_state', self._wheels, qos_profile_sensor_data)
@@ -451,6 +458,9 @@ class Compare(Node):
         if isinstance(dr, (int, float)):
             self.fs_dr_m = float(dr)
         if self.vo_diverged():
+            if not self.fs_diverged:   # first trip wins; later ones are noise
+                self.fs_div_z = self.fs_z
+                self.fs_div_imp = self.fs_imp
             self.fs_diverged = True
 
     def vo_diverged(self):
@@ -472,16 +482,29 @@ class Compare(Node):
                 and self.fs_imp > self.fs_imp_first)
 
     def _divergence_lines(self, indent='  '):
-        """The red line. Same text live and in the verdict."""
-        if not (self.fs_diverged or self.vo_diverged()):
+        """The red line. Same text live and in the verdict.
+
+        Quotes the live fields while it is still diverged, and the latched ones
+        once it is not. Dead-reckoned metres is cumulative, so that one stays
+        live either way -- the distance carried open-loop did not un-happen.
+        """
+        live = self.vo_diverged()
+        if not (self.fs_diverged or live):
             return []
-        z = '?' if self.fs_z is None else '%+.2f m' % self.fs_z
-        imp = '?' if self.fs_imp is None else str(self.fs_imp)
+        if live:
+            z, imp = self.fs_z, self.fs_imp
+            second = (f'{indent}  The pose is running open-loop on wheels+gyro. '
+                      f'Every rate above this line still reads fine.')
+        else:
+            z, imp = self.fs_div_z, self.fs_div_imp
+            second = (f'{indent}  Measured when it tripped. The live fields read '
+                      f'clean now, which does not make the run clean.')
+        zs = '?' if z is None else '%+.2f m' % z
+        imps = '?' if imp is None else str(imp)
         return [
-            f'{indent}✗ cuVSLAM DIVERGED — vo_z {z}, {imp} poses rejected, '
+            f'{indent}✗ cuVSLAM DIVERGED — vo_z {zs}, {imps} poses rejected, '
             f'{self.fs_dr_m:.2f} m dead reckoned.',
-            f'{indent}  The pose is running open-loop on wheels+gyro. Every rate '
-            f'above this line still reads fine.',
+            second,
             f'{indent}  Fix: ./rover pose  THEN  ./rover fused  (fused alone '
             f'restarts fusion and NOT cuvslam).',
         ]

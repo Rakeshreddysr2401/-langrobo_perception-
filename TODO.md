@@ -1346,6 +1346,34 @@ HEALTHY (vo_alive 1)        ok — tracking, not dead reckoning           rc=0
 OLD     (field absent)      ok  + ! does not publish vo_alive           rc=0
 ```
 
+### Follow-up: the latched red line quoted the wrong numbers (2026-09-09)
+
+`compare.py` latches divergence on purpose — a push that diverged is not clean,
+even if the tracker looks fine by the time you read the verdict. But
+`_divergence_lines()` printed the **live** fields beside that latched verdict,
+so once cuVSLAM was reset the red line refuted itself:
+
+```
+✗ cuVSLAM DIVERGED — vo_z +0.01 m, 0 poses rejected, 0.00 m dead reckoned.
+```
+
+A divergence warning quoting a z well inside the 0.30 m limit is one a reader
+talks themselves out of, which defeats the point of latching it.
+
+`vo_z` and `vo_implausible` are now snapshotted at the moment the latch trips
+and quoted from there once it has recovered, with the second line saying so.
+While it is *still* diverged the live values are quoted, because then they are
+the truth. `dr_metres` stays live in both cases — it is cumulative, and the
+distance carried open-loop does not un-happen.
+
+```
+still diverged  ✗ ... vo_z -1.40 m, 9 poses rejected, 5.00 m dead reckoned.
+                  The pose is running open-loop on wheels+gyro. ...
+recovered       ✗ ... vo_z -0.91 m, 7 poses rejected, 4.50 m dead reckoned.
+                  Measured when it tripped. The live fields read clean now,
+                  which does not make the run clean.
+```
+
 ---
 
 ## 🟠 31. Frame gaps of 1.4–1.9 s under full load exceed cuVSLAM's `max_frame_delta_s` (2026-09-09)
