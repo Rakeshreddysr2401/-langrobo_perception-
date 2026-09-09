@@ -63,12 +63,19 @@ fails.**
 ./rover view        # RViz on the laptop
 ```
 
-`detect` is what makes the brain's `approach_object`, `where_is`,
-`list_known_objects`, `scan_surroundings` and `world_model` work — five tools
-that otherwise answer "I haven't seen one before" about an object in plain
-view. It is distinct from `vlm`: `vlm` answers a VLM's *described* object at
-~10-40 s a look, `detect` publishes everything it recognises continuously at
-roughly zero query cost. Run both. See [TODO.md](TODO.md) §32.
+**`detect` depends on which brain the Pi 5 is running.** It feeds
+`approach_object`, `where_is`, `list_known_objects` and the `world_model`
+service — five tools that otherwise answer "I haven't seen one before" about an
+object in plain view. It is distinct from `vlm`: `vlm` answers a VLM's
+*described* object at ~10-40 s a look, `detect` publishes everything it
+recognises continuously at roughly zero query cost.
+
+Those tools exist on `pi5_ros2_ws`'s **`dev-1.2.8-refactor-test`**. They were
+deliberately removed on **`dev-1.3.0-minimal`**, along with `world_model` and
+the `on_detections` handler — that cut keeps vision on `look` + the VLM approach
+path. On the minimal brain `/vision/detections_3d` has no subscriber, and
+running `detect` costs GPU for nobody. Check which branch the Pi 5 is on before
+adding it to the order. See [TODO.md](TODO.md) §32.
 
 **Do not stop at `nav`.** `vlm` is what lets the Pi 5 brain *see* — without it
 `look()` and `approach_described_object()` are silently dead, the brain answers
