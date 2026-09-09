@@ -330,27 +330,47 @@ Nothing on the Pi 5 starts it at boot — `agent_node` runs the graph in-process
 and needs no server. Studio is a **separate dev server** you start by hand.
 
 ```bash
-ssh 192.168.1.16
-cd ~/ros2_ws
-source /opt/ros/jazzy/setup.bash && source install/setup.bash
-export ROS_DOMAIN_ID=0 RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
-       ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET
-unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE
-setsid nohup ~/.local/bin/langgraph dev --no-browser --allow-blocking \
-    --host 127.0.0.1 --port 2024 > /tmp/langgraph_dev.log 2>&1 < /dev/null &
+ssh 192.168.1.16 'setsid nohup ~/ros2_ws/start_studio.sh \
+    > /tmp/langgraph_dev.log 2>&1 < /dev/null &'
 ```
 
-Run it **from `~/ros2_ws`** — that is where `langgraph.json` and `.env` live, and
-the CLI reads both from the working directory. `langgraph` is at
-`~/.local/bin/` and is **not** on a non-interactive ssh PATH, so spell the path
-out. Match those ROS vars to `agent_node`'s: the Pi 5 uses plain SUBNET
-discovery, and a stale `ROS_DISCOVERY_SERVER` gives you a bridge that starts
-cleanly and silently sees no robot.
+`~/ros2_ws/start_studio.sh` on the Pi 5 holds the environment, and holds it for
+a reason — every line in it is something that fails quietly if you get it wrong:
 
-`--allow-blocking` is needed because the graph does synchronous ROS and HTTP
-work; without it the server raises on the first blocking call.
+- **It `cd`s to `~/ros2_ws` itself.** The CLI reads `langgraph.json` and `.env`
+  from the working directory, not from its own location.
+- **Full path to `~/.local/bin/langgraph`.** It is not on a non-interactive ssh
+  PATH, so `ssh pi 'langgraph dev'` is `command not found`.
+- **ROS vars matched to `agent_node`'s** — plain SUBNET discovery, domain 0. A
+  stale `ROS_DISCOVERY_SERVER` gives a bridge that starts perfectly cleanly and
+  silently sees no robot.
+- **`LANGROBO_MEMORY_PATH` set to a Studio-only store**, and deliberately NOT in
+  `.env` — `agent_node` reads that same file, so putting it there would repoint
+  the *robot's* memory. See the episodic-memory note below.
+- **No `set -u`.** ROS's `setup.bash` references unset variables, so `set -u`
+  aborts the script the instant it is sourced — silently, if its stderr is going
+  to `/dev/null`.
+- **`--allow-blocking`**, because the graph does synchronous ROS and HTTP work
+  and the server otherwise raises on the first blocking call.
 
-Stop it with `pkill -f 'langgraph dev'`. Log: `/tmp/langgraph_dev.log`.
+It takes 30-60 s to answer. Poll rather than assume:
+
+```bash
+ssh 192.168.1.16 'curl -s http://127.0.0.1:2024/ok'     # {"ok":true} when ready
+```
+
+Log: `/tmp/langgraph_dev.log`. To stop it:
+
+```bash
+ssh 192.168.1.16 'pkill -f "langgrap[h] dev"'
+```
+
+**The brackets are not a typo and not optional.** `pkill -f "langgraph dev"`
+matches its OWN command line — the pattern text is *in* the command sshd is
+running — so the remote shell kills itself and its own ssh session. You get
+exit 255, no output, and nothing killed, which reads exactly like the Pi 5's
+intermittent ssh. `langgrap[h]` is a regex that does not match the literal
+string `langgrap[h]`, so it only matches the server.
 
 ### Reaching the UI
 
@@ -388,11 +408,15 @@ The graph is `agent`, from `graph_studio.py:graph` via `langgraph.json`.
   watches, and MANUAL on the phone is the stop. To read flows **without** that
   risk, start it in a shell where ROS is *not* sourced: it falls back to
   `StubBridge` and tool calls are logged instead of published.
-- **Episodic memory is unavailable while `agent_node` is running.** Embedded
-  Qdrant is single-process and the robot holds
-  `~/.langrobo/qdrant`, so Studio logs `Storage folder … is already accessed by
-  another instance` and starts without recall. Harmless; the fix would be a
-  Qdrant server rather than embedded.
+- **Studio has its own episodic memory, separate from the robot's.** Embedded
+  Qdrant is single-process, so while `agent_node` holds `~/.langrobo/qdrant`
+  Studio used to start with no memory at all (`Storage folder … is already
+  accessed by another instance`). `start_studio.sh` now points it at
+  `~/.langrobo/qdrant_studio`, so the memory tools work — but they recall
+  **Studio's** memories, not the household's. That is the right trade for a dev
+  tool and it cannot corrupt the robot's store. To genuinely SHARE one store,
+  run a Qdrant server and set `QDRANT_URL` for both processes (`memory.py`
+  supports it); that needs `agent_node` restarted and is not done.
 - **`watchfiles` logs "N changes detected" every ~10 s and nothing is
   reloading.** `langgraph dev` writes its own `.langgraph_api/*.pckl`
   checkpoints inside the directory it watches. Confirm a real reload by looking
@@ -406,9 +430,11 @@ turns through `agent_node` are **already** traced to smith.langchain.com with no
 server running and nothing tunnelled. For reading past flows that is the lower
 effort path; Studio is for driving the graph yourself.
 
-Note `STUDIO_MODEL=gpt-4o-mini` while `STUDIO_PROVIDER=llamacpp`. The name is
-passed through to llama.cpp, which serves Gemma whatever it says — harmless, but
-do not trust the model field when reading a trace.
+`STUDIO_MODEL` used to read `gpt-4o-mini` while `STUDIO_PROVIDER=llamacpp`,
+which made every trace look like it had called OpenAI. It is now `default`,
+matching `agent_params.yaml` — the honest llama.cpp convention, since the server
+serves whatever model it has loaded (currently `gemma-4-12B-it-Q4_K_M`) and
+ignores the field.
 
 ---
 

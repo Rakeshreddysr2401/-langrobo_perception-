@@ -278,7 +278,20 @@ nothing distinguishes the two on screen.
     irreversible one: nvblox integrates depth at whatever pose it is handed, so
     a diverged pose does not degrade the map, it corrupts it, and the only
     recovery is discarding the map and redriving the lap.
-  Still open from this bullet: the red line in `compare.py`.
+- ~~**The red line in `compare.py`.**~~ **DONE 2026-09-09.** `compare` is the
+  instrument you are actually watching during a push, and it was reading
+  `/vo/status` — which carries the landmark count but **not** `vo_z`,
+  `vo_implausible` or `dr_metres`. Those live on `/fusion/status`. That is why
+  the Phase 1 instrument stayed quiet through all four divergences. It now
+  subscribes to both and prints a red banner live, and again in the verdict
+  above the grade, latched so a run that diverged *and then recovered* is still
+  not reported clean. `VO_Z_LIMIT` is defined once at 0.30 m so the instrument
+  and `health.py` cannot drift apart. Divergence is detected on absolute z **or**
+  a climbing rejection counter — the counter catches it before z has moved far
+  enough to trip, and a steady non-zero counter is treated as history, not a
+  fault. Verified against all four recorded signatures (−21.7, +87.7, −40.1,
+  +7.2 m), the climbing case, the steady case, the latch, and a malformed
+  payload.
 - **Find out why it diverges.** `planar_constraints = True` was set specifically
   to make vertical drift impossible and has now failed three times (−21.7 m,
   +87.7 m, −40.1 m). Either the flag does not do what its name says on this

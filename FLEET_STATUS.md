@@ -312,9 +312,41 @@ truncating that JSON, so anything grepping it reads nothing.
 
 ## Fixed this session
 
-The cuVSLAM honesty check moved from a doc instruction into the gates — see
-TODO §21, "Surface it". `./rover fused` now runs it and warns; `./rover map`
-now refuses to build on a dishonest pose.
+- The cuVSLAM honesty check moved from a doc instruction into the gates — see
+  TODO §21, "Surface it". `./rover fused` now runs it and warns; `./rover map`
+  now refuses to build on a dishonest pose.
+- **`compare.py` now shows divergence** (TODO §21, the last open bullet). It was
+  watching `/vo/status`, which does not carry `vo_z` / `vo_implausible` /
+  `dr_metres` — those are on `/fusion/status`. The Phase 1 instrument had no way
+  to know, which is why it stayed quiet through four divergences.
+- **LangGraph Studio brought up on the Pi 5** — see OPERATIONS.md §7, plus
+  `~/ros2_ws/start_studio.sh` on the Pi. Studio now gets its own episodic store
+  (`~/.langrobo/qdrant_studio`) instead of starting with none, and
+  `STUDIO_MODEL` was corrected from `gpt-4o-mini` to `default` so traces stop
+  claiming an OpenAI model when llama.cpp is serving Gemma.
+
+## Open item 4 (ssh to the Pi 5 hangs) — a candidate cause, found by hitting it
+
+Reproduced today: ping 0% loss, port 22 accepting TCP, teleop answering 200,
+and eight consecutive `ssh` calls returning **exit 255 with no output at all**.
+
+At least some of that is self-inflicted, and it is worth knowing before anyone
+chases the network again. The command being run remotely was
+
+```
+pkill -f "langgraph dev"
+```
+
+`pkill -f` matches against the whole command line — **including the command line
+of the shell sshd started to run it**, which contains the pattern text. So the
+remote shell kills itself and its own session. Exit 255, nothing printed,
+nothing actually killed, and it looks precisely like a flaky link. `pkill -f
+"langgrap[h] dev"` fixes it: a regex that cannot match its own literal text.
+
+This does **not** retire open item 4 — the 2026-09-06 report was during a fleet
+check and nobody has confirmed a self-matching `pkill` was involved there. But
+any future "ssh to the Pi 5 is hanging" should rule this out first, because the
+signature is identical and the cause is local.
 
 ## Not verified this pass
 
