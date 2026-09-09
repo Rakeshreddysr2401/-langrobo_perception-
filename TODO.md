@@ -266,9 +266,19 @@ nothing distinguishes the two on screen.
 - **`./rover fused` does NOT reset cuVSLAM.** It restarts `fusion_node` only.
   Recovering a diverged tracker needs `./rover pose` first. Easy to get wrong
   while debugging, and it silently leaves the divergence in place.
-- **Surface it.** `vo_implausible` climbing should be loud — in the `fused` gate,
-  in `./rover status`, and ideally as a red line in `compare.py`. A counter you
-  have to go and ask for is not a warning.
+- ~~**Surface it.**~~ **DONE 2026-09-09.** `vo_implausible` climbing is now loud
+  where it matters. `./rover status` already ran `health.py`; the gap was that
+  the *bring-up path* did not, so the check lived only in a doc telling you to
+  run it by hand after every start — which is how it got skipped. Now:
+  - `./rover fused` runs `health.py` as part of its gate, because that is the
+    layer that starts publishing `/odom` and so the layer that has to say
+    whether `/odom` means anything. On divergence it warns and keeps going —
+    the layer *is* up, it just cannot be trusted.
+  - `./rover map` **refuses to start** on a dishonest pose. This is the
+    irreversible one: nvblox integrates depth at whatever pose it is handed, so
+    a diverged pose does not degrade the map, it corrupts it, and the only
+    recovery is discarding the map and redriving the lap.
+  Still open from this bullet: the red line in `compare.py`.
 - **Find out why it diverges.** `planar_constraints = True` was set specifically
   to make vertical drift impossible and has now failed three times (−21.7 m,
   +87.7 m, −40.1 m). Either the flag does not do what its name says on this

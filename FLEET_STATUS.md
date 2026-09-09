@@ -240,3 +240,77 @@ A wired USB headset in the Pi 5 also works and skips steps 1-2 entirely.
 ## Still true
 
 Telegram remains the working channel today and needs none of the above.
+
+---
+
+# Post-power-cycle bring-up — 2026-09-09
+
+Everything was power-cycled (D555, Jetson, Pi 5, ESP32) and the Pi 5 refactored.
+Cold start from `docker start rover`, every layer brought up in order.
+
+## All eleven rows green
+
+```
+camera  /camera/camera0/infra1/image_rect_raw   29.9   want 15    OK
+camera  /camera/camera0/depth/image_rect_raw    23.0   want 10    OK
+pose    /vo/odom                                28.5   want 10    OK
+pose    /gyro/base                             200.1   want 50    OK
+wheels  /wheel_state                            19.9   want 15    OK
+fused   /odom                                   20.0   want 15    OK
+map     /nvblox_node/static_occupancy_grid       4.9   want  1    OK
+nav     /global_costmap/costmap                  0.8   want0.5    OK
+nav     /local_costmap/costmap                   1.7   want  1    OK
+vlm     /camera/color/image_raw/compressed       4.6   want  2    OK
+view    /rover/model                             1.0   want0.5    OK
+
+cuvslam  vo_z +0.003 m  implausible 0  dead-reckoned 0.00 m  landmarks 215
+         ok — tracking, not dead reckoning
+```
+
+**The ESP32 came back on its own** — `/wheel_state` 19.9 Hz, `/cmd_vel` subs 1,
+no power-cycle needed. That is not the §24 regression state. Teleop is in
+**AUTO** (`GET :8091/mode` -> `{"manual": false}`).
+
+Note `./rover status` with nothing running does not fail fast — it walks eleven
+topics at ~12 s each and takes over two minutes to print a table of dashes. Run
+a layer first; the layer gates are the fast answer.
+
+## The 8.3 Hz depth reading was misattributed
+
+Open item 1 from 2026-09-06 blamed `align_depth` for depth sitting under its
+gate. **That hypothesis is wrong.** The camera launch args are byte-identical
+(`enable_color:=true`, `align_depth.enable:=true` — `rover:104`), and measured
+across this bring-up:
+
+| when | depth |
+|---|---|
+| camera/pose/fused/map/nav up, **no VLM layer** | 23–26 Hz |
+| after `./rover vlm` attaches `image_bridge` | **14.3 Hz**, max gap 633 ms |
+
+So it is **consumer load**, not the driver's reprojection. `align_depth` was
+already on in both readings. The 8.3 Hz on 2026-09-06 was the VLM layer running.
+
+Still above the 10 Hz gate, so nothing is broken — but the 633 ms worst-case
+inter-frame gap is the number to watch, not the average. Depth is what
+`pixel_to_goal.py` reads to turn a VLM pixel into a metric goal, and a 0.6 s
+stall there lands the goal wherever the rover was two thirds of a second ago.
+
+## `./rover vlm` is not in the documented bring-up order
+
+The `rover-start` skill lists camera -> pose -> fused -> map -> nav -> view and
+stops. `vlm` is a real layer with its own gate and is not in that list, so a
+by-the-book bring-up leaves the VLM row at `--` and the Pi 5 brain's
+`look()` / `approach_described_object()` path silently dead. It is not a bug in
+the stack — it is a gap in the written order. Start it after `nav`.
+
+## Fixed this session
+
+The cuVSLAM honesty check moved from a doc instruction into the gates — see
+TODO §21, "Surface it". `./rover fused` now runs it and warns; `./rover map`
+now refuses to build on a dishonest pose.
+
+## Not verified this pass
+
+No motion was commanded. A human watches every autonomous move and nobody was
+standing over it, so "the stack is up and honest" is the claim; "it drove" is
+not.

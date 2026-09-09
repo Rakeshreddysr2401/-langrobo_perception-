@@ -65,6 +65,14 @@ assert_rate(){ # topic  min_hz  label
   [ "$ok" = 1 ]
 }
 
+# A rate proves a topic is publishing. It cannot prove the pose it carries is
+# REAL. cuVSLAM's failure mode is silent (TODO 21, five occurrences): it drops
+# to gyro-plus-wheel dead reckoning and /odom carries on at 20 Hz with every
+# rate gate green -- one session ran 21 m that way unnoticed. health.py
+# subscribes to /fusion/status properly (`ros2 topic echo` truncates that JSON)
+# and answers the only question the rates cannot.
+pose_honest(){ rexec "python3 $SRC/nodes/health.py"; }
+
 start_container(){
   docker rm -f "$NAME" >/dev/null 2>&1 || true
   mkdir -p "$REPO/logs"
@@ -239,6 +247,17 @@ fused)
   echo "  GATE fused:"
   assert_rate /odom 15 "fused odom" || true
   assert_rate /rover/model 0.5 "rover body" || true
+  # The honesty check belongs HERE, not in a doc telling you to run it by hand
+  # after every bring-up -- which is what it was, and so it got skipped. This
+  # is the layer that starts publishing /odom, so this is the layer that has to
+  # say whether /odom means anything.
+  echo
+  pose_honest || {
+    echo
+    echo "  ✗ Do NOT run ./rover map on this pose. nvblox writes depth wherever"
+    echo "    the pose claims the robot is, so mapping while diverged smears the"
+    echo "    map permanently and the only recovery is to discard it and redrive."
+  }
   echo
   echo "  Health, live:  ./rover compare"
   echo "  Raw status:    ros2 topic echo /fusion/status"
@@ -249,6 +268,14 @@ map)
   need_container
   echo "  checking the fused pose is up before building a map on it..."
   assert_rate /odom 15 "fused odom" || die "no fused pose — run ./rover fused first"
+  # Rate alone is not enough to start mapping on. A diverged cuVSLAM still
+  # publishes /odom at 20 Hz, and nvblox integrates depth at whatever pose it is
+  # handed -- so a bad pose does not degrade the map, it corrupts it, and the
+  # only fix is to throw the map away and redrive the lap. Cheap check, expensive
+  # mistake.
+  pose_honest || die "the pose is dead reckoning, not tracking — mapping on it would
+    smear the map permanently. Fix it first:  ./rover pose  THEN  ./rover fused
+    (./rover fused alone restarts fusion and NOT cuvslam, so divergence survives)"
   kill_match 'nvblox_node'
   echo "[map] nvblox — depth + the FUSED pose -> TSDF mesh and a 2D floor slice"
   echo "      built on /odom, not raw cuvslam: nvblox writes depth wherever the"
