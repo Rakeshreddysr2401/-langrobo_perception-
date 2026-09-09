@@ -1603,3 +1603,18 @@ either way on one observation. It is the most obvious thing to test first.
 Capture the micro-ROS agent log *while it is down* — the session teardown and
 re-establish reasons are the evidence this entry does not have. Do **not**
 power-cycle first; that destroys the only interesting state.
+
+**The agent runs on the Pi 5, not the Jetson** (found 2026-09-10 while looking
+for something else): `langrobo-microros.service`, "LangRobo micro-ROS agent
+(Pi5 <-> ESP32 WiFi UDP bridge)". So the log to read is
+
+```bash
+ssh 192.168.1.16 'journalctl -u langrobo-microros --since "10 min ago"'
+```
+
+That also reframes the whole entry: the link is **ESP32 -> Pi 5 over WiFi UDP**,
+and `/wheel_state` only reaches the Jetson afterwards over the DDS discovery
+server. A WiFi dropout on the Pi 5 side would produce exactly the decay-then-
+recover signature observed, and would have nothing to do with Jetson DDS load or
+with `/cmd_vel` publisher count. **That is now the first hypothesis to test**,
+ahead of the publisher-count one above.
