@@ -1415,7 +1415,12 @@ the workaround — not running `vlm` while mapping — costs the brain its eyes.
 
 ---
 
-## 🔴 32. The Pi 5 brain asks this rover for four things it never answers (2026-09-06)
+## 🟠 32. The Pi 5 brain asks this rover for four things it never answers (2026-09-06)
+
+> **The two vision seams are closed as of 2026-09-09** — `/vision/detections_3d`,
+> `/vision/target` and `/vision/target_result` are answered and verified on
+> hardware. See "Closed here" below. The servo and music rows stay open, and
+> the Nav2 rotation question below is still unmeasured.
 
 Read both repos side by side as one system for the first time. The rover is
 not the problem; the **seam** is. Four topics `pi5_ros2_ws`'s `ros2_bridge.py`
@@ -1479,5 +1484,61 @@ that side. But it raises a question about *this* repo:
 >
 > One test settles it: command a pure rotation through Nav2 and watch whether
 > the base translates.
+
+### Closed here: the detector is back, in `odom` (2026-09-09)
+
+The node was not missing, it was **stranded**. `orin-nav-stack/nodes/detections_3d.py`
+— 459 lines, YOLOv8n + D555 depth + TF, already speaking all three vision
+topics — was left behind in the superseded project when the layered stack was
+built. `/tmp/detections_3d.log` in the container, dated July, was the clue.
+
+Ported to `phase4/nodes/detections_3d.py` and wired in as **`./rover detect`**.
+Almost all of the adaptation was configuration, not code — the node was written
+against parameters:
+
+| what | old stack | here | why |
+|---|---|---|---|
+| `target_frame` | `map` | **`odom`** | the brain drops any other frame. `ros2_bridge.NAV_FRAME` is `os.environ.get("LANGROBO_NAV_FRAME", "odom")` — read on the Pi 5, not assumed |
+| `look_feed_rate` | 2.0 Hz | **0.0** | `image_bridge` (the `vlm` layer) owns `/camera/color/image_raw/compressed` now. Two publishers on one topic is the failure that reads as a flapping camera |
+| model | `/models` in the old image | `models/` mounted `:ro` | weights are gitignored; `./rover detect` prints the one-line recovery |
+
+Its TF handling needed nothing: it already takes capture-time TF and falls back
+to latest-available with **no timeout**, and gives the `TransformListener` its
+own thread (`spin_thread=True`). That is the bug §32 fixed in `pixel_to_goal`
+above — this node never had it.
+
+**Verified on hardware**, on the running stack:
+
+```
+GATE detect:
+    detections_3d publishing       1        (want >= 1)   OK
+    target hunt listening          1        (want >= 1)   OK
+```
+
+- 136 messages captured in 90 s, **every one `"frame": "odom"`**.
+- Positions are steady: one object held x 2.51, y 1.21, z 1.10 across ten
+  consecutive ticks, ~2 cm spread — the EMA in `_smooth()` doing its job.
+- The visual-servo path answers without needing an object: setting
+  `/vision/target` to `person` produced `{"target": "person", "found": false}`
+  on `/vision/target_result` every tick at ~5 Hz, which is the contract (the
+  brain reads silence there as a dead camera and halts).
+- The node logged `YOLO active (demand)` with `Subscription count: 2` — the
+  Pi 5 brain was already listening, across machines, with no change on that side.
+
+Two honest caveats:
+
+- **The labels are yolov8n-grade.** That capture was confidently 126×`knife` in
+  a room with no knife in it, at `confidence 0.35`. The *geometry* is right and
+  that is what `world_model` consumes, but "it can see" should not be read as
+  "it can name". The 0.35 gate is deliberate and documented in the node — 0.45
+  published nothing for objects filling the frame.
+- **The gate is not a rate gate**, on purpose: the node publishes only when it
+  sees something, and `on_detections` on the Pi 5 has no staleness timeout — it
+  just observes into `world_model`. An empty room is not a fault, so the gate
+  checks the node is up and listening and then reports what is in view.
+
+**Not closed:** `/servo_pan` and `/servo_tilt` have no hardware to answer with —
+`rover_firmware_v2.ino` declares three subscriptions and none are servos, and
+there is no mount. `/audio/music_*` is Pi 5-side. Both are unchanged.
 
 Full cross-repo writeup: **`pi5_ros2_ws/INTEGRATION_GAPS.md`**.

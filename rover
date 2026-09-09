@@ -86,6 +86,7 @@ start_container(){
     -v "$REPO/phase2":$SRC2:ro \
     -v "$REPO/phase3":$SRC3:ro \
     -v "$REPO/phase4":$SRC4:ro \
+    -v "$REPO/models":/models:ro \
     -v "$REPO/logs":/logs \
     "$IMAGE" -c 'sleep infinity' >/dev/null
   sleep 2
@@ -346,6 +347,46 @@ vlm)
   echo "  This does not drive anything by itself — it only answers queries."
   echo "  The Pi 5's approach_described_object() tool is what triggers a drive."
   echo "  Log: ./rover logs image_bridge   or   ./rover logs pixel_to_goal"
+  ;;
+
+detect)
+  need_container
+  # Needs the FUSED pose, not just the camera: every detection is deprojected
+  # into odom via TF, and a detection in a frame the brain does not navigate in
+  # is dropped on arrival (ros2_bridge.on_detections). No pose, no useful output.
+  echo "  checking the fused pose is up before placing objects in odom..."
+  assert_rate /odom 15 "fused odom" || die "no fused pose — run ./rover fused"
+  pose_honest || die "the pose is dead reckoning — objects would be placed in a
+    frame that is drifting. Fix it first:  ./rover pose  THEN  ./rover fused"
+  [ -f "$REPO/models/yolov8n.pt" ] || die "no model at models/yolov8n.pt.
+    Stock YOLOv8n, ~6.5 MB: python3 -c \"from ultralytics import YOLO; YOLO('yolov8n.pt')\"
+    and move it there, or copy it off another machine."
+  kill_match 'detections_3d.py'
+  echo "[detect] YOLOv8n + D555 depth -> odom-frame objects, for the Pi 5 brain"
+  echo "         look_feed_rate=0: image_bridge (the vlm layer) owns the JPEG"
+  echo "         topic, and two publishers on it would look like a flapping camera."
+  dexec "exec python3 $SRC4/nodes/detections_3d.py > /tmp/detections_3d.log 2>&1"
+  echo "  loading YOLO onto the GPU (~15 s)..."
+  sleep 16
+  echo
+  echo "  GATE detect:"
+  # NOT a rate gate: the node publishes only when it actually sees something,
+  # and an empty room is not a fault. The brain agrees -- on_detections has no
+  # staleness timeout, it just observes into world_model. So gate on the node
+  # being up and listening, then say what it can currently see.
+  rexec "n=\$(ros2 topic info /vision/detections_3d 2>/dev/null | awk '/Publisher count/{print \$3}'); \
+         printf '      %-26s %5s        (want >= 1)   %s\n' 'detections_3d publishing' \"\${n:-0}\" \"\$([ \"\${n:-0}\" -ge 1 ] && echo OK || echo FAIL)\""
+  rexec "n=\$(ros2 topic info /vision/target 2>/dev/null | awk '/Subscription count/{print \$3}'); \
+         printf '      %-26s %5s        (want >= 1)   %s\n' 'target hunt listening' \"\${n:-0}\" \"\$([ \"\${n:-0}\" -ge 1 ] && echo OK || echo FAIL)\""
+  echo
+  echo "  What it can see right now (8 s sample, empty is not a failure):"
+  rexec "timeout 8 ros2 topic echo /vision/detections_3d --once 2>/dev/null \
+         | python3 -c 'import sys,json,re; d=sys.stdin.read(); m=re.search(r\"objects.:\s*(\[.*?\])\", d, re.S); print(\"      \" + (\", \".join(sorted({o[\\\"label\\\"] for o in json.loads(m.group(1))})) if m else \"nothing in view\"))' 2>/dev/null" \
+    || echo "      nothing in view"
+  echo
+  echo "  This lights up the brain's approach_object, where_is,"
+  echo "  list_known_objects, scan_surroundings and the world_model service."
+  echo "  Log: ./rover logs detections_3d"
   ;;
 
 # ── rviz ────────────────────────────────────────────────────────────────────

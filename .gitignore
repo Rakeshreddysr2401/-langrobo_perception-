@@ -20,3 +20,8 @@ logs/*.csv
 logs/run.txt
 logs/kill.txt
 logs/smoke.txt
+
+# The YOLO weights. Stock YOLOv8n, ~6.5 MB, re-downloadable:
+#   python3 -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
+# Binary, not source, and not ours -- ./rover detect names the recovery.
+models/*.pt

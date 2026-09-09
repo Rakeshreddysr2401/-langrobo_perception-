@@ -59,8 +59,16 @@ fails.**
 ./rover map         # + nvblox             — occupancy grid >=1 Hz
 ./rover nav         # + nav2               — both costmaps
 ./rover vlm         # + VLM pixel -> goal  — colour >=2 Hz, 1 listener
+./rover detect      # + YOLO -> odom objects — publishing, target hunt listening
 ./rover view        # RViz on the laptop
 ```
+
+`detect` is what makes the brain's `approach_object`, `where_is`,
+`list_known_objects`, `scan_surroundings` and `world_model` work — five tools
+that otherwise answer "I haven't seen one before" about an object in plain
+view. It is distinct from `vlm`: `vlm` answers a VLM's *described* object at
+~10-40 s a look, `detect` publishes everything it recognises continuously at
+roughly zero query cost. Run both. See [TODO.md](TODO.md) §32.
 
 **Do not stop at `nav`.** `vlm` is what lets the Pi 5 brain *see* — without it
 `look()` and `approach_described_object()` are silently dead, the brain answers
