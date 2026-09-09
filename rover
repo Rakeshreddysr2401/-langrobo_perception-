@@ -66,7 +66,7 @@ assert_rate(){ # topic  min_hz  label
 }
 
 # A rate proves a topic is publishing. It cannot prove the pose it carries is
-# REAL. cuVSLAM's failure mode is silent (TODO 21, five occurrences): it drops
+# REAL. cuVSLAM's failure mode is silent (TODO 21, four occurrences): it drops
 # to gyro-plus-wheel dead reckoning and /odom carries on at 20 Hz with every
 # rate gate green -- one session ran 21 m that way unnoticed. health.py
 # subscribes to /fusion/status properly (`ros2 topic echo` truncates that JSON)

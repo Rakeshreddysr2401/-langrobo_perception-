@@ -303,6 +303,13 @@ by-the-book bring-up leaves the VLM row at `--` and the Pi 5 brain's
 `look()` / `approach_described_object()` path silently dead. It is not a bug in
 the stack — it is a gap in the written order. Start it after `nav`.
 
+**Fixed 2026-09-09**: the `rover-start` skill now lists `vlm` in the bring-up
+order, with the depth cost noted. The same pass corrected two other stale
+instructions in it — it still claimed `./rover fused`'s gate does not cover
+cuVSLAM (it does now), and it recommended checking divergence with
+`ros2 topic echo /fusion/status --once`, which `health.py` documents as
+truncating that JSON, so anything grepping it reads nothing.
+
 ## Fixed this session
 
 The cuVSLAM honesty check moved from a doc instruction into the gates — see
