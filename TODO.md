@@ -1241,3 +1241,119 @@ Worth caring about because remote bring-up of the Pi 5 (voice, the brain) goes
 over exactly this link, and because it will look like "the Pi 5 crashed" when
 it has not. If it recurs, worth checking whether the Jetson's wired interface
 can carry the Pi 5 link instead of the Wi-Fi radio.
+
+---
+
+## 🔴 30. The cuVSLAM honesty gate reported "ok — tracking" while cuVSLAM was dead (2026-09-09)
+
+The check that exists specifically to catch a silent pose failure passed a pose
+whose tracker was **not running at all**.
+
+During bring-up, `vo_node` died after `./rover pose` had already gated green.
+`./rover status` then printed both of these, in one output:
+
+```
+pose      /vo/odom                                    0.0     10 --
+cuvslam   vo_z +0.014 m   implausible 0   dead-reckoned 0.00 m   landmarks 81
+          ok — tracking, not dead reckoning
+```
+
+`ros2 node list` showed no cuVSLAM node. `ros2 topic hz /vo/odom` said
+`does not appear to be published yet`. `./rover map` had already built on that
+pose without refusing, which §3 of [STARTUP.md](STARTUP.md) says it will not do.
+
+Only the contradiction between those two lines exposed it. Had the status sweep
+sampled `/vo/odom` a second earlier or later, the whole table would have read OK.
+
+### The cause: `vo_alive` is published, correct, and never read
+
+`phase1/nodes/health.py` parses four fields out of `/fusion/status` — `vo_z`,
+`vo_implausible`, `dr_metres`, `landmarks`. It never reads `vo_alive`.
+
+The fusion node computes that field correctly and does publish it —
+`phase1/nodes/fusion.py:377`:
+
+```python
+'vo_alive': self.vo_n > 0 and (now - self.vo_last_msg) <= COVER_STALE_S,
+```
+
+with `COVER_STALE_S = 0.5`, and `fusion_node.py:348` serialises the whole health
+dict, so `vo_alive` is sitting in the very JSON payload `health.py` already
+parses. The signal was present, correct, and unused.
+
+### Why the four fields it does read cannot catch this
+
+All four are last-known values that **freeze** when the publisher stops rather
+than going stale-flagged or absent:
+
+| field | on tracker death | why it stays quiet |
+|---|---|---|
+| `vo_z` | holds its final value | +0.014 m, well inside the 0.30 m limit |
+| `landmarks` | holds its final count | 81 — above the 30 that would warn |
+| `vo_implausible` | stops incrementing | `climbing` compares two frozen samples |
+| `dr_metres` | **0.00** | the rover was stationary |
+
+`dr_metres` is the one that would have moved, and it only moves once the rover
+drives. **A stationary rover with a dead tracker is indistinguishable from a
+stationary rover with a healthy one** on these four fields — which is exactly
+the state every bring-up is in.
+
+### How it was missed
+
+`health.py`'s own docstring explains the silent fallback as one where
+"`vo_alive` stays true". That is true of **divergence** — cuVSLAM keeps
+publishing a confidently wrong pose, so freshness looks fine. It is false of
+**death**, where publishing stops and `vo_alive` goes false within 0.5 s.
+
+The check was written for the first failure mode and, in the process, dismissed
+the one field that cleanly catches the second.
+
+### Fix
+
+`health.py` should test `vo_alive` as its own failure, separately from the
+divergence test, and exit non-zero on it — so the layer gates that call it
+(`fused`, and the refusal in `map`) inherit the catch. Worth logging the
+distinction it prints, too: "diverged" and "not running" want different fixes,
+though both start with `./rover pose`.
+
+Until then: **`./rover status`'s `cuvslam` line does not prove the tracker is
+alive.** Read the `/vo/odom` rate row next to it.
+
+---
+
+## 🟠 31. Frame gaps of 1.4–1.9 s under full load exceed cuVSLAM's `max_frame_delta_s` (2026-09-09)
+
+With every layer up (camera, pose, fused, map, nav, vlm) on a Jetson at load
+average ~4.2, the camera pipeline stalls long enough to starve `vo_node` past
+the point where cuVSLAM resets tracking. From `/tmp/vo.log`, one session:
+
+```
+[WARN] [vo_node]: frame gap 1.92 s — past cuVSLAM max_frame_delta_s (1.0 s). Tracking may reset.
+[WARN] [vo_node]: frame gap 1.40 s — past cuVSLAM max_frame_delta_s (1.0 s). Tracking may reset.
+```
+
+matched one-for-one, to the same second, by the fusion node:
+
+```
+[WARN] [fusion_node]: vo DOWN — carrying on with the rest
+[INFO] [fusion_node]: all three sensors contributing
+```
+
+Each dropout recovered in ~1 s, so no rate gate ever saw it: `/odom` held 20 Hz
+and `/vo/odom` averaged 23 Hz across the sweep.
+
+**This revises the cost recorded in [STARTUP.md](STARTUP.md) §2.** That note has
+the `vlm` layer taking depth from ~24 Hz to ~14 Hz, "worst case a 633 ms gap …
+still over the 10 Hz gate". The rate gate is not the binding constraint —
+`max_frame_delta_s` is, it sits at 1.0 s, and the gaps measured here are up to
+**1.9 s, nearly double it**. A gap that clears the 10 Hz gate comfortably can
+still reset the tracker.
+
+Unproven but suspected: this is also what killed `vo_node` outright in §30. Its
+log ends on `tracker up` with no traceback, no OOM in `dmesg`, and 2.7 GB free —
+consistent with a tracking reset it did not survive rather than a crash.
+
+Not yet diagnosed to a cause. The obvious suspects are consumer load on the
+camera pipeline (`image_bridge` attaching a second consumer to the colour
+stream) and CPU contention from nvblox + nav2. Worth measuring which, because
+the workaround — not running `vlm` while mapping — costs the brain its eyes.

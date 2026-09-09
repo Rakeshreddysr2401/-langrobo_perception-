@@ -71,6 +71,12 @@ case a 633 ms gap (measured 2026-09-09). Still over the 10 Hz gate. This is
 consumer load, **not** `align_depth` — an earlier note blaming the driver's
 reprojection was wrong.
 
+**But the 10 Hz gate is not the constraint that matters here.** Later the same
+day, under all six layers, the same stall was measured at **1.4–1.9 s** — past
+cuVSLAM's `max_frame_delta_s` of 1.0 s, which resets tracking. `vo_node` logs
+`frame gap` and the fusion node logs `vo DOWN`, both recovering in ~1 s, so no
+rate gate ever sees it. See [TODO.md](TODO.md) §31.
+
 ### When a layer fails
 
 | layer | what it means | what to do — physically |
@@ -96,6 +102,20 @@ way before anyone noticed.
 - `./rover map` **refuses** to build on a diverged pose — mapping while diverged
   corrupts the map permanently rather than degrading it.
 - `./rover compare` shows a red banner live and in its verdict.
+
+### It catches divergence. It does NOT catch a dead tracker.
+
+The check reads `vo_z`, `vo_implausible`, `dr_metres` and `landmarks` — all
+last-known values that **freeze** rather than disappear when `vo_node` stops
+publishing. On 2026-09-09 it printed `ok — tracking, not dead reckoning` with
+no cuVSLAM node running at all, and `./rover map` built on that pose without
+refusing. `dr_metres` is the field that would have caught it, and it reads 0.00
+until the rover actually drives — so a stationary rover with a dead tracker
+looks exactly like a healthy one, which is the state every bring-up is in.
+
+**So read the `/vo/odom` rate row next to the `cuvslam` line.** If it is `0.0`
+and the `cuvslam` line still says `ok`, believe the rate. Fix is the same:
+`./rover pose` **then** `./rover fused`. Full detail in [TODO.md](TODO.md) §30.
 
 What you want to see:
 
