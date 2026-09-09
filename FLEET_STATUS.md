@@ -240,3 +240,116 @@ A wired USB headset in the Pi 5 also works and skips steps 1-2 entirely.
 ## Still true
 
 Telegram remains the working channel today and needs none of the above.
+
+---
+
+# Post-power-cycle bring-up — 2026-09-09
+
+Everything was power-cycled (D555, Jetson, Pi 5, ESP32) and the Pi 5 refactored.
+Cold start from `docker start rover`, every layer brought up in order.
+
+## All eleven rows green
+
+```
+camera  /camera/camera0/infra1/image_rect_raw   29.9   want 15    OK
+camera  /camera/camera0/depth/image_rect_raw    23.0   want 10    OK
+pose    /vo/odom                                28.5   want 10    OK
+pose    /gyro/base                             200.1   want 50    OK
+wheels  /wheel_state                            19.9   want 15    OK
+fused   /odom                                   20.0   want 15    OK
+map     /nvblox_node/static_occupancy_grid       4.9   want  1    OK
+nav     /global_costmap/costmap                  0.8   want0.5    OK
+nav     /local_costmap/costmap                   1.7   want  1    OK
+vlm     /camera/color/image_raw/compressed       4.6   want  2    OK
+view    /rover/model                             1.0   want0.5    OK
+
+cuvslam  vo_z +0.003 m  implausible 0  dead-reckoned 0.00 m  landmarks 215
+         ok — tracking, not dead reckoning
+```
+
+**The ESP32 came back on its own** — `/wheel_state` 19.9 Hz, `/cmd_vel` subs 1,
+no power-cycle needed. That is not the §24 regression state. Teleop is in
+**AUTO** (`GET :8091/mode` -> `{"manual": false}`).
+
+Note `./rover status` with nothing running does not fail fast — it walks eleven
+topics at ~12 s each and takes over two minutes to print a table of dashes. Run
+a layer first; the layer gates are the fast answer.
+
+## The 8.3 Hz depth reading was misattributed
+
+Open item 1 from 2026-09-06 blamed `align_depth` for depth sitting under its
+gate. **That hypothesis is wrong.** The camera launch args are byte-identical
+(`enable_color:=true`, `align_depth.enable:=true` — `rover:104`), and measured
+across this bring-up:
+
+| when | depth |
+|---|---|
+| camera/pose/fused/map/nav up, **no VLM layer** | 23–26 Hz |
+| after `./rover vlm` attaches `image_bridge` | **14.3 Hz**, max gap 633 ms |
+
+So it is **consumer load**, not the driver's reprojection. `align_depth` was
+already on in both readings. The 8.3 Hz on 2026-09-06 was the VLM layer running.
+
+Still above the 10 Hz gate, so nothing is broken — but the 633 ms worst-case
+inter-frame gap is the number to watch, not the average. Depth is what
+`pixel_to_goal.py` reads to turn a VLM pixel into a metric goal, and a 0.6 s
+stall there lands the goal wherever the rover was two thirds of a second ago.
+
+## `./rover vlm` is not in the documented bring-up order
+
+The `rover-start` skill lists camera -> pose -> fused -> map -> nav -> view and
+stops. `vlm` is a real layer with its own gate and is not in that list, so a
+by-the-book bring-up leaves the VLM row at `--` and the Pi 5 brain's
+`look()` / `approach_described_object()` path silently dead. It is not a bug in
+the stack — it is a gap in the written order. Start it after `nav`.
+
+**Fixed 2026-09-09**: the `rover-start` skill now lists `vlm` in the bring-up
+order, with the depth cost noted. The same pass corrected two other stale
+instructions in it — it still claimed `./rover fused`'s gate does not cover
+cuVSLAM (it does now), and it recommended checking divergence with
+`ros2 topic echo /fusion/status --once`, which `health.py` documents as
+truncating that JSON, so anything grepping it reads nothing.
+
+## Fixed this session
+
+- The cuVSLAM honesty check moved from a doc instruction into the gates — see
+  TODO §21, "Surface it". `./rover fused` now runs it and warns; `./rover map`
+  now refuses to build on a dishonest pose.
+- **`compare.py` now shows divergence** (TODO §21, the last open bullet). It was
+  watching `/vo/status`, which does not carry `vo_z` / `vo_implausible` /
+  `dr_metres` — those are on `/fusion/status`. The Phase 1 instrument had no way
+  to know, which is why it stayed quiet through four divergences.
+- **LangGraph Studio brought up on the Pi 5** — see OPERATIONS.md §7, plus
+  `~/ros2_ws/scripts/start_studio.sh` on the Pi. Studio now gets its own episodic store
+  (`~/.langrobo/qdrant_studio`) instead of starting with none, and
+  `STUDIO_MODEL` was corrected from `gpt-4o-mini` to `default` so traces stop
+  claiming an OpenAI model when llama.cpp is serving Gemma.
+
+## Open item 4 (ssh to the Pi 5 hangs) — a candidate cause, found by hitting it
+
+Reproduced today: ping 0% loss, port 22 accepting TCP, teleop answering 200,
+and eight consecutive `ssh` calls returning **exit 255 with no output at all**.
+
+At least some of that is self-inflicted, and it is worth knowing before anyone
+chases the network again. The command being run remotely was
+
+```
+pkill -f "langgraph dev"
+```
+
+`pkill -f` matches against the whole command line — **including the command line
+of the shell sshd started to run it**, which contains the pattern text. So the
+remote shell kills itself and its own session. Exit 255, nothing printed,
+nothing actually killed, and it looks precisely like a flaky link. `pkill -f
+"langgrap[h] dev"` fixes it: a regex that cannot match its own literal text.
+
+This does **not** retire open item 4 — the 2026-09-06 report was during a fleet
+check and nobody has confirmed a self-matching `pkill` was involved there. But
+any future "ssh to the Pi 5 is hanging" should rule this out first, because the
+signature is identical and the cause is local.
+
+## Not verified this pass
+
+No motion was commanded. A human watches every autonomous move and nobody was
+standing over it, so "the stack is up and honest" is the claim; "it drove" is
+not.

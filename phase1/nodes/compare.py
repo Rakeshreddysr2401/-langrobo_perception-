@@ -135,6 +135,10 @@ MAX_PUSH_MS = 1.0
 # collapse just before a teleport. Recorded at every jump to test that.
 LOW_LANDMARKS = 30
 
+# A ground rover is not this far above or below the floor. Same limit health.py
+# grades on -- one number, so the instrument and the gate cannot disagree.
+VO_Z_LIMIT = 0.30
+
 # Complementary-filter time constant for roll/pitch, seconds. Above it the
 # accelerometer wins (absolute, no drift); below it the gyro wins (smooth, and
 # immune to the fake tilt that acceleration puts on the accelerometer). A quarter
@@ -343,11 +347,25 @@ class Compare(Node):
         self.tick_travel = 0.0            # unsigned arc length from raw ticks
         self.tick_at_fuse = 0.0           # tick_path at the last FUSED advance
         self.vo_unhealthy = 0             # frames cuVSLAM was ignored outright
+        # cuVSLAM divergence, read from /fusion/status. TODO 21: it has diverged
+        # four times and the fallback is SILENT -- the rover drops to gyro+wheel
+        # dead reckoning while every rate on screen stays green. compare is the
+        # instrument you are actually watching during a push, so it is the last
+        # place that silence should survive.
+        self.fs_z = None            # vo_z, metres
+        self.fs_imp = None          # vo_implausible, latest
+        self.fs_imp_first = None    # first seen, so "climbing" is measurable
+        self.fs_dr_m = 0.0          # metres carried on dead reckoning
+        self.fs_diverged = False    # latched: a run that diverged is not clean
 
         self.create_subscription(Odometry, '/vo/odom', self._vo, qos_profile_sensor_data)
         self.create_subscription(Vector3, '/wheel_state', self._wheels, qos_profile_sensor_data)
         self.create_subscription(Imu, '/gyro/base', self._gyro, qos_profile_sensor_data)
         self.create_subscription(String, '/vo/status', self._status, 10)
+        # /fusion/status, NOT /vo/status: vo_z, vo_implausible and dr_metres
+        # live on the fusion node's payload. Watching only /vo/status is why
+        # this instrument stayed quiet through four divergences.
+        self.create_subscription(String, '/fusion/status', self._fusion_status, 10)
         # Per-wheel cumulative counts. Velocity has to be integrated and loses
         # whatever a dropped message carried; a total never does. It is also the
         # only view that shows one wheel slipping, since velL averages the two
@@ -414,6 +432,59 @@ class Compare(Node):
             self.landmarks = int(n)
             if self.landmarks_min is None or self.landmarks < self.landmarks_min:
                 self.landmarks_min = self.landmarks
+
+    def _fusion_status(self, m):
+        """Latch cuVSLAM divergence, so a push cannot be graded against a lie."""
+        try:
+            d = json.loads(m.data)
+        except (ValueError, TypeError):
+            return
+        z = d.get('vo_z')
+        if isinstance(z, (int, float)):
+            self.fs_z = float(z)
+        imp = d.get('vo_implausible')
+        if isinstance(imp, (int, float)):
+            self.fs_imp = int(imp)
+            if self.fs_imp_first is None:
+                self.fs_imp_first = self.fs_imp
+        dr = d.get('dr_metres')
+        if isinstance(dr, (int, float)):
+            self.fs_dr_m = float(dr)
+        if self.vo_diverged():
+            self.fs_diverged = True
+
+    def vo_diverged(self):
+        """Off the floor, or rejecting poses right now.
+
+        Two tests because they catch different moments. Absolute z catches a
+        tracker that is ALREADY underground -- the state you inherit when you
+        start compare on a session that went wrong an hour ago. A climbing
+        rejection counter catches one going there WHILE you watch, before z has
+        moved far enough to trip the limit.
+
+        A non-zero count that is not climbing is history, not a fault: it means
+        some poses were rejected earlier and it is steady now. health.py draws
+        the line in exactly the same place.
+        """
+        if self.fs_z is not None and abs(self.fs_z) > VO_Z_LIMIT:
+            return True
+        return (self.fs_imp is not None and self.fs_imp_first is not None
+                and self.fs_imp > self.fs_imp_first)
+
+    def _divergence_lines(self, indent='  '):
+        """The red line. Same text live and in the verdict."""
+        if not (self.fs_diverged or self.vo_diverged()):
+            return []
+        z = '?' if self.fs_z is None else '%+.2f m' % self.fs_z
+        imp = '?' if self.fs_imp is None else str(self.fs_imp)
+        return [
+            f'{indent}✗ cuVSLAM DIVERGED — vo_z {z}, {imp} poses rejected, '
+            f'{self.fs_dr_m:.2f} m dead reckoned.',
+            f'{indent}  The pose is running open-loop on wheels+gyro. Every rate '
+            f'above this line still reads fine.',
+            f'{indent}  Fix: ./rover pose  THEN  ./rover fused  (fused alone '
+            f'restarts fusion and NOT cuvslam).',
+        ]
 
     def _watchdog(self):
         """Keep the pose alive when cuVSLAM goes quiet altogether.
@@ -810,6 +881,10 @@ class Compare(Node):
                            f'{s.straight * 100:11.1f}  {s.path * 100:8.1f}  {s.hz:6.1f}{flag}')
         out.append('')
 
+        red, off = ('', '') if self.args.plain else ('\033[31;1m', '\033[0m')
+        for line in self._divergence_lines():
+            out.append(f'{red}{line}{off}')
+
         if self.jumps:
             out.append(f'  ⚠ {len(self.jumps)} POSE JUMP(S) — cuvslam lost tracking. '
                        f'FUSED carried {self.dr_steps} frames on wheels+gyro '
@@ -923,6 +998,16 @@ class Compare(Node):
     def verdict(self):
         a = self.args
         print('\n\n  ── result ' + '─' * 58)
+        # Before any grade. A number measured against a diverged pose is not a
+        # bad measurement, it is a measurement of something else -- and TODO 21
+        # exists because that distinction was invisible for a whole session.
+        div = self._divergence_lines()
+        if div:
+            print()
+            for line in div:
+                print(line)
+            print('  Nothing below is graded — rerun the push once the pose is real.')
+            print()
         if self.wheel_dead_side:
             print(f'  NOTE: {self.wheel_dead_side} encoders read zero throughout while the other')
             print('  side moved. The wheels row below is arithmetic on a dead input —')
