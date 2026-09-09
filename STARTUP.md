@@ -360,10 +360,43 @@ real turn through Telegram and read the trace. For *reading* flows this is the
 lower-effort path and always has been; Studio is only worth the tunnel when you
 want to **step the graph yourself**.
 
+### Stop it before you use Telegram — it answers your messages instead
+
+**Studio is not a passive viewer.** Its process runs the same graph, polls the
+same Telegram bot, and brings up its own `/studio_bridge` ROS node alongside
+`/agent_node`. Both then publish `/cmd_vel`, and both pick up your messages.
+
+Measured 2026-09-10, with Studio left running from §6 and the user driving the
+rover from Telegram: the navigation was executed by **`studio_bridge`**, and it
+logged
+
+```
+[studio_bridge]: nav done: success=False listener=NONE
+                 msg="Navigation to 'near the white bucket' failed ..."
+```
+
+`listener=NONE` is the whole problem. Only `agent_node` registers a nav-done
+callback, so when Studio's bridge runs the navigation the completion has
+nowhere to go: the rover accepts the goal, drives (or fails to), finishes, and
+**tells nobody** — while `agent_node`, the process that would have reported it,
+never saw the goal at all. Two sessions were spent hunting a "missing report"
+that was really a report delivered to a bridge with no listener.
+
+So treat §6 as a mode, not an addition: **Studio, or the Telegram/voice brain —
+not both.** The [`rover-start`](#) flow starts Studio at the end because the
+link is usually what is wanted; if you are about to drive from Telegram, stop
+it first.
+
 ### Stopping it
 
 ```bash
 ssh 192.168.1.16 'pkill -f "langgrap[h] dev"'
+```
+
+Confirm `/studio_bridge` is actually gone before trusting a nav report again:
+
+```bash
+ros2 node list | grep studio      # want no output
 ```
 
 **The brackets are not a typo.** `pkill -f "langgraph dev"` matches its own
