@@ -1619,6 +1619,67 @@ recover signature observed, and would have nothing to do with Jetson DDS load or
 with `/cmd_vel` publisher count. **That is now the first hypothesis to test**,
 ahead of the publisher-count one above.
 
+### It is REPRODUCIBLE, and driving is the trigger (2026-09-10)
+
+Found while trying to calibrate the rotation constant (§36), which needed the
+rover to pivot repeatedly. It is no longer a single bring-up observation.
+
+**Idle it is fine. Under driving load it falls apart.** `/wheel_state`, measured
+across one session, in the order the readings were taken:
+
+| when | rate |
+|---|---|
+| after bring-up, idle | 19.99 Hz |
+| idle, before driving | 18.8 Hz |
+| during a 5 s pivot | 14.2 Hz |
+| during three back-to-back pivots | **1 message in 3 s** |
+| idle again, minutes later | 19.94 Hz |
+| idle, confirmed | 19.86 Hz |
+
+No intervention at any point. The recovery is the same self-healing already
+recorded above; what is new is that **commanding motion is what breaks it.**
+
+**Both directions of the link die together, which is the diagnostic.** During a
+continuous 5 s pivot command, `/wheel_state` produced *no messages at all* for
+1.5 s — not zeros, an absence — and the gyro confirms the body was not rotating
+then either. Commands and telemetry share one micro-ROS WiFi UDP path, so a
+single link stall stops the motors (firmware watchdog) and the telemetry at the
+same instant. Nothing else explains both halves at once.
+
+The visible signature at the robot is a **~1 s on, ~1 s off stutter**. Gyro rate
+per 0.5 s bucket through one 5 s pivot, commanded continuously at 5.0 rad/s:
+
+```
+0.92  0.37  0.00  0.00  0.61  0.52  0.00  0.00  0.52  0.64
+```
+
+**It is not a current cliff.** Full duty was the obvious suspect — 5.0 rad/s
+commands +/-0.85 m/s against `MAX_WHEEL_VEL` 0.86, and a pivot is the
+highest-current manoeuvre this rover has. But re-running at **2.0 rad/s** was
+*worse*, not better: the right side managed 11.7 deg in five seconds. A current
+or thermal limit would ease off at lower duty. This does not.
+
+**What this invalidates.** Any measurement taken while driving is suspect unless
+`/wheel_state` continuity is checked for the same window. Three of the four
+rotation measurements on 2026-09-10 had to be thrown away for this reason, and
+one of them looked perfectly plausible (0.13 rad/s, 12% left/right asymmetry)
+while being nothing but dropout.
+
+**What to do next**, in order:
+
+1. Capture `journalctl -u langrobo-microros` **during** a pivot — the trigger is
+   now reproducible on demand, so the log that this entry has always lacked is
+   finally obtainable. (Checked after the fact: the unit is `active` and logged
+   nothing for the whole window, which is itself worth explaining.)
+2. Watch the Pi 5's WiFi at the same time — signal, retries, tx errors. If the
+   ESP32 browns out under motor current its WiFi drops first.
+3. Only then consider firmware. A power-cycle still "fixes" it and still
+   destroys the evidence.
+
+**This outranks §36.** A calibration constant is worth nothing while the link
+delivers commands intermittently, and it makes every motion measurement on this
+rover untrustworthy until it is fixed.
+
 
 ---
 
@@ -1791,3 +1852,75 @@ tracker). Both failed the same way: a proxy signal was treated as the fact
 itself, and the proxy was chosen because it was easy to read. §30 froze; this
 one was never true in the first place. When a gate accuses hardware that looks
 fine, suspect the gate.
+
+---
+
+## 🟠 36. Timed turns are computed against a yaw rate the rover never reaches (2026-09-10)
+
+Ask for 90°, 180° or 360° and the rover turns a small fraction of it. Reported
+from normal use: "when I asked to rotate 90 or 180 or 360 it looks like it is
+rotating only near to 90 degrees."
+
+`langrobo_core/tools/movement.py` drives every turn open-loop:
+
+```python
+duration = radians(angle) / _STEADY_STATE_ANGULAR_VEL
+```
+
+Two constants exist, correctly separated:
+
+| constant | meaning | value |
+|---|---|---|
+| `_ANGULAR_VEL_RS` | yaw rate **commanded** in the Twist | 5.0 rad/s |
+| `_STEADY_STATE_ANGULAR_VEL` | yaw rate **achieved** | **defaults to `_ANGULAR_VEL_RS`** |
+
+The second defaulting to the first is the bug. Its own comment says "MEASURE IT
+and set `LANGROBO_STEADY_ANGULAR_VEL`" — and it never was. There was no
+`~/.langrobo/brain.env` on the Pi 5 at all, so nothing overrode it.
+
+Commanded 5.0 rad/s is 286 °/s. Achieved is ~69 °/s. So every turn duration is
+**~4.2× too short**:
+
+| asked | duration computed | actual |
+|---|---|---|
+| 90° | 0.314 s | ~21° |
+| 180° | 0.628 s | ~43° |
+| 360° | 1.257 s | **~86°** |
+
+That last row is the reported symptom, to within a few degrees.
+
+### The consequence nobody had noticed
+
+`approach_described_object`'s search calls `_duration("L", 90.0)` per step and
+runs five steps, which its docstring calls "a full circle plus one recheck".
+At the real rate each step turns ~21°, so the sweep covers **~105°, not 450°**.
+
+**Anything behind the robot has never been searched**, and the failure message —
+"I turned a full circle and looked carefully, but I couldn't spot the ... " — is
+false. It turned about a quarter circle.
+
+### The value, and why it is provisional
+
+Set `LANGROBO_STEADY_ANGULAR_VEL=1.20` (69 °/s) in `~/.langrobo/brain.env`
+2026-09-10. Two independent measurements agree:
+
+- §13 (2026-08-21): body turned 65–75 °/s across four 360° pivots.
+- `logs/measure_yaw_rate.py` (2026-09-10): one clean 3 s plateau at
+  L −0.30 / R +0.32 m/s = **1.21 rad/s**, wheel telemetry continuous throughout.
+
+**Provisional because of §33.** Most runs that day were unusable — the wheel link
+drops out under driving load and the rover stutters ~1 s on, ~1 s off, so the
+measured average is dominated by dropout rather than by the drivetrain. The
+value above comes from the single window where the link held. **Re-measure after
+§33 is fixed**, and on the surface actually driven — §13 warns scrub is
+surface-dependent.
+
+`LANGROBO_TURN_STARTUP_S` was deliberately left at 0.0. A 1.5–2 s "startup lag"
+was visible, but it was §33's dropout, not mechanical ramp, and baking a link
+fault into a calibration constant is exactly how it would get hidden.
+
+### Not verified end to end yet
+
+The brain must be restarted to read the file, and that needs a password
+(STARTUP.md §5), so it is the operator's step. After the restart, ask for a
+360° turn and measure the result before believing any of this.
