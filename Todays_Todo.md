@@ -50,6 +50,38 @@ place" looks stale, which means **#2 is probably unnecessary and the real move
 is re-enabling nav2's rotate-to-heading** rather than making goals yaw-agnostic.
 Confirm on clean data before changing nav2.
 
+### Update — powered down again 2026-09-10, after the rotation + stale-view work
+
+**Rotation is FIXED and confirmed by the user.** Two separate causes, found in
+this order:
+
+1. `_STEADY_STATE_ANGULAR_VEL` defaulted to the commanded 5.0 rad/s → every turn
+   4.2× short. Fixed via `LANGROBO_STEADY_ANGULAR_VEL=1.20` in
+   `~/.langrobo/brain.env`. Verified through `agent_node`: 360→357°.
+2. **It still looked broken, because Studio never read that file.** `brain.env`
+   is loaded by *systemd* for `langrobo-brain.service` only; Studio is started by
+   `start_studio.sh`. Same graph, uncalibrated constants. Fixed in
+   `start_studio.sh` (Pi 5 `1dbac6e`) — it now sources the file, says so on
+   startup, and warns loudly when it is missing.
+
+**Item #14 (stale camera view) is done** — Pi 5 `86e0b08`, 184 tests pass. See
+its section below, including why stripping stale images would have been wrong.
+
+**The power cycle applies everything.** A cold boot restarts `agent_node`, which
+re-reads `brain.env` *and* re-imports `langrobo_core` from `src/`. So both fixes
+go live for Telegram and voice with no password step.
+
+**Studio does NOT start at boot** — run `~/ros2_ws/scripts/start_studio.sh` and
+check the log says `loaded calibration from ~/.langrobo/brain.env`. If that line
+is missing, Studio is uncalibrated and any motion test through it is invalid.
+
+### Still to verify on return
+
+- **#14 in practice.** The stale-view note is an *instruction* to a 12B model,
+  not an enforcement. Test: `go forward` → `rotate 180` → `what can you see`.
+  It should call `look()` again. If it answers from the old photo anyway, that
+  is the signal to build something stronger — measure before building.
+
 ### On return, in this order
 
 1. Bring the stack up (`rover-start` — container, six layers, Studio, RViz).
