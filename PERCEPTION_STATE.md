@@ -13,6 +13,12 @@ That is `Todays_Todo.md` item 14, which was marked ✅ done earlier the same day
 what the actual defect is, and what to build instead — under the constraint
 that the fix must not disturb the llama.cpp KV cache.
 
+**✅ RESOLVED, confirmed by the user, 2026-09-10 evening.** It took three Pi 5
+commits, not one — `4988fe8` (the pose stamps), `1de1e9e` and `0c83c94` (a
+code-level backstop, itself needing a second pass). §7 has the order things
+were actually found in; §7b and §7c are the two rounds the first fix missed,
+both from the user driving the real robot and pasting back what happened.
+
 ---
 
 ## 0. First, the thing that costs a day if it is not said
@@ -284,9 +290,14 @@ frame) — everything here gets cheaper once a look costs 5–15 s instead of 10
 | 1 | Restart the brain and reproduce. | The old fix had never run (§0). | 2 min | superseded by 2+3 |
 | 2 | Fix `LOCAL_AGENT_PROMPT` rules 2–3 (§1). | The system prompt contradicted the fix. | ~5 lines | ✅ Pi 5 `4988fe8` |
 | 3 | Stamp the frame; frame the turn (§5). | Removes the lying label, adds the coordinates, append-only. | small | ✅ Pi 5 `4988fe8` |
-| 4 | **Measure whether 2+3 suffice.** | `look` → `move_robot("F:60,L:180")` → `what can you see`. Did it call `look()` again? | 10 min | ⬜ **next** |
-| 5 | Only if 4 fails: the freshness gate, §6(i). | Enforcement instead of instruction. | small | ⬜ |
+| 4 | Measure whether 2+3 suffice. | `look` → move → `what can you see`. | 10 min | ✅ **partially — see §7b/7c, it wasn't quite enough on its own** |
+| 5 | The vision-question backstop, code-level. | §4's measurement found the routing gap, not a stamping gap. | small | ✅ Pi 5 `1de1e9e`, `0c83c94` |
 | 6 | Later: the world model, §6(iii). | A different capability, not a fix for this bug. | medium | ⬜ |
+
+**Confirmed working by the user, 2026-09-10 evening**, after all three commits
+were live: the exact repro (look → turn → "now what are you looking at")
+answers from a fresh `look()` instead of a stale photo or an unrequested
+`scan_surroundings()` spin.
 
 ### What shipped (2026-09-10, Pi 5 `4988fe8`, 196 tests — was 184)
 

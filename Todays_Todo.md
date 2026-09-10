@@ -115,11 +115,11 @@ is missing, Studio is uncalibrated and any motion test through it is invalid.
 | 11 | Power telemetry into `/rover_diag` | READINESS #2; the rover has run itself flat | small | ⬜ |
 | 12 | Search-step overlap and a progress message | a failed search is ~4 min of silence | small | ⬜ |
 | 13 | Commit the flow walkthrough as a doc | it exists only in a terminal today | small | ⬜ |
-| 14 | Stale camera view after the robot moves | answered "what can you see" from a photo of where it used to be | small | 🔄 redesigned + shipped (Pi 5 `4988fe8`) — **awaiting the on-robot test**, see [PERCEPTION_STATE.md](PERCEPTION_STATE.md) |
+| 14 | Stale camera view after the robot moves | answered "what can you see" from a photo of where it used to be | small | ✅ **done and confirmed by the user, 2026-09-10 evening** (Pi 5 `4988fe8`, `1de1e9e`, `0c83c94`), see [PERCEPTION_STATE.md](PERCEPTION_STATE.md) |
 
 ---
 
-## 14. 🔄 Stale camera view after the robot moves — SHIPPED, NOT VERIFIED
+## 14. ✅ Stale camera view after the robot moves — DONE, CONFIRMED 2026-09-10
 
 `look()` injects the frame as a HumanMessage labelled `[Current camera view]`
 and it **keeps that label for the rest of the conversation**. `local_agent` has
@@ -206,6 +206,22 @@ local_agent; the 12B model ignored them three times in one transcript. Fixed
 Pi 5 `1de1e9e`: a code-level backstop in `graph/build.py`, matched against the
 user's own words, forces the chain to local_agent when a non-vision agent
 tries to answer one. 209 tests. See PERCEPTION_STATE.md §7b.
+
+**Update, same evening — the backstop's own blind spot:** the very next test
+found a second shape of the identical bug. "now what are you looking at" with
+`navigate` sticky produced a proposed `scan_surroundings()` call — a real 360°
+rotation nobody asked for — because `1de1e9e`'s check only caught "spoke with
+no tool call" and waved any tool call through. Fixed Pi 5 `0c83c94`: the check
+now keys on whether `handover` specifically is among the proposed tool calls,
+so it catches the proposal *before* the tool runs — the wheels never turn.
+213 tests. See PERCEPTION_STATE.md §7c.
+
+**✅ DONE. Confirmed by the user after this fix went live**, 2026-09-10
+evening: "The fixes you made are really amazing and super and worked good."
+All three Pi 5 commits (`4988fe8`, `1de1e9e`, `0c83c94`) are pushed to
+`dev-1.3.1-minimal` and live in `agent_node` (verified by restart-timestamp
+against each commit — see [[pi5-two-processes-one-config]] for why that check
+matters here specifically). 213 tests pass.
 
 ---
 
