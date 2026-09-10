@@ -20,14 +20,28 @@ export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 export ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET
 unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE
 
-# Studio gets its OWN episodic store. Embedded Qdrant is single-process and
-# agent_node holds ~/.langrobo/qdrant, so sharing it means Studio starts with no
-# memory at all. This MUST be set here and never in .env -- agent_node reads the
-# same .env, and setting it there would repoint the ROBOT's memory.
-export LANGROBO_MEMORY_PATH="$HOME/.langrobo/qdrant_studio"
+# The robot CALIBRATION lives in ~/.langrobo/brain.env, which systemd loads for
+# langrobo-brain.service via EnvironmentFile=. Studio is not started by systemd,
+# so without this it runs the SAME GRAPH with uncalibrated constants -- and the
+# failure is silent and entirely plausible: movement.py falls back to
+# _STEADY_STATE_ANGULAR_VEL = the COMMANDED 5.0 rad/s, which the body never
+# reaches, so every timed turn runs ~4.2x short. Ask for 360 and get ~86.
+#
+# Found 2026-09-10: the rotation fix measured correctly through agent_node
+# (360 -> 357 deg) and appeared completely unfixed when tested from Studio,
+# because these are two processes and only one of them was ever given the file.
+# Anything else added to brain.env has the same trap. See rover/TODO.md 36.
+if [ -f "$HOME/.langrobo/brain.env" ]; then
+    set -a
+    . "$HOME/.langrobo/brain.env"
+    set +a
+    echo "loaded calibration from ~/.langrobo/brain.env"
+else
+    echo "WARNING: no ~/.langrobo/brain.env - Studio will use UNCALIBRATED defaults"
+fi
 
 # --allow-blocking: the graph does synchronous ROS and HTTP work, and without it
 # the server raises on the first blocking call.
-echo "starting: cwd=$(pwd) memory=$LANGROBO_MEMORY_PATH domain=$ROS_DOMAIN_ID"
+echo "starting: cwd=$(pwd) domain=$ROS_DOMAIN_ID"
 exec "$HOME/.local/bin/langgraph" dev \
     --no-browser --allow-blocking --host 127.0.0.1 --port 2024

@@ -1941,6 +1941,50 @@ of these windows (max gap 0.11–0.16 s), so none of it is §33 dropout.
 process that served it started before `brain.env` was written; the journal shows
 zero user turns between the 13:20 restart and the report.
 
+### And it still looked broken — because Studio never got the file
+
+Reported again after the verification above, from a LangGraph Studio thread:
+`R:180`, `R:360`, `R:90` all "looks like half rotations". Every number in that
+trace is consistent with the **un-fixed** constant.
+
+**`brain.env` reaches `langrobo-brain.service` and nothing else.** systemd loads
+it via `EnvironmentFile=`. Studio is started by `scripts/start_studio.sh`, which
+sourced ROS and nothing else — so it ran **the same graph** with
+`_STEADY_STATE_ANGULAR_VEL` back at the commanded 5.0. Confirmed by reading
+`/proc/<studio pid>/environ`: no `LANGROBO_*` at all.
+
+So on the same rover, minutes apart, the same request measured 357° through
+`agent_node` and about 86° through Studio. Two processes, one file, and only one
+of them was ever given it.
+
+Fixed 2026-09-10 in `start_studio.sh` (Pi 5 repo `1dbac6e`, copy synced to
+`phase4/pi5/`): source `~/.langrobo/brain.env` with `set -a`, print
+`loaded calibration from ...` on startup, and **warn loudly when the file is
+absent** — "no calibration" must never again look identical to "calibrated".
+Verified: the restarted Studio process has `LANGROBO_STEADY_ANGULAR_VEL=1.20`.
+
+**Anything else ever added to `brain.env` inherits this trap.** Two processes run
+this graph and they are configured by different mechanisms.
+
+### A detour worth recording: it is not left/right asymmetry
+
+The first suspicion was direction, since every command in the reported trace was
+`R:` and every verification run had been `L:`. §13 does document the two sides
+scrubbing differently (LEFT 1.60×, RIGHT 1.29× on a 360). Measured head to head,
+same duration, alternating:
+
+| dir | driven | coast | total | wheels L/R | wheel msgs | max gap |
+|---|---|---|---|---|---|---|
+| L | 114.3° | 0.0° | 114.3° | −0.198/+0.197 | 21 | **0.95 s** |
+| R | 186.7° | 5.4° | 192.1° | +0.304/−0.311 | 56 | 0.17 s |
+| L | 167.2° | 4.4° | 171.6° | −0.263/+0.274 | 55 | 0.12 s |
+| R | 182.0° | 5.1° | 187.2° | +0.289/−0.296 | 59 | 0.13 s |
+
+Both directions land near 180°. **The one outlier is a §33 dropout, and its own
+row says so** — 21 wheel messages instead of ~55, and a 0.95 s gap. Without that
+column it would have read as a clean 40% left/right asymmetry and sent the whole
+investigation the wrong way. That column exists because §33 says to check it.
+
 ### What is left is variance, not a systematic error
 
 Two numbers behind the totals above, from splitting the gyro integral at the
