@@ -1682,3 +1682,112 @@ is untested. Studio is stopped; the next run is the first clean measurement.
 2. `./rover logs nav` for which of the two failures it is.
 3. Test a hand pivot via teleop, then revisit the rotate-to-heading config.
 4. If it is the planner, print the goal pose and check it against the costmap.
+
+---
+
+## ✅ 35. `./rover view` reported "nobody is logged in" at a laptop that was logged in — FIXED, verified 2026-09-10
+
+After a power cycle, every Jetson layer came up green and `./rover view` ended
+the bring-up with:
+
+```
+  found at 192.168.1.17
+  config synced from the repo
+  ✗ nobody is logged in at the laptop desktop.
+    RViz cannot render into a login screen. Log in there, then re-run.
+```
+
+Someone **was** logged in, at the laptop, at its own screen. Re-running changed
+nothing, and no amount of logging in would have — the advice the launcher gives
+in this case cannot fix this case.
+
+### The cause: Xwayland running is not what "logged in" means
+
+The check read one thing:
+
+```bash
+pgrep -a Xwayland   # empty -> "nobody is logged in", exit 1
+```
+
+`loginctl` on the same laptop, at the same moment, disagreed:
+
+```
+SESSION  UID USER    SEAT  TTY  STATE  IDLE
+     14 1000 rakhi24 -     -    active no
+      2 1000 rakhi24 seat0 tty2 active no     <- Type=wayland, Active=yes
+```
+
+GNOME Shell was running (PID 2837). **GNOME starts Xwayland on demand.** Log in,
+open nothing that speaks X11, and there is no Xwayland process — not because
+there is no session, but because nothing has asked for one yet. The launcher was
+testing for an X11 *client having already run*, and calling its absence a login
+screen.
+
+The evidence that a session was waiting was sitting in the runtime dir, written
+at login:
+
+```
+/run/user/1000/.mutter-Xwaylandauth.QY3XV3     (11:11, cookie only, no process)
+```
+
+That cookie is exactly what mutter prepares **in advance** for the on-demand
+path. Launching `~/rover_live.sh` with `DISPLAY=:0` and that `XAUTHORITY` brought
+RViz straight up and spawned Xwayland as a side effect:
+
+```
+4626 /usr/bin/Xwayland :0 -rootless -noreset -accessx -core \
+     -auth /run/user/1000/.mutter-Xwaylandauth.QY3XV3 ...
+```
+
+### Why the original check was written that way
+
+It is not arbitrary, and the comment above it explains itself: on Wayland
+`loginctl show-session -p Display` is **empty**, so the obvious source for the
+display number is gone, and Xwayland's own cmdline carries both the display
+number and the auth cookie. That reasoning is sound — the mistake was using a
+*convenient source of two values* as the *test for a precondition*. When
+Xwayland runs, it is still the best source. It was never evidence of a login.
+
+### The fix
+
+`rover`'s `view` now keeps Xwayland as the preferred source and falls back when
+it is absent, instead of concluding failure:
+
+1. `pgrep -a Xwayland` — if running, parse display and auth from it, as before.
+2. Otherwise ask the two questions that actually matter: does `loginctl` show a
+   session with `Active=yes` and `Type` of `wayland` or `x11`, and is there a
+   `.mutter-Xwaylandauth.*` cookie in the runtime dir? If yes, use `:0` and that
+   cookie, and say plainly that Xwayland is not started yet.
+3. Only with no active graphical session does it print "nobody is logged in".
+
+An `x11` session leaves no mutter cookie, so `XAUTHORITY` falls back to
+`$HOME/.Xauthority` — an empty `XAUTHORITY` is worse than an absent one.
+
+### Verified
+
+Tested from the real failing state, not a simulation: `rviz2` and `Xwayland`
+were both killed on the laptop, returning it to the exact condition that
+produced the false negative (`rviz2: 0  Xwayland: 0`). Then:
+
+```
+  Xwayland not started yet — GNOME starts it on demand; starting rviz2
+  is what spawns it. Someone IS logged in; loginctl says so.
+  display :0
+  started
+  subscriptions (0 means it is connected to nothing):
+      /rover/model                               1
+      /fusion/path                               1
+      /nvblox_node/static_occupancy_grid         1
+```
+
+Running **and** receiving. The primary path was re-checked with Xwayland alive
+and still reports `display :0` / `already running`.
+
+### The shape of this one is worth keeping
+
+This is the third entry in this file where a **check** was wrong rather than the
+thing it checked (see §30, where the cuVSLAM honesty gate passed a dead
+tracker). Both failed the same way: a proxy signal was treated as the fact
+itself, and the proxy was chosen because it was easy to read. §30 froze; this
+one was never true in the first place. When a gate accuses hardware that looks
+fine, suspect the gate.

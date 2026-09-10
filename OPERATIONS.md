@@ -271,6 +271,11 @@ over ssh into a login screen renders into a void and exits 0. The launcher
 refuses in that case and says so rather than reporting success; log in there and
 re-run, or start it on the laptop by hand with the command above.
 
+It does **not** decide that by looking for an `Xwayland` process any more. GNOME
+starts Xwayland on demand, so a freshly logged-in laptop has none and used to be
+reported as a login screen — see [TODO.md](TODO.md) §35. It now asks `loginctl`
+for an active graphical session and uses mutter's waiting auth cookie.
+
 | symptom | cause |
 |---|---|
 | blank, `/rviz` in the graph, **0 subscribers** on `/odom` | started without `-d` |

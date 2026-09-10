@@ -435,16 +435,49 @@ view)
 
   # A desktop session must exist. RViz over ssh with nobody logged in renders
   # into nothing and exits 0 — it looks exactly like a data fault, and it cost
-  # an evening once. Xwayland's cmdline is the authoritative source for both the
-  # display number and the auth cookie; on Wayland `loginctl -p Display` is EMPTY.
+  # an evening once. Xwayland's cmdline is the best source for both the display
+  # number and the auth cookie; on Wayland `loginctl -p Display` is EMPTY.
+  #
+  # But Xwayland running is NOT what "logged in" means — it only means some X11
+  # client has already asked for one. GNOME starts it ON DEMAND: log in, touch
+  # nothing X11, and there is no Xwayland process at all. Reading that as "nobody
+  # is logged in" told us to log in to a laptop we were already logged in to, and
+  # no amount of logging in would have fixed it. See TODO 35.
+  #
+  # So when Xwayland is absent, ask the two questions that actually matter: does
+  # loginctl show an ACTIVE graphical session, and has mutter left its Xwayland
+  # auth cookie waiting in the runtime dir? That cookie is precisely what the
+  # on-demand path sets up in advance, and starting rviz2 against it is what
+  # spawns Xwayland.
   xw=$(timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$ip" 'pgrep -a Xwayland 2>/dev/null | head -1' 2>/dev/null)
-  if [ -z "$xw" ]; then
-    echo "  ✗ nobody is logged in at the laptop desktop."
-    echo "    RViz cannot render into a login screen. Log in there, then re-run."
-    exit 1
+  if [ -n "$xw" ]; then
+    disp=$(echo "$xw" | grep -oE ' :[0-9]+' | head -1 | tr -d ' ')
+    auth=$(echo "$xw" | sed -nE 's/.* -auth ([^ ]+).*/\1/p')
+  else
+    probe=$(timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$ip" '
+      for s in $(loginctl list-sessions --no-legend 2>/dev/null | awk "{print \$1}"); do
+        [ "$(loginctl show-session "$s" -p Active --value 2>/dev/null)" = yes ] || continue
+        case "$(loginctl show-session "$s" -p Type --value 2>/dev/null)" in
+          wayland|x11) echo GRAPHICAL; break ;;
+        esac
+      done
+      ls /run/user/$(id -u)/.mutter-Xwaylandauth.* 2>/dev/null | head -1' 2>/dev/null)
+    case "$probe" in
+      *GRAPHICAL*) ;;
+      *)
+        echo "  ✗ nobody is logged in at the laptop desktop."
+        echo "    RViz cannot render into a login screen. Log in there, then re-run."
+        exit 1
+        ;;
+    esac
+    auth=$(echo "$probe" | grep -m1 'mutter-Xwaylandauth' || true)
+    disp=":0"
+    echo "  Xwayland not started yet — GNOME starts it on demand; starting rviz2"
+    echo "  is what spawns it. Someone IS logged in; loginctl says so."
   fi
-  disp=$(echo "$xw" | grep -oE ' :[0-9]+' | head -1 | tr -d ' ')
-  auth=$(echo "$xw" | sed -nE 's/.* -auth ([^ ]+).*/\1/p')
+  # An x11 session leaves no mutter cookie; an empty XAUTHORITY is worse than an
+  # absent one, so name the default rather than exporting nothing.
+  [ -n "$auth" ] || auth='$HOME/.Xauthority'
   echo "  display ${disp:-:0}"
 
   # pgrep -x, never -f: -f matches our own ssh command line and always "succeeds".
