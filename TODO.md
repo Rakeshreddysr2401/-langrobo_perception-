@@ -1919,8 +1919,57 @@ surface-dependent.
 was visible, but it was §33's dropout, not mechanical ramp, and baking a link
 fault into a calibration constant is exactly how it would get hidden.
 
-### Not verified end to end yet
+### VERIFIED end to end 2026-09-10 — it works
 
-The brain must be restarted to read the file, and that needs a password
-(STARTUP.md §5), so it is the operator's step. After the restart, ask for a
-360° turn and measure the result before believing any of this.
+Confirmed live through the real brain: a `String` published to
+`/voice/user_input`, with `/cmd_vel` and `/gyro/base` recorded. The length of
+the `/cmd_vel` window is the tell — `movement.py` holds the twist for
+`radians(angle)/STEADY`, so it reveals the angle the *model* asked for,
+independently of what was said to it.
+
+| asked | model asked | twist held | achieved | was, before the fix |
+|---|---|---|---|---|
+| 360° | ~355° | 5.16 s | **357.0°** | ~86° |
+| 180° | ~182° | 2.65 s | **202.0°** | ~43° |
+| 90° | ~91° | 1.32 s | **114.3°** | ~21° |
+| 90° (repeat) | ~88° | 1.27 s | **83.6°** | ~21° |
+
+The 4.2× systematic error is gone. `/wheel_state` was continuous for every one
+of these windows (max gap 0.11–0.16 s), so none of it is §33 dropout.
+
+**The user's report of "still only ~90°" was against the un-fixed brain.** The
+process that served it started before `brain.env` was written; the journal shows
+zero user turns between the 13:20 restart and the report.
+
+### What is left is variance, not a systematic error
+
+Two numbers behind the totals above, from splitting the gyro integral at the
+moment the twist stops:
+
+- **driven rate 60–66 °/s** while commanded, consistently. `STEADY=1.20`
+  implies 68.8 °/s, so the constant is ~5–10% optimistic. Close enough that
+  changing it is not clearly an improvement.
+- **coast after the stop varies wildly: 7°, 24°, 36°.** `_drive_for_duration`
+  does publish a zero Twist, so this is mechanical spin-down, and it is the
+  dominant error term on short turns. Two identical "turn left 90" requests
+  produced 114.3° and 83.6°.
+
+So repeatability is roughly **±20–25%**, and a single multiplicative constant
+cannot fix it — the coast is an additive offset, so the correction it needs is
+different for 90° than for 360°.
+
+**`_TURN_STARTUP_DELAY` is the right-shaped knob and it is NOT safe to use
+negatively.** `_duration()` would go negative for small angles, and `move_robot`
+sends any step with `dur <= 0` down the `else` branch, which publishes a moving
+twist that **nothing ever stops** — the wheels then run until the 500 ms
+firmware watchdog catches them. `_parse_step`'s docstring already records that
+exact bug from a previous encounter. Using it would need a
+`max(0.05, ...)` floor in `_duration()` first.
+
+**If precision matters more than this, the answer is closed-loop.** Open-loop
+timing on a skid-steer whose scrub varies with surface, battery and heat cannot
+do much better than ±20%. Turning until the *measured* yaw reaches the target
+would remove the calibration constant entirely. `/wheel_state` integrated
+through `WHEEL_BASE_ROT_M` gives a Pi 5-local yaw source that does not depend on
+the Jetson being up — with a timeout fallback to the current open-loop path,
+since §33 can stop that telemetry mid-turn.
