@@ -22,12 +22,16 @@ Status: ⬜ not started · 🔄 in progress · ✅ done · ❌ judged not worth 
 Everything was powered off for a break. Nothing here is implemented. What
 changed during the session:
 
-**1. The rotation bug is diagnosed and the fix is written but has NEVER RUN.**
-`LANGROBO_STEADY_ANGULAR_VEL=1.20` was written to `~/.langrobo/brain.env` on the
-Pi 5. The brain was not restarted (that needs a password) — **but the power
-cycle applies it for free**, because a cold boot starts `langrobo-brain` fresh
-and it reads `EnvironmentFile` on start. So no sudo step is needed on return.
-Full detail in TODO 36.
+**1. The rotation bug is FIXED and verified end to end (2026-09-10).**
+`LANGROBO_STEADY_ANGULAR_VEL=1.20` in `~/.langrobo/brain.env` on the Pi 5.
+Measured through the real brain: **360→357°, 180→202°, 90→114°/84°**, against
+~86/43/21° before. Residual is ±20–25% variance from mechanical spin-down coast,
+not a systematic error. Full detail and the closed-loop option in TODO 36.
+
+**Note for next time:** the "still broken" report came from a brain process that
+had started *before* `brain.env` existed. After any env or `langrobo_core`
+change, check `/proc/<pid>/environ` of the running `agent_node` before trusting
+a symptom report — a restart needs a password and is always the user's step.
 
 **2. TODO 33 got much worse, and now outranks everything here.** The micro-ROS
 wheel link dies **under driving load** — reproducible on demand, commands and
