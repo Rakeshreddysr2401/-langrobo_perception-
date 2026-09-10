@@ -81,6 +81,50 @@ Confirm on clean data before changing nav2.
 | 11 | Power telemetry into `/rover_diag` | READINESS #2; the rover has run itself flat | small | ⬜ |
 | 12 | Search-step overlap and a progress message | a failed search is ~4 min of silence | small | ⬜ |
 | 13 | Commit the flow walkthrough as a doc | it exists only in a terminal today | small | ⬜ |
+| 14 | Stale camera view after the robot moves | answered "what can you see" from a photo of where it used to be | small | ✅ done 2026-09-10 |
+
+---
+
+## 14. ✅ Stale camera view after the robot moves — DONE 2026-09-10
+
+`look()` injects the frame as a HumanMessage labelled `[Current camera view]`
+and it **keeps that label for the rest of the conversation**. `local_agent` has
+`keep_images=True`. So "go forward 30, turn 180, now what can you see" was
+answered from a photo of the place the robot had just left — confidently, with
+nothing anywhere saying the view was old.
+
+`look()`'s own docstring made it worse: it told the model not to look again
+"unless the scene may have changed", which the model has no way to know.
+
+### The fix is NOT to strip stale images — that was my first recommendation and it was wrong
+
+`utils/message_utils.py` opens with a **cache invariant**: the projection must be
+append-only, because each agent's llama.cpp slot caches the KV of its previous
+prompt. An image present in turn N and gone in turn N+1 diverges the cached
+prefix and re-prefills everything after it — worst exactly where it would bite,
+on `local_agent`'s slot with a camera frame in it.
+
+So the movement result carries the news instead. Append-only by construction,
+costs a few tokens, and reaches the model at the moment the movement is
+reported. Every tool that drives the base appends it: `move_robot`,
+`navigate_to_pose`, `approach_described_object`, `scan_surroundings`. `look()`'s
+docstrings now say a fresh look is **required** after any movement.
+
+Two edges worth keeping: a bare `S` gets **no** note (it moves nothing, and a
+false alarm burns a 10–40 s look), and a sequence interrupted during its **first**
+step **does** get one (the base still drove part of the way, and "completed:
+nothing" would hide that). The test for the second is what caught it — the first
+version keyed off `at > 0` and was wrong.
+
+Pi 5 repo `86e0b08`. 184 tests pass.
+
+**Live in Studio now. NOT live for Telegram/voice** until `agent_node` restarts,
+which needs a password: `ssh 192.168.1.16 'sudo systemctl restart langrobo-brain'`.
+
+**Still open:** this is an instruction to the model, not an enforcement. If the
+12B model ignores the note and answers from the old photo anyway, the next step
+is #8-style verification or an epoch tag the model must reconcile — but measure
+whether it actually ignores it before building that.
 
 ---
 
