@@ -93,6 +93,7 @@ right now — the Pi 5 has neither a microphone nor a speaker attached (§28).
 | **[TODO.md](TODO.md)** | open faults, and the dead theories kept so they are not re-litigated |
 | **[FLEET_STATUS.md](FLEET_STATUS.md)** | every box checked live — Jetson, Pi 5, Mac mini, ESP32, D555 — and what blocks voice |
 | **[READINESS.md](READINESS.md)** | the cross-cutting view — every subsystem's measured values against what is missing, and **what actually blocks unattended operation** |
+| **[PERCEPTION_STATE.md](PERCEPTION_STATE.md)** | why the brain answers from a photo of where it used to be — the stale-view defect, the KV-cache rules any fix must obey, and what to build instead |
 | **[JETSON_LOAD.md](JETSON_LOAD.md)** | the box itself — power mode, disk, what's running, and what's dev tooling vs. the rover |
 | **[VOICE_PLACEMENT.md](VOICE_PLACEMENT.md)** | why STT/TTS moved to the Pi5 — the full-stack GPU/RAM measurement that forced the call, and where the build lives |
 | **[phase2/LAPTOP.md](phase2/LAPTOP.md)** | watching it from a laptop in RViz |
