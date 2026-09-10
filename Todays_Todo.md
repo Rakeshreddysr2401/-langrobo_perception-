@@ -64,8 +64,10 @@ this order:
    `start_studio.sh` (Pi 5 `1dbac6e`) — it now sources the file, says so on
    startup, and warns loudly when it is missing.
 
-**Item #14 (stale camera view) is done** — Pi 5 `86e0b08`, 184 tests pass. See
-its section below, including why stripping stale images would have been wrong.
+**Item #14 (stale camera view) is shipped but NOT verified, and is reopened** —
+Pi 5 `86e0b08`, 184 tests pass, but the fix has never executed on a live brain
+and `prompts.py` still contradicts it. See its section below and
+**[PERCEPTION_STATE.md](PERCEPTION_STATE.md)**.
 
 **The power cycle applies everything.** A cold boot restarts `agent_node`, which
 re-reads `brain.env` *and* re-imports `langrobo_core` from `src/`. So both fixes
@@ -113,11 +115,11 @@ is missing, Studio is uncalibrated and any motion test through it is invalid.
 | 11 | Power telemetry into `/rover_diag` | READINESS #2; the rover has run itself flat | small | ⬜ |
 | 12 | Search-step overlap and a progress message | a failed search is ~4 min of silence | small | ⬜ |
 | 13 | Commit the flow walkthrough as a doc | it exists only in a terminal today | small | ⬜ |
-| 14 | Stale camera view after the robot moves | answered "what can you see" from a photo of where it used to be | small | ✅ done 2026-09-10 |
+| 14 | Stale camera view after the robot moves | answered "what can you see" from a photo of where it used to be | small | 🔄 shipped but **never executed**, and the prompt contradicts it — see [PERCEPTION_STATE.md](PERCEPTION_STATE.md) |
 
 ---
 
-## 14. ✅ Stale camera view after the robot moves — DONE 2026-09-10
+## 14. 🔄 Stale camera view after the robot moves — SHIPPED, NOT VERIFIED
 
 `look()` injects the frame as a HumanMessage labelled `[Current camera view]`
 and it **keeps that label for the rest of the conversation**. `local_agent` has
@@ -157,6 +159,29 @@ which needs a password: `ssh 192.168.1.16 'sudo systemctl restart langrobo-brain
 12B model ignores the note and answers from the old photo anyway, the next step
 is #8-style verification or an epoch tag the model must reconcile — but measure
 whether it actually ignores it before building that.
+
+### Reopened 2026-09-10 evening — read PERCEPTION_STATE.md before touching this
+
+The user reported the symptom again. Two findings, neither of which is "the
+12B model ignored the note":
+
+1. **The fix has never executed.** `langrobo_core` is editable, so the source
+   looks live, but Python imports at process start. The `agent_node` that could
+   have served the test started **13:20:01** — 57 min before the 14:17 commit.
+   The current one (after the 14:33 reboot) has it and has served **zero** turns.
+   Restart and reproduce before judging. Same trap as the rotation fix.
+
+2. **`86e0b08` never touched `prompts.py`.** `LOCAL_AGENT_PROMPT` rules 2 and 3
+   still say "Do NOT call look() again" and gate looking on "the last view is
+   stale" — the one condition the model cannot evaluate. A sentence in a
+   `ToolMessage` does not outrank a numbered system-prompt rule, and the note is
+   written during a **navigate** turn while the question is answered by
+   **local_agent**. Fix the prompt first; it is ~5 lines and costs no cache.
+
+The design that replaces the note — stamp the frame with the pose it was taken
+from, frame each turn with the current pose, and gate on the difference — is in
+**[PERCEPTION_STATE.md](PERCEPTION_STATE.md)**, along with the KV-cache rules
+any fix must obey and a correction to this entry's cache reasoning.
 
 ---
 
