@@ -2017,3 +2017,96 @@ would remove the calibration constant entirely. `/wheel_state` integrated
 through `WHEEL_BASE_ROT_M` gives a Pi 5-local yaw source that does not depend on
 the Jetson being up — with a timeout fallback to the current open-loop path,
 since §33 can stop that telemetry mid-turn.
+
+## 🟠 37. Rotation-induced x,y drift — reported informally, not yet verified against a controlled test (2026-09-10)
+
+Reported from manual pushing: coordinates track fine forward/back, but "when it
+taking left and right or rotations it values slightly shifting wrongly." Asked
+whether more sensors (LiDAR, or 2 spare IR rangefinders on hand) are needed to
+fix it.
+
+### The report itself is not yet a reproducible bug
+
+Numbers quoted from a live `./rover compare` read — not a graded `--spin`,
+`--return` or `--expect` run, and the exact physical motion (how far pushed,
+how many degrees turned, whether it was actually returned to the start mark)
+was never confirmed:
+
+    wheel   (-4.4, -1.6, 2°)
+    FUSED   ( 2,   22,  -2°)
+    cuvslam (19,   18,  -9°)
+    gyro    (4°)
+
+With no known push distance or rotation angle, none of these is yet an
+"error" — they can only be compared to each other, not to truth. And this
+exact test class **already has a documented PASS baseline** that contradicts
+the "wheels look correct" read: README.md's Phase 1 gate table records, under
+a controlled test, heading 360° spin error of **3.68°** (gate ≤10°) and drift
+of **2.5 cm hand-pushed** / **4.9 cm driven hard through 12 teleports** (gate
+≤10 cm) — all from the FUSED output, not wheels. So either something has
+regressed since that baseline, or — far more likely, since no controlled
+maneuver was confirmed — the quoted numbers are not from a comparable test.
+
+### Why "wheels look correct" is backwards
+
+This is a skid-steer rover (ARCHITECTURE.md): turning is inherently a
+controlled skid, and wheel encoders are the sensor MOST likely to silently
+**under-read** a rotation (slip against the floor), not the one most likely
+to be obviously noisy. That is exactly why `fusion.py` deliberately does not
+trust wheels for heading — FUSED heading comes from the gyro, FUSED distance
+from cuVSLAM (`compare.py`: "distance from cuVSLAM, heading from the gyro").
+Small wheel numbers are not evidence of accuracy; they can just as easily
+mean the wheels quietly missed the turn.
+
+### What is already in place to fight this
+
+- `WHEEL_BASE_ROT_M = 0.5216` — an empirically measured "effective" rotational
+  wheelbase, wider than the real 0.34 m track, specifically compensating for
+  skid-steer scrub inflating the apparent turn radius read from encoder ticks.
+- Continuous gyro bias recalibration, and cuVSLAM sanity-checked against
+  landmark count and implausible-jump rejection.
+- §36 above already measured skid-steer turn repeatability directly: driven
+  rate steady to ~5-10%, but **coast-after-stop varies wildly (7°, 24°, 36°
+  between identical commands)** — the physical randomness this item is
+  chasing is already measured and documented as inherent to the drivetrain,
+  not a missing calibration constant.
+
+### What to test, in order, before touching hardware
+
+1. `./rover compare --expect 2.00` — push exactly 2.00 m straight, Ctrl-C.
+   Confirms straight-line scale is still near the −2.3% baseline.
+2. `./rover compare --spin 360` — mark a heading, rotate exactly one full
+   turn, Ctrl-C. Compare FUSED heading error against the 3.68° baseline
+   (gate ≤10°).
+3. `./rover compare --return` — mark start position + heading, drive/turn
+   freely, return to the exact mark, Ctrl-C. Compare FUSED drift against the
+   2.5 cm / 4.9 cm baseline (gate ≤10 cm).
+4. Only if 1-3 actually FAIL against these numbers: re-measure `cam_x`/
+   `cam_y` (`vo_node.py`) with a tape measure. The code's own comment already
+   flags `cam_x` as "unverified on your rig" and consequential for exactly a
+   spin test — a camera mounted forward of the true pivot swings on a lever
+   arm during rotation, producing a fake translation that looks identical to
+   this symptom.
+
+### Sensors asked about
+
+- **The 2 spare IR rangefinders: not useful here.** Short-range proximity
+  sensors don't help egomotion or localisation. Their real use is the
+  separate, already-documented gap in README.md: "nothing below 10 cm, above
+  24 cm, outside 87°, and nothing downward at all — no drop-off detection."
+  Use them there, not on this problem.
+- **LiDAR: a real option, but last resort.** 2D frame-to-frame scan-matching
+  (laser odometry, not persistent-map SLAM — consistent with the "no
+  persistent map, fresh start every time" decision) would give a
+  rotation-slip-immune correction layered on the existing VIO+gyro+encoder
+  fusion. Only worth the integration cost if steps 1-4 above show a genuine,
+  reproducible failure against the documented baseline — the current sensor
+  suite (D555 stereo + IMU + encoders) already passed this exact test class
+  once, at 2.5-4.9 cm and 3.68°.
+
+### Status
+
+Deferred by the user 2026-09-10 ("will see it later... minor issue"). Nobody
+has re-run the controlled test above on the current build to confirm whether
+this is a real regression or just an unverified live reading. Do that first,
+before any hardware discussion.
