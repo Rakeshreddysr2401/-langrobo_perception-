@@ -13,6 +13,10 @@
 #   ./rover vlm        VLM pixel -> Nav2 goal bridge, for the Pi 5 brain (Phase 4)
 #   ./rover rviz       view it on the Jetson's own screen (costs GPU)
 #   ./rover view       RViz on the laptop — finds it on DHCP, checks it renders
+#   ./rover up         everything above, in order, + ESP32 + Pi 5 + Studio + view.
+#                      Add --voice to also bring up Pi 5 STT/TTS and the speaker.
+#                      Tears down and restarts the container — do not run this
+#                      against a stack that is already up and working.
 #   ./rover logs <n>   tail a layer's log (camera|vo|gyro|fused)
 #   ./rover stop       tear the container down
 #
@@ -25,6 +29,8 @@ set -eo pipefail
 IMAGE=${IMAGE:-orin-nav:1.1}
 NAME=${NAME:-rover}
 LAPTOP_USER=${LAPTOP_USER:-rakhi24}   # LAPTOP_IP is DISCOVERED, not fixed: DHCP moves it
+PI5_HOST=${PI5_HOST:-192.168.1.16}    # fixed — unlike the laptop, not on DHCP
+BT_SPEAKER=${BT_SPEAKER:-D6:AA:BB:59:EF:B6}  # boAt Stone 650
 SRC=/opt/rover
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOSTSRC="$REPO/phase1"
@@ -349,6 +355,104 @@ vlm)
   echo "  Log: ./rover logs image_bridge   or   ./rover logs pixel_to_goal"
   ;;
 
+# ── up: the whole fleet, one command ────────────────────────────────────────
+# This restarts the container (start_container does `docker rm -f` first), so
+# it is for a cold power-on, not for topping up a stack that is already
+# running well — running it against a healthy stack throws the healthy state
+# away for no reason.
+up)
+  echo "═══ full bring-up: camera → pose → fused → map → nav → vlm → wheels → Pi5 → Studio → view ═══"
+  for layer in camera pose fused map nav vlm; do
+    echo
+    "$0" "$layer" || die "'$layer' failed — fix it (see above) before continuing. Re-run: ./rover up"
+  done
+
+  echo
+  echo "[wheels] ESP32 link — first check"
+  "$0" wheels || true
+
+  echo
+  echo "[pi5] teleop + agent_node"
+  procs=$(timeout 8 ssh -o BatchMode=yes -o ConnectTimeout=4 "$LAPTOP_USER@$PI5_HOST" \
+    'pgrep -af "teleop_we[b]|agent_[n]ode"' 2>/dev/null)
+  if [ -n "$procs" ]; then
+    echo "      teleop + agent_node running"
+  else
+    echo "      ✗ teleop and/or agent_node not found on the Pi 5 — check it by hand"
+  fi
+  mode=$(timeout 8 curl -s "http://$PI5_HOST:8091/mode" 2>/dev/null)
+  case "$mode" in
+    *'"manual": false'*|*'"manual":false'*) echo "      teleop: AUTO — OK" ;;
+    *) echo "      ✗ teleop not in AUTO ($mode) — MANUAL streams zeros and cancels nav2. Flip it." ;;
+  esac
+
+  echo
+  echo "[studio] LangGraph Studio on the Pi 5"
+  ssh -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" \
+    'setsid nohup ~/ros2_ws/scripts/start_studio.sh > /tmp/langgraph_dev.log 2>&1 < /dev/null &' \
+    2>/dev/null || true
+  studio_ok=""
+  for i in 1 2 3 4 5 6; do
+    sleep 5
+    studio_ok=$(timeout 5 ssh -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" \
+      'curl -s http://127.0.0.1:2024/ok' 2>/dev/null)
+    [ "$studio_ok" = '{"ok":true}' ] && break
+  done
+  if [ "$studio_ok" = '{"ok":true}' ]; then
+    echo "      ready:"
+    echo "        1. ssh -N -L 2024:localhost:2024 $LAPTOP_USER@$PI5_HOST"
+    echo "        2. open https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024"
+  else
+    echo "      ✗ not up after 30s — check on the Pi 5: tail /tmp/langgraph_dev.log"
+  fi
+  echo "      NOTE: Studio and agent_node (Telegram) both publish /cmd_vel and only"
+  echo "      agent_node gets the nav-done callback. Driving from Telegram? Stop"
+  echo "      Studio first and confirm: ros2 node list | grep studio   (empty)"
+
+  if [ "${2:-}" = "--voice" ]; then
+    echo
+    echo "[voice] Pi 5 STT/TTS + $BT_SPEAKER"
+    already=$(timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" \
+      'pgrep -af "stt_node|tts_node"' 2>/dev/null)
+    if [ -n "$already" ]; then
+      echo "      already running — leaving it alone (a second pair double-speaks)"
+    else
+      gate=$(bash ~/robot/scripts/fleet_role.sh voice status 2>/dev/null || true)
+      echo "      gate: ${gate:-unknown}"
+      case "$gate" in
+        *stopped*) ;;
+        *) echo "      ✗ Jetson's own voice stack is not confirmed stopped — not starting Pi 5 voice." ;;
+      esac
+      if [ -z "$gate" ] || [[ "$gate" == *stopped* ]]; then
+        ssh -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" 'cd ~/ros2_ws && setsid nohup bash -lc \
+          "source /opt/ros/jazzy/setup.bash && source install/setup.bash && \
+           ros2 launch pi5_voice_pkg voice_launch.py" \
+          > /tmp/voice_launch.log 2>&1 < /dev/null &' 2>/dev/null || true
+        sleep 6
+      fi
+    fi
+    conn=$(timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" \
+      "bluetoothctl info $BT_SPEAKER | grep -i connected" 2>/dev/null)
+    echo "      speaker: ${conn:-unknown}"
+    case "$conn" in
+      *": yes"*) ;;
+      *)
+        ssh -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" "bluetoothctl connect $BT_SPEAKER" >/dev/null 2>&1 || true
+        conn=$(timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" \
+          "bluetoothctl info $BT_SPEAKER | grep -i connected" 2>/dev/null)
+        echo "      speaker retry: ${conn:-unknown}"
+        case "$conn" in
+          *": yes"*) ;;
+          *) echo "      ✗ speaker not connecting — page-timeout means it's off or out of range. Power-cycle it." ;;
+        esac
+        ;;
+    esac
+  fi
+
+  echo
+  "$0" view
+  ;;
+
 detect)
   need_container
   # Needs the FUSED pose, not just the camera: every detection is deprojected
@@ -581,6 +685,6 @@ selftest)
   ;;
 
 *)
-  sed -n '2,12p' "$0" | sed 's/^# \?//'
+  sed -n '2,21p' "$0" | sed 's/^# \?//'
   ;;
 esac

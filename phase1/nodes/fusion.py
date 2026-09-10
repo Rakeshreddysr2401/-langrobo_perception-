@@ -389,6 +389,15 @@ class PoseFusion:
             'bias_deg_s': None if self.gyro_bias is None else math.degrees(self.gyro_bias),
             'roll': self.roll,
             'pitch': self.pitch,
+            # Identifies THIS odom origin. t0 is set once, at construction --
+            # every restart of this process (container restart, ./rover pose
+            # re-run, cuVSLAM divergence recovery) picks a new origin at
+            # whatever spot the robot is standing in, and a coordinate saved
+            # under the old origin_epoch no longer means anything here. The
+            # Pi 5 brain uses this to refuse to navigate to a location saved
+            # under a stale epoch instead of silently driving to the wrong
+            # physical spot.
+            'origin_epoch': round(self.t0, 3),
         }
 
     # ── inputs ─────────────────────────────────────────────────────────────

@@ -23,6 +23,15 @@ For the full runbook including calibration and troubleshooting see
 | Mac mini (LLM/VLM) | 192.168.1.6 | `:8080/v1/models` answers |
 | Laptop (RViz) | **DHCP — moves** | `./rover view` finds it |
 
+**Single command:** `./rover up` runs every step below in order — camera,
+pose, fused, map, nav, vlm, the ESP32 check, the Pi 5 check, Studio, and the
+laptop view — and prints the Studio tunnel link at the end. Add `--voice` to
+also bring up Pi 5 STT/TTS and reconnect the boAt Stone 650. It restarts the
+container, so it's for a cold power-on — don't run it against a stack that's
+already up and healthy, it throws the running state away for nothing. The
+layer-by-layer steps below are what it runs, and what to fall back to when
+one of them fails and you need to see which.
+
 Two traps worth knowing before you start:
 
 - **The D555 answers ping while completely dead.** It is a PoE network device
