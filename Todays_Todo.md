@@ -115,7 +115,7 @@ is missing, Studio is uncalibrated and any motion test through it is invalid.
 | 11 | Power telemetry into `/rover_diag` | READINESS #2; the rover has run itself flat | small | ⬜ |
 | 12 | Search-step overlap and a progress message | a failed search is ~4 min of silence | small | ⬜ |
 | 13 | Commit the flow walkthrough as a doc | it exists only in a terminal today | small | ⬜ |
-| 14 | Stale camera view after the robot moves | answered "what can you see" from a photo of where it used to be | small | 🔄 shipped but **never executed**, and the prompt contradicts it — see [PERCEPTION_STATE.md](PERCEPTION_STATE.md) |
+| 14 | Stale camera view after the robot moves | answered "what can you see" from a photo of where it used to be | small | 🔄 redesigned + shipped (Pi 5 `4988fe8`) — **awaiting the on-robot test**, see [PERCEPTION_STATE.md](PERCEPTION_STATE.md) |
 
 ---
 
@@ -182,6 +182,20 @@ The design that replaces the note — stamp the frame with the pose it was taken
 from, frame each turn with the current pose, and gate on the difference — is in
 **[PERCEPTION_STATE.md](PERCEPTION_STATE.md)**, along with the KV-cache rules
 any fix must obey and a correction to this entry's cache reasoning.
+
+**Both were built and pushed the same evening (Pi 5 `4988fe8`, 196 tests).** The
+prompt no longer says "Do NOT call look() again"; `look()` stamps the frame with
+the pose it was taken from; every user turn carries the current pose and the
+distance from that frame. PERCEPTION_STATE.md §7 has the shipped table.
+
+**What is left is the measurement, and it is the whole point:**
+`look` → `move_robot("F:60,L:180")` → `what can you see`. It must call `look()`
+again. If it still answers from the old photo with both poses in front of it,
+that is the signal to build the freshness gate (§6(i)) — enforcement in
+`local_agent`'s node rather than any more words in the prompt.
+
+Check `/wheel_state` continuity over the same window (TODO 33): a turn that
+silently did not happen will read as a model failure here.
 
 ---
 

@@ -279,14 +279,53 @@ frame) — everything here gets cheaper once a look costs 5–15 s instead of 10
 
 ## 7. Order of work
 
-| # | do | why now | effort |
-|---|---|---|---|
-| 1 | **Restart the brain and reproduce.** | The fix under discussion has never run (§0). Everything below is guesswork until this is done. | 2 min |
-| 2 | Fix `LOCAL_AGENT_PROMPT` rules 2–3 (§1). | The system prompt currently contradicts the fix. Free, no cache cost. | ~5 lines |
-| 3 | Stamp the frame; frame the turn (§5). | Removes the lying label, adds the coordinates, append-only. | small |
-| 4 | Measure whether 2+3 suffice. | `look` → `move_robot("F:60,L:180")` → `what can you see`. Did it call `look()` again? | 10 min |
-| 5 | Only if 4 fails: the freshness gate, §6(i). | Enforcement instead of instruction. | small |
-| 6 | Later: the world model, §6(iii). | A different capability, not a fix for this bug. | medium |
+| # | do | why now | effort | status |
+|---|---|---|---|---|
+| 1 | Restart the brain and reproduce. | The old fix had never run (§0). | 2 min | superseded by 2+3 |
+| 2 | Fix `LOCAL_AGENT_PROMPT` rules 2–3 (§1). | The system prompt contradicted the fix. | ~5 lines | ✅ Pi 5 `4988fe8` |
+| 3 | Stamp the frame; frame the turn (§5). | Removes the lying label, adds the coordinates, append-only. | small | ✅ Pi 5 `4988fe8` |
+| 4 | **Measure whether 2+3 suffice.** | `look` → `move_robot("F:60,L:180")` → `what can you see`. Did it call `look()` again? | 10 min | ⬜ **next** |
+| 5 | Only if 4 fails: the freshness gate, §6(i). | Enforcement instead of instruction. | small | ⬜ |
+| 6 | Later: the world model, §6(iii). | A different capability, not a fix for this bug. | medium | ⬜ |
+
+### What shipped (2026-09-10, Pi 5 `4988fe8`, 196 tests — was 184)
+
+New `langrobo_core/utils/pose_stamp.py` owns both stamps and the last-view pose
+(module-level, the way `_bridge.py` holds the ROS adapter — so `StubBridge` and
+`ROS2Bridge` stay identical for free rather than being a field two classes must
+remember to mirror).
+
+| where | before | after |
+|---|---|---|
+| `look()`'s label | `[Current camera view]` | `[Camera view — taken at 16:31:02 from x=1.20 y=0.34 heading=45°]` |
+| every user turn | nothing | `[Robot now at … — that is 0.90 m and 180° from where the last camera view was taken, so that photo shows somewhere it has left]` |
+| `LOCAL_AGENT_PROMPT` | "Do NOT call look() again" | a `== IS YOUR VIEW STILL GOOD? ==` block that says to compare the two poses |
+| the movement note | a fixed sentence | the same sentence **plus the measured displacement**, so it lines up with the pose on the frame |
+| `SPEECH_STYLE` | — | bracket tags are telemetry: use them, never read them aloud |
+
+Four edges that cost something to find, all now covered by tests:
+
+- **Headings wrap.** 359° and 1° are 2° apart, not 358°. Without folding into
+  (−180, 180] every crossing of the wrap point reads as a half-turn and forces a
+  needless 10–40 s look.
+- **The label and the stamp must print the same convention**, or the model is
+  asked to compare `225` with `-135` and reasonably concludes they differ.
+- **A pure pivot moves zero metres** and changes the view completely, so distance
+  alone cannot decide staleness — hence `MOVED_M` *or* `TURNED_DEG`.
+- **Losing TF prints "position unknown"** rather than defaulting to unmoved,
+  which would silently license the old photo.
+
+The stamp stays absent until the first `look()` — before any frame there is
+nothing to compare against, and a pose on "what's the weather" is noise on every
+text turn. And it rides on the `HumanMessage` that is being appended anyway
+rather than adding a message of its own: the 48-message cap counts **messages**,
+so a third message per turn would pull trims — the one real cache reset —
+forward.
+
+**Both packages are `--symlink-install`** (`build/langrobo_ros/langrobo_ros` is a
+symlink to `src/`), so a restart is enough and **no `colcon build` is needed**
+for a `.py` change in either. A restart is still required — an editable install
+does not make a running process reload.
 
 **One measurement rule carried over from `Todays_Todo.md`, and it applies to
 every step above that moves the rover:** no motion measurement on this rover is
