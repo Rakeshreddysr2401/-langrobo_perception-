@@ -373,6 +373,27 @@ never reaches the user. 13 new tests, 209 total.
 grabs a genuinely fresh frame on its own (see its docstring) and is legitimately
 `chat`'s — not a symptom of anything above.
 
+## 7c. The backstop's own blind spot, found the same evening (Pi 5 `0c83c94`)
+
+§7b's backstop only checked "spoke with no tool call at all." The user's very
+next test found the other shape of the same bug, live, after §7b was already
+running: asked "now what are you looking at" with `navigate` sticky, the model
+called `scan_surroundings()` — **a real 360° physical rotation nobody asked
+for** — instead of handing over. A tool call was present, so the first version
+exempted it on sight, reasoning "a tool call means the agent is doing its job."
+
+That reasoning was backwards. `handover` is the one tool call that is always
+correct here; everything else — `move_robot`, `navigate_to_pose`,
+`scan_surroundings`, `approach_described_object`, or plain unrouted text — is
+the identical failure in a different shape. The check now keys on whether
+`handover` is among the proposed `tool_calls`, not on whether `tool_calls` is
+empty.
+
+Firing *before* the tool executes matters more than catching a wrong reply
+after the fact: returning the `Command` in place of the node's output replaces
+it entirely, so a proposed `scan_surroundings` never reaches its `ToolNode`
+and the wheels never turn. 4 new tests, 213 total.
+
 ## 8. What this does not fix
 
 - **Nothing above gives the robot memory across boots.** Every session starts at
