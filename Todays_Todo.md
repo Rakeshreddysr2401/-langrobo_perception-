@@ -17,11 +17,54 @@ Status: ⬜ not started · 🔄 in progress · ✅ done · ❌ judged not worth 
 
 ---
 
+## WHERE WE LEFT OFF — read this first (2026-09-10, powered down)
+
+Everything was powered off for a break. Nothing here is implemented. What
+changed during the session:
+
+**1. The rotation bug is diagnosed and the fix is written but has NEVER RUN.**
+`LANGROBO_STEADY_ANGULAR_VEL=1.20` was written to `~/.langrobo/brain.env` on the
+Pi 5. The brain was not restarted (that needs a password) — **but the power
+cycle applies it for free**, because a cold boot starts `langrobo-brain` fresh
+and it reads `EnvironmentFile` on start. So no sudo step is needed on return.
+Full detail in TODO 36.
+
+**2. TODO 33 got much worse, and now outranks everything here.** The micro-ROS
+wheel link dies **under driving load** — reproducible on demand, commands and
+telemetry stop together, recovers on its own, and it is *not* a current cliff.
+Three of four rotation measurements were unusable because of it, and one looked
+entirely plausible while being pure dropout.
+
+> **No motion measurement on this rover can be trusted unless `/wheel_state`
+> continuity is checked over the same window.** That applies to every item below
+> that involves the rover moving.
+
+**3. Item #1 below is largely ANSWERED — this rover CAN pivot.** Measured
+2026-09-10: wheels counter-rotate cleanly at L −0.30 / R +0.32 m/s, body ~69 °/s,
+held steady for 3 s whenever the link was up. So TODO 14's "cannot turn in
+place" looks stale, which means **#2 is probably unnecessary and the real move
+is re-enabling nav2's rotate-to-heading** rather than making goals yaw-agnostic.
+Confirm on clean data before changing nav2.
+
+### On return, in this order
+
+1. Bring the stack up (`rover-start` — container, six layers, Studio, RViz).
+2. **Verify the rotation fix**: ask for a 360° turn and measure what actually
+   happens. Expect roughly a full turn. `logs/measure_yaw_rate.py` is the tool;
+   read its per-bucket ramp line, not just the mean.
+3. **Then TODO 33**, before trusting anything else that moves: capture
+   `ssh 192.168.1.16 'journalctl -u langrobo-microros'` **during** a pivot. The
+   trigger is reproducible now, so the log this bug has always lacked is finally
+   obtainable. Do not power-cycle the ESP32 first — that destroys the evidence.
+4. Then pick from the series below, one at a time, on worth.
+
+---
+
 ## The series
 
 | # | item | why it is here | effort | status |
 |---|---|---|---|---|
-| 1 | Test whether the chassis can pivot | gates #2, and TODO 34 is the only 🔴 in this path | 5 min | ⬜ |
+| 1 | Test whether the chassis can pivot | gates #2, and TODO 34 is the only 🔴 in this path | 5 min | 🔄 mostly answered — it CAN, see above |
 | 2 | Make the approach goal yaw-agnostic | only if #1 says it cannot pivot | small | ⬜ |
 | 3 | Costmap-check the standoff goal | the other suspected half of TODO 34 | medium | ⬜ |
 | 4 | Downscale the VLM frame | 10–40 s per look dominates every approach | one line | ⬜ |
