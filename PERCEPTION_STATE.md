@@ -335,6 +335,44 @@ silently did not happen will read as a model failure here.
 
 ---
 
+## 7b. A second, worse bug found in a real transcript (2026-09-10 evening)
+
+Before either fix above was tested, the user pasted a transcript from an
+earlier session. It shows the actual failure mode, and stamping the frame
+would never have touched it:
+
+```
+left, left, "what are you looking at" -> "I am looking at the area around
+the chair." No look() call. No handover. No image anywhere in the turn.
+```
+
+`navigate` is **sticky** (`registry.py`, since 2026-09-08 — a multi-step drive
+should cost one LLM call, not a routing hop on every follow-up). So after
+"left", the *next* turn re-enters `navigate` directly, skipping `chat`'s
+routing table entirely. `NAVIGATE_PROMPT` rule 6 already says a no-movement
+follow-up goes to `chat`; `CHAT_PROMPT` already says a visual question goes to
+`local_agent`. **Both are instructions, and the Mac mini's 12B model ignored
+them three times in the one transcript**, answering directly in specific,
+plausible-sounding prose instead. `local_agent` — the only agent with `look()`
+— was never entered.
+
+§5 and §6's stamps live entirely inside `LOCAL_AGENT_PROMPT`. They do nothing
+for a turn that never reaches `local_agent`. Fixed Pi 5 `1de1e9e`: a
+deterministic backstop in `graph/build.py`'s loop-guard wrapper —
+`_vision_backstop` — fires when a non-`local_agent` node is about to end the
+turn by speaking with no tool call, `local_agent` has not already run this
+turn, and the **user's own words** (not the model's reply — that parsing is
+exactly what the model is already failing at) match a narrow vision-question
+pattern. On a hit it does not delete the wrong reply (append-only, same rule
+as the images), it appends a routing note and chains to `local_agent` in the
+same turn — `agent_node` only speaks the *final* message, so the wrong one
+never reaches the user. 13 new tests, 209 total.
+
+**Also correctly NOT a bug**, easy to misread as one from the same transcript:
+"take fresh pic" routed to `send_telegram_photo`, not `look()`. That tool
+grabs a genuinely fresh frame on its own (see its docstring) and is legitimately
+`chat`'s — not a symptom of anything above.
+
 ## 8. What this does not fix
 
 - **Nothing above gives the robot memory across boots.** Every session starts at

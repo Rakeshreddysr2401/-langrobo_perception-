@@ -197,6 +197,16 @@ that is the signal to build the freshness gate (§6(i)) — enforcement in
 Check `/wheel_state` continuity over the same window (TODO 33): a turn that
 silently did not happen will read as a model failure here.
 
+**Update, same evening:** the user pasted an actual failing transcript before
+the test above ran. It was worse than the label bug: with `navigate` sticky
+from an earlier move, "what are you looking at" was answered directly by
+`navigate` -- no look(), no handover, no image anywhere in the turn. Both
+CHAT_PROMPT and NAVIGATE_PROMPT already say to hand a vision question to
+local_agent; the 12B model ignored them three times in one transcript. Fixed
+Pi 5 `1de1e9e`: a code-level backstop in `graph/build.py`, matched against the
+user's own words, forces the chain to local_agent when a non-vision agent
+tries to answer one. 209 tests. See PERCEPTION_STATE.md §7b.
+
 ---
 
 ## 1. ⬜ Test whether the chassis can pivot in place
