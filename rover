@@ -17,6 +17,8 @@
 #                      Add --voice to also bring up Pi 5 STT/TTS and the speaker.
 #                      Tears down and restarts the container — do not run this
 #                      against a stack that is already up and working.
+#   ./rover voice      Pi 5 STT/TTS + the speaker, on its own (safe any time —
+#                      it touches nothing on the Jetson and skips if already up)
 #   ./rover logs <n>   tail a layer's log (camera|vo|gyro|fused)
 #   ./rover stop       tear the container down
 #
@@ -388,7 +390,9 @@ up)
 
   echo
   echo "[studio] LangGraph Studio on the Pi 5"
-  ssh -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" \
+  # timeout + -n: this ssh does not return on its own, the launched server
+  # holds the channel's fds open. Safe to cut — start_studio.sh is detached.
+  timeout 15 ssh -n -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" \
     'setsid nohup ~/ros2_ws/scripts/start_studio.sh > /tmp/langgraph_dev.log 2>&1 < /dev/null &' \
     2>/dev/null || true
   studio_ok=""
@@ -399,21 +403,38 @@ up)
     [ "$studio_ok" = '{"ok":true}' ] && break
   done
   if [ "$studio_ok" = '{"ok":true}' ]; then
-    echo "      ready:"
+    echo "      ready — BOTH steps, the link alone is blocked as mixed content:"
     echo "        1. ssh -N -L 2024:localhost:2024 $LAPTOP_USER@$PI5_HOST"
     echo "        2. open https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024"
   else
     echo "      ✗ not up after 30s — check on the Pi 5: tail /tmp/langgraph_dev.log"
   fi
+  echo
+  echo "[langsmith] traces of real turns — cloud, already recording, no tunnel"
+  echo "        https://smith.langchain.com  ->  project 'pi5'"
+  echo "        Spoken turns appear as run 'turn:voice', Telegram as 'turn:telegram',"
+  echo "        each with the full node traversal, tool calls and LLM in/out."
+  echo "        This is where to watch a voice turn — Studio's thread list only"
+  echo "        shows runs its OWN server executed, and agent_node runs voice."
   echo "      NOTE: Studio and agent_node (Telegram) both publish /cmd_vel and only"
   echo "      agent_node gets the nav-done callback. Driving from Telegram? Stop"
   echo "      Studio first and confirm: ros2 node list | grep studio   (empty)"
 
   if [ "${2:-}" = "--voice" ]; then
     echo
+    "$0" voice
+  fi
+
+  echo
+  "$0" view
+  ;;
+
+voice)
     echo "[voice] Pi 5 STT/TTS + $BT_SPEAKER"
+    # Bracketed, or the pattern matches the ssh command line carrying it and
+    # every run reports "already running" — so --voice never started anything.
     already=$(timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" \
-      'pgrep -af "stt_node|tts_node"' 2>/dev/null)
+      'pgrep -af "stt_nod[e]|tts_nod[e]"' 2>/dev/null || true)
     if [ -n "$already" ]; then
       echo "      already running — leaving it alone (a second pair double-speaks)"
     else
@@ -424,22 +445,37 @@ up)
         *) echo "      ✗ Jetson's own voice stack is not confirmed stopped — not starting Pi 5 voice." ;;
       esac
       if [ -z "$gate" ] || [[ "$gate" == *stopped* ]]; then
-        ssh -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" 'cd ~/ros2_ws && setsid nohup bash -lc \
+        # timeout, because this ssh does NOT return on its own: the launched
+        # process keeps the channel's fds open even under setsid+nohup, so the
+        # connection just sits there. Killing it is safe — voice_launch is
+        # already detached on the Pi 5 and keeps running.
+        timeout 15 ssh -n -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" 'cd ~/ros2_ws && setsid nohup bash -lc \
           "source /opt/ros/jazzy/setup.bash && source install/setup.bash && \
            ros2 launch pi5_voice_pkg voice_launch.py" \
           > /tmp/voice_launch.log 2>&1 < /dev/null &' 2>/dev/null || true
-        sleep 6
+        # Loading whisper takes ~20s and the gain is re-applied 5s after that,
+        # so a blind `sleep 6` reported on a pipeline that wasn't up yet. Wait
+        # ON the Pi 5 in ONE ssh: polling from here cost 20 connections, and
+        # ssh to this box is slow enough that that alone ran past four minutes.
+        timeout 90 ssh -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" \
+          'for i in $(seq 1 40); do
+             grep -q "re-applied" /tmp/voice_launch.log 2>/dev/null && break
+             sleep 2
+           done' 2>/dev/null || true
       fi
     fi
+    timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" \
+      'grep -hE "stt_provider =|tts_provider =|wake_detector =|mic gain .* re-applied" \
+         /tmp/voice_launch.log | sed "s/.*\] //"' 2>/dev/null | sed 's/^/      /' || true
     conn=$(timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" \
-      "bluetoothctl info $BT_SPEAKER | grep -i connected" 2>/dev/null)
+      "bluetoothctl info $BT_SPEAKER | grep -i connected" 2>/dev/null || true)
     echo "      speaker: ${conn:-unknown}"
     case "$conn" in
       *": yes"*) ;;
       *)
         ssh -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" "bluetoothctl connect $BT_SPEAKER" >/dev/null 2>&1 || true
         conn=$(timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" \
-          "bluetoothctl info $BT_SPEAKER | grep -i connected" 2>/dev/null)
+          "bluetoothctl info $BT_SPEAKER | grep -i connected" 2>/dev/null || true)
         echo "      speaker retry: ${conn:-unknown}"
         case "$conn" in
           *": yes"*) ;;
@@ -447,10 +483,10 @@ up)
         esac
         ;;
     esac
-  fi
-
   echo
-  "$0" view
+  echo "  Wake word is OFF (wake_detector: transcript_alias, require_wake:false)"
+  echo "  — just talk, every transcript goes to the brain. Watch a turn land:"
+  echo "     https://smith.langchain.com  ->  project 'pi5'  ->  run 'turn:voice'"
   ;;
 
 detect)

@@ -25,14 +25,34 @@ For the full runbook including calibration and troubleshooting see
 
 **Single command:** `./rover up` runs every step below in order — camera,
 pose, fused, map, nav, vlm, the ESP32 check, the Pi 5 check, Studio, and the
-laptop view — and prints the Studio tunnel link at the end. Add `--voice` to
-also bring up Pi 5 STT/TTS and reconnect the boAt Stone 650. It restarts the
-container, so it's for a cold power-on — don't run it against a stack that's
-already up and healthy, it throws the running state away for nothing. The
-layer-by-layer steps below are what it runs, and what to fall back to when
-one of them fails and you need to see which.
+laptop view — and prints the Studio tunnel link and the LangSmith project at
+the end. Add `--voice` to also bring up Pi 5 STT/TTS and reconnect the boAt
+Stone 650. It restarts the container, so it's for a cold power-on — don't run
+it against a stack that's already up and healthy, it throws the running state
+away for nothing. The layer-by-layer steps below are what it runs, and what to
+fall back to when one of them fails and you need to see which.
 
-Two traps worth knowing before you start:
+**Voice on its own:** `./rover voice` — same bring-up, no Jetson side, safe to
+run any time. It skips if voice is already up (a second pair double-speaks),
+then prints the providers, the wake setting, the mic gain and the speaker
+state. Use this rather than `up --voice` when only voice needs restarting.
+
+**The voice trap: a mic that is too quiet fails silently and looks like a dead
+brain.** The Bluetooth HFP mic delivers speech at rms ~0.024 against a
+`min_utterance_rms` of 0.05, so the VAD segments your speech correctly and the
+gate then throws every utterance away — nothing reaches Sarvam, nothing reaches
+the brain, and the only evidence is a `dropped: too quiet` line on
+`/voice/debug_vad`. `bt_mic_gain: 4.0` (Pi 5 `voice_params.yaml`) fixes it, and
+`stt_node` re-applies it 5 s after startup because `tts_node`'s HFP profile
+switch re-creates the PipeWire source and wipes it. To check a suspicion:
+
+```bash
+docker exec rover bash -lc 'unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE; \
+  export ROS_DOMAIN_ID=0; source /opt/ros/jazzy/setup.bash; \
+  ros2 topic echo /voice/debug_vad --field data'
+```
+
+Two more traps worth knowing before you start:
 
 - **The D555 answers ping while completely dead.** It is a PoE network device
   speaking DDS, not a USB camera. Never diagnose it with `lsusb` or `ping`.
