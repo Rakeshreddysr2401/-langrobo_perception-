@@ -2110,3 +2110,62 @@ Deferred by the user 2026-09-10 ("will see it later... minor issue"). Nobody
 has re-run the controlled test above on the current build to confirm whether
 this is a real regression or just an unverified live reading. Do that first,
 before any hardware discussion.
+
+## 🟡 38. Studio's CORS fix lives in site-packages, so pip will silently undo it (2026-09-11)
+
+The hosted Studio UI renders **blank** against a server whose `/ok` is healthy,
+because the browser's private-network preflight is rejected:
+
+```
+OPTIONS /assistants/search  ->  400 Disallowed CORS private-network
+```
+
+starlette >= 1.0 added `allow_private_network` (default `False`) and rejects
+that preflight; langgraph-api 0.10.0 builds its `CORSMiddleware` without ever
+passing it, even though it computes `ALLOW_PRIVATE_NETWORK` correctly and its
+own `PrivateNetworkMiddleware` adds the response header — too late, the 400 has
+already been issued. A version bump on either side caused this; it worked before.
+
+Patched on the Pi 5 by hand:
+
+```
+~/.local/lib/python3.12/site-packages/langgraph_api/server.py
+    allow_private_network=config.ALLOW_PRIVATE_NETWORK,   # added
+    (original kept as server.py.orig)
+```
+
+**Why this is a TODO and not done:** that file belongs to pip, not to either
+repo, so it is in no commit and no backup. Any `pip install -U langgraph*`, a
+rebuilt venv or a fresh SD card brings the blank page back, and the symptom
+points nowhere near the cause. The durable fix is upgrading langgraph to a
+release that passes this itself — deferred because the same upgrade moves the
+graph runtime `agent_node` depends on, which is not a thing to do casually on a
+working brain. Diagnostic curl is in [OPERATIONS.md](OPERATIONS.md) §7.
+
+## 🟡 39. The robot reads VLM pixel coordinates out loud (2026-09-11, unreproduced)
+
+Reported by the user: asked to go somewhere, the speaker said something like
+`x:477, y:647`. Typed turns in Studio did not do it.
+
+That format is the VLM grounding prompt's, in `langrobo_core/tools/approach.py`:
+
+```
+{"found": true, "x": N, "y": N}    normalized 0-1000, (0,0) top-left
+```
+
+which matches the reported numbers. The mechanism is available — there is no
+filter between a reply and TTS (`langrobo_core/tools/__init__.py`: "each
+agent's reply text IS the speech"), so any reply containing that JSON is spoken
+verbatim.
+
+**Not yet reproduced.** Every `→ TTS:` line in the brain's journal for that day
+was clean, so it is unclear whether it came from `agent_node` or from a
+Studio-driven turn — Studio's replies reach the same speaker through
+`/studio_bridge` but are logged in a different process, which would explain the
+absence. Do not add a coordinate-stripping filter before catching one real
+instance: the useful fix depends on which path emitted it, and a regex over
+spoken text would hide the bug rather than fix it.
+
+```bash
+journalctl -u langrobo-brain --since today | grep "→ TTS:"
+```

@@ -354,6 +354,12 @@ tunnel is what makes it `127.0.0.1` on your laptop.
 
 Check the tunnel from your laptop: `curl localhost:2024/ok` → `{"ok":true}`.
 
+**A blank page when `/ok` is healthy is the CORS private-network bug**, not a
+dead server — and `curl` cannot see it, because curl sends no `Origin`. A local
+patch on the Pi 5 fixes it and `pip` silently undoes it; the diagnostic curl and
+the one-line fix are in [OPERATIONS.md](OPERATIONS.md) §7, tracked as
+[TODO.md](TODO.md) §38. A stale tab looks the same, so hard-reload first.
+
 ### When there is no laptop
 
 The tunnel is not a laptop thing — it must simply run **on whichever machine has

@@ -406,6 +406,28 @@ curl -XPOST localhost:2024/assistants/search \
      -H 'Content-Type: application/json' -d '{}'
 ```
 
+**A blank Studio page with a healthy `/ok` is a CORS rejection, not a dead
+server.** Found 2026-09-11. The browser sends a *private-network* preflight
+before it may call a private address from a public HTTPS page; starlette >= 1.0
+rejects that preflight unless `allow_private_network` is set, and
+langgraph-api 0.10.0 never passes it — so every API call the UI makes dies at
+the preflight and the page renders empty with nothing in the server log. The
+curls above all still pass, because curl sends no `Origin`. Reproduce it the
+way the browser does:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -X OPTIONS localhost:2024/assistants/search \
+  -H 'Origin: https://smith.langchain.com' -H 'Access-Control-Request-Method: POST' \
+  -H 'Access-Control-Request-Private-Network: true'
+# 200 = fine.  400 "Disallowed CORS private-network" = this bug.
+```
+
+The fix is one argument — `allow_private_network=config.ALLOW_PRIVATE_NETWORK`
+on the `CORSMiddleware` in `langgraph_api/server.py` (the flag is already
+computed correctly, just never handed over). That is **a patch to site-packages
+on the Pi 5, not to any repo**: `pip` will overwrite it and the blank page comes
+back. `server.py.orig` sits beside it. See [TODO.md](TODO.md) §38.
+
 The graph is `agent`, from `graph_studio.py:graph` via `langgraph.json`.
 
 ### Three things that surprise you
