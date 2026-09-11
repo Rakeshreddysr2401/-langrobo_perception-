@@ -2294,9 +2294,28 @@ Nothing here has been driven. Required, in order:
    0.38 m across the tyres, and `nav2.yaml` has flagged the tyre half-width as
    the one assumption in that polygon since 2026-08-23. Measure it before
    trusting a 1 cm/side margin.
-2. **Confirm Spin actually rotates.** `./rover logs nav` during a forced
-   recovery; if the wheels sit while `behavior_server` reports Running, the
-   breakaway numbers above are wrong, not the concept.
+2. **Confirm Spin actually PIVOTS — log x,y, not just yaw.** This is the test
+   most likely to fail, and the reason is a hole in the evidence this whole
+   entry leans on. `nav2.yaml`'s wz sweep (2026-08-23) read yaw rate off
+   `/odom`, and **yaw rate cannot tell a pivot from an arc** — a curving turn
+   gives the same number. Meanwhile `phase1/teleop/teleop_web.py` measured the
+   day before that wz 2.0 is only ~47% duty and "cannot break four tyres loose
+   sideways", and §14 put a real pivot at ~93% duty, i.e. wz ≈ 4.7. Spin is
+   capped at 1.5 here, which is ~25% duty per wheel.
+
+   If that reading is right, nav2 has never pivoted — it has curved — and a
+   Spin recovery that translates while it turns is **worse than no Spin** in
+   exactly the narrow gaps this entry is trying to get through. It would also
+   be a clean candidate cause for §37 and §36.
+
+   Command a pure rotation through nav2 and log `/odom` x **and** y **and**
+   yaw. Yaw alone proves nothing. If it curves, the fix is more angular
+   authority (`velocity_smoother` `max_velocity[2]` and Spin's
+   `max_rotational_vel`, currently both 1.5) — but raise it deliberately, since
+   `nav2.yaml` records that commanded 2.0 made RPP overshoot badly, and
+   OPERATIONS.md §2 warns a fast pivot disturbs cuVSLAM. **Until this runs,
+   treat the Spin recovery as unproven.** Cross-referenced in the Pi 5 repo's
+   `INTEGRATION_GAPS.md` §3, which flagged the 1.5 cap before this change did.
 3. **The doorway test.** A gap measured at 0.42–0.45 m, goal on the far side.
    Before this change it was refused; it should now plan and pass.
 4. **The wall test the user described.** Nose to a wall, goal 1 m behind.
