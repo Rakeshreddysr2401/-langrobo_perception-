@@ -39,14 +39,30 @@
               <ClearEntireCostmap name="ClearLocalCostmap-Subtree" service_name="local_costmap/clear_entirely_local_costmap"/>
               <ClearEntireCostmap name="ClearGlobalCostmap-Subtree" service_name="global_costmap/clear_entirely_global_costmap"/>
             </Sequence>
-            <!-- Spin removed: this rover cannot turn in place (TODO 14).
-                 Leaving it in makes nav2 command a rotation that never
-                 happens, sit still, and time out - turning a recoverable
-                 situation into a stuck one. A longer BackUp takes its
-                 slot so the round-robin still has two real attempts. -->
-            <BackUp backup_dist="0.50" backup_speed="0.10" error_code_id="{backup_code_id}"/>
+            <!-- SPIN IS BACK, and it is the FIRST thing tried after clearing.
+                 TODO 40. It was removed on the grounds that this rover cannot
+                 turn in place; TODO 14 fixed that and measured 65 deg/s on the
+                 floor, so the grounds expired. Leaving it out cost more than it
+                 saved, for a reason specific to this rover:
+
+                 THIS ROVER IS BLIND BEHIND IT. One forward camera, 87 deg wide,
+                 nothing below 10 cm, nothing rearward at all. BackUp was
+                 therefore the LEAST safe recovery available and it was the ONLY
+                 one. Spin is the safe one: it turns the camera onto new ground,
+                 which both frees the rover and gives nvblox something to
+                 observe - and an unobserved start cell is itself a common
+                 reason the planner had nothing to offer.
+
+                 Two spins, opposite directions, so a rover wedged facing a wall
+                 tries one way, reverses, then tries the other. 1.57 rad is a
+                 quarter turn; at the ~0.42 rad/s this chassis actually achieves
+                 that is about 4 s. behavior_server's rotational limits must
+                 stay above the 0.8 rad/s breakaway or Spin commands a rotation
+                 that never happens - see nav2.yaml. -->
+            <Spin spin_dist="1.57" error_code_id="{spin_error_code}"/>
+            <BackUp backup_dist="0.30" backup_speed="0.10" error_code_id="{backup_code_id}"/>
+            <Spin spin_dist="-1.57" error_code_id="{spin_error_code}"/>
             <Wait wait_duration="5.0"/>
-            <BackUp backup_dist="0.30" backup_speed="0.15" error_code_id="{backup_code_id}"/>
           </RoundRobin>
         </ReactiveFallback>
       </Sequence>

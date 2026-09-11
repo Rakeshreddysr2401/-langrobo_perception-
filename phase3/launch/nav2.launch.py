@@ -12,11 +12,13 @@ NO map SERVER, NO AMCL
     relative to where the rover started. Enough to click a goal and drive to it;
     not enough to recognise a room tomorrow.
 
-THE ROVER CANNOT TURN IN PLACE (TODO 14)
-    Every rotate-in-place behaviour is disabled in nav2.yaml. Most importantly
-    RPP runs with use_rotate_to_heading:false, and the Spin recovery is removed.
-    Without that nav2 would command a rotation the rover cannot execute, sit
-    still, and time out -- which looks like a planner bug and is not.
+THE ROVER CAN TURN IN PLACE -- THE DOCSTRING THAT SAID OTHERWISE WAS STALE
+    It could not, when this file was written (TODO 14), and everything that
+    rotates was disabled on those grounds. TODO 14 was fixed and verified on the
+    floor on 2026-08-22 at 65 deg/s. The controller was relaxed then; the
+    RECOVERIES were not, and TODO 40 is the bill for that -- Spin is back, and
+    nav2.yaml carries the rotational limits it needs to clear the scrub
+    breakaway. Read nav2.yaml before changing any rotation value here.
 """
 import os
 
@@ -44,8 +46,16 @@ def generate_launch_description():
              remappings=[('cmd_vel', 'cmd_vel_nav')]),
         Node(package='nav2_planner', executable='planner_server',
              name='planner_server', output='screen', parameters=[CONFIG]),
+        # behavior_server ALSO goes through the smoother. It publishes to
+        # `cmd_vel` by default, which on this rover is the wheels -- so every
+        # recovery was a step change straight into the PID, bypassing the very
+        # node added to prevent that. Harmless while the only recovery was a
+        # 0.10 m/s reverse; not harmless now that Spin is back and commands
+        # 1.5 rad/s from a standstill, which is exactly the slip that corrupts
+        # the odometry nav2 is steering by. Remapped 2026-09-11, TODO 40.
         Node(package='nav2_behaviors', executable='behavior_server',
-             name='behavior_server', output='screen', parameters=[CONFIG]),
+             name='behavior_server', output='screen', parameters=[CONFIG],
+             remappings=[('cmd_vel', 'cmd_vel_nav')]),
         Node(package='nav2_bt_navigator', executable='bt_navigator',
              name='bt_navigator', output='screen', parameters=[CONFIG]),
         # The smoother sits between the controller and the wheels, so the

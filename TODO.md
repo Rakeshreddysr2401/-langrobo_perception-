@@ -1685,6 +1685,11 @@ rover untrustworthy until it is fixed.
 
 ## 🔴 34. Nav2 fails to reach anything — controller one run, planner the next (2026-09-10)
 
+> **Explained 2026-09-11 — see §40.** Run A is RPP's collision sweep and the
+> cost-regulation crawl; run B is the planner refusing a gap narrower than
+> twice the inscribed radius. Both are fixed in config; neither is verified on
+> the floor, so this stays 🔴 until §40's tests run.
+
 Three consecutive `approach_described_object` attempts at a white bucket ~1.6 m
 away. None arrived. **This is the thing actually blocking use of the robot** —
 everything else fixed today was about being *told* what happened.
@@ -2169,3 +2174,138 @@ spoken text would hide the bug rather than fix it.
 ```bash
 journalctl -u langrobo-brain --since today | grep "→ TTS:"
 ```
+
+---
+
+## 🟠 40. Nav2 refuses gaps the rover fits through, and cannot turn its way out (2026-09-11)
+
+Reported by the user: a goal is accepted, the rover drives, then **stops dead at
+a narrow place it can physically pass**; and facing a wall with the goal behind
+it, it never tries to rotate out — it needs to "proactively try to fit into that
+path by rotating safely".
+
+This is the explanation for **§34**, which recorded the same two failures — run A
+`follow_path` aborting into repeated backups, run B `compute_path_to_pose`
+aborting six times with no movement at all — and could not separate them. They
+are not one bug. They are three, and they compound.
+
+### 1. The planner forbids a band of gaps the rover fits through
+
+`footprint_padding` was 0.07. Padding expands the footprint used to compute the
+**inscribed radius**, and that radius is a hard gate in two places at once:
+`InflationLayer` writes cost 253 to every cell within it, NavFn treats 253 as
+solid, and RPP's collision sweep uses the same padded polygon.
+
+The inscribed radius here is set by the **rear overhang** (0.170 m), not the
+half-width (0.190 m) — the rear edge is the nearest one to centre. So:
+
+| padding | inscribed | narrowest gap the planner accepts | real margin |
+|---|---|---|---|
+| 0.07 (was) | 0.24 m | **0.48 m** | 5 cm/side |
+| 0.03 (now) | 0.20 m | **0.40 m** | 1 cm/side |
+| 0.02 | 0.19 m | 0.38 m | 0 cm/side |
+| 0.00 | 0.17 m | 0.34 m | **−2 cm/side** |
+
+The rover is **0.38 m** across the tyres. At 0.07 the refused band was gaps of
+roughly 0.38–0.53 m — passable, rejected — which is most interior doorways once
+nvblox's 0.05 m voxels thicken each jamb. That is the user's symptom exactly.
+
+Read the last row before dropping padding further: at zero the planner would
+route the rover through a 0.35 m gap it cannot enter, because the gate is the
+rear overhang and the body is wider. **0.02 is the floor**, and it is not a
+safety margin — it is the correction that makes the inscribed radius equal the
+true half-width. Set to **0.03**: 1 cm/side of planner margin, doorways allowed.
+
+The old comment in `nav2.yaml` ended *"if it starts refusing doorways, this is
+why"*. It did. The note was right and nobody was watching for it.
+
+### 2. Cost regulation was inverting the wrong curve
+
+`InflationLayer` decays cost at `cost_scaling_factor: 2.0`. RPP inverts that
+curve to recover "how far am I from the nearest obstacle" — using **its own
+copy** of the constant, `FollowPath.inflation_cost_scaling_factor`, which was
+never set and defaulted to **3.0**:
+
+```cpp
+// regulation_functions.hpp, costConstraint()
+min_distance_to_obstacle = inscribed + log(253 / pose_cost) / f;
+if (min_distance_to_obstacle < cost_scaling_dist)
+    vel *= cost_scaling_gain * min_distance_to_obstacle / cost_scaling_dist;
+```
+
+Two different constants for one curve: RPP read every cost as **a third closer**
+to the obstacle than it is. Worse, `cost_scaling_dist` defaulted to 0.6 while
+`min_distance_to_obstacle` can never fall below the inscribed radius — so the
+rover was *always* inside the scaling window and permanently capped at
+0.24/0.60 = 40% of `desired_linear_vel`, about **0.07 m/s**, any time a wall was
+in the costmap. That is the crawl half of the report. Now 2.0 and 0.40.
+
+### 3. There was no recovery that turns — only one that reverses
+
+`behavior_plugins` was `[backup, wait]` and the tree's round-robin was
+clear → BackUp 0.50 → Wait → BackUp 0.30. Nothing rotated.
+
+**This rover is blind behind it.** One forward camera, 87° wide, nothing below
+10 cm, nothing rearward. BackUp was the least safe recovery available and it was
+the only one. Facing a wall with the goal behind, the sequence could only
+reverse blindly and give up — never turn to face the goal.
+
+It was removed for a reason that expired on **2026-08-22**, when §14 was fixed
+and verified at 65 °/s. The controller settings were relaxed that day
+(`use_rotate_to_heading: true`); the recovery settings were not. Three weeks of
+the robot being unable to get itself unstuck came from a stale premise nobody
+re-read.
+
+### The trap that kept the wrong diagnosis alive
+
+Restoring Spin by adding it to `behavior_plugins` alone would have **reproduced
+the original bug**. Spin reads `max_rotational_vel` / `min_rotational_vel` /
+`rotational_acc_lim` unnamespaced from the server, and ours held the stock-ish
+`0.6 / 0.2 / 1.0` — **entirely inside** the 0.8 rad/s scrub breakaway measured in
+§14. Spin would have commanded 0.2–0.6 rad/s, the wheels would have sat still,
+the behaviour would have timed out, and the log would have said "this rover
+cannot pivot" for the second time about a rover that can.
+
+Set to `1.5 / 1.0 / 10.0`: the cap matches the velocity smoother so nothing
+downstream clips it, the floor stays above breakaway so the last few degrees of
+a spin still move, and the acceleration limit clears breakaway on the first
+100 ms tick — the same fix, for the same reason, as the controller's
+`max_angular_accel: 10.0`.
+
+### Changed
+
+| file | change |
+|---|---|
+| `phase3/config/nav2.yaml` | `footprint_padding` 0.07 → **0.03**, both costmaps |
+| | `progress_checker` → `PoseProgressChecker`, `required_movement_angle: 0.5` — turning now counts as progress |
+| | `FollowPath.inflation_cost_scaling_factor: 2.0`, `cost_scaling_dist: 0.40` |
+| | `FollowPath.max_allowed_time_to_collision_up_to_carrot` 1.5 → **1.0** |
+| | `behavior_plugins: [spin, backup, wait]`, rotational limits 1.5/1.0/10.0, `simulate_ahead_time: 1.0` |
+| `phase3/bt/navigate_to_pose.xml` | renamed from `navigate_no_spin.xml`; round-robin now clear → **Spin +90°** → BackUp 0.30 → **Spin −90°** → Wait |
+| `phase3/bt/navigate_through_poses.xml` | renamed from `navigate_through_no_spin.xml`, same round-robin |
+| `phase3/launch/nav2.launch.py` | `behavior_server` `cmd_vel` → `cmd_vel_nav`, so recoveries go through the velocity smoother instead of stepping the PID |
+| `knowledge/07-planners-and-controllers.md` | the "no Spin or BackUp" section was stale *and* wrong — the tree always had BackUp |
+
+### Not yet verified on the floor — this is why it is 🟠
+
+Nothing here has been driven. Required, in order:
+
+1. **Tape-measure the actual footprint width.** Every number above rests on
+   0.38 m across the tyres, and `nav2.yaml` has flagged the tyre half-width as
+   the one assumption in that polygon since 2026-08-23. Measure it before
+   trusting a 1 cm/side margin.
+2. **Confirm Spin actually rotates.** `./rover logs nav` during a forced
+   recovery; if the wheels sit while `behavior_server` reports Running, the
+   breakaway numbers above are wrong, not the concept.
+3. **The doorway test.** A gap measured at 0.42–0.45 m, goal on the far side.
+   Before this change it was refused; it should now plan and pass.
+4. **The wall test the user described.** Nose to a wall, goal 1 m behind.
+   Expect: no path → clear → Spin +90° → replan → drive. Watch that it turns
+   rather than reverses.
+5. **Watch for grazing.** 4 cm/side of planner margin was given up. If it
+   touches anything, raise `footprint_padding` to 0.05 (0.44 m gaps) rather
+   than reverting to 0.07.
+
+Related: **§34** (the observations this explains), **§14** (the pivot fix whose
+consequences were only half applied), **§13/§22** (why commanded ≠ actual wz),
+**§37** (rotation-induced x,y drift — more spinning will exercise it).

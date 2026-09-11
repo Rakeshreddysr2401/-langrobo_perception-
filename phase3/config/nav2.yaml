@@ -6,12 +6,25 @@
 #   where the rover started. That is enough to click a goal and drive to it; it
 #   is not enough to recognise a room tomorrow.
 #
-# THIS ROVER CANNOT TURN IN PLACE.
-#   Measured 2026-08-21, TODO 14: a pivot command drives instead of turning --
-#   the two sides never counter-rotate. So every rotate-in-place behaviour here
-#   is disabled or avoided, and the rover is treated as steering by arcs. That is
-#   a workaround, not a fix; when 14 is fixed, revisit every setting flagged
-#   NO-PIVOT below.
+# THIS ROVER CAN TURN IN PLACE. It could not, once.
+#   Measured 2026-08-21 (TODO 14): a pivot command drove instead of turning, so
+#   every rotate-in-place behaviour here was disabled and the rover was treated
+#   as steering by arcs. Those settings were marked NO-PIVOT.
+#
+#   TODO 14 was FIXED and verified on the floor 2026-08-22: 93% and 96% duty,
+#   counter-rotating, 65 deg/s. The premise expired that day, but only the
+#   controller settings were relaxed. The RECOVERY settings were not, and TODO
+#   40 is what that cost: with Spin absent, the only recovery this rover had was
+#   to reverse -- the one direction it cannot see. Every NO-PIVOT marker below
+#   has now been cleared or re-justified on its own merits.
+#
+# THE ROTATION DEADBAND IS STILL REAL, AND IT IS WHY THE NUMBERS LOOK ODD.
+#   Commanded wz below ~0.8 rad/s never breaks skid scrub -- the wheels sit.
+#   Above it, commanded still runs ~3.4x optimistic (TODO 13/22). So anything
+#   here that commands a rotation must command it ABOVE 0.8, or it is the same
+#   as not commanding it at all. That trap is what made "cannot pivot" look
+#   true for so long, and it is set for anyone who re-enables a rotation by
+#   copying a stock nav2 value.
 
 amcl:
   ros__parameters:
@@ -26,15 +39,15 @@ bt_navigator:
     odom_topic: /odom
     bt_loop_duration: 10
     default_server_timeout: 20
-    # NO-PIVOT. nav2's default tree hard-requires a `spin` action server, so
-    # removing the Spin behaviour made bt_navigator refuse to load entirely:
-    #   "spin action server not available" -> "Exception when loading BT"
-    # This tree is the default with Spin replaced by a second, longer BackUp.
-    default_nav_to_pose_bt_xml: /opt/rover3/bt/navigate_no_spin.xml
+    # The default tree with the recovery round-robin reordered, TODO 40:
+    #   clear costmaps -> Spin +90 -> BackUp 0.30 -> Spin -90 -> Wait
+    # Spin FIRST, because this rover is blind behind itself and reversing was
+    # the only recovery it had. Full reasoning in the tree file.
+    default_nav_to_pose_bt_xml: /opt/rover3/bt/navigate_to_pose.xml
     # BOTH default trees must be overridden. bt_navigator loads them both at
     # startup, so leaving navigate_through_poses on the stock file fails the
     # whole bringup even when nothing ever calls it.
-    default_nav_through_poses_bt_xml: /opt/rover3/bt/navigate_through_no_spin.xml
+    default_nav_through_poses_bt_xml: /opt/rover3/bt/navigate_through_poses.xml
 
 controller_server:
   ros__parameters:
@@ -52,7 +65,19 @@ controller_server:
     controller_plugins: [FollowPath]
 
     progress_checker:
-      plugin: nav2_controller::SimpleProgressChecker
+      # PoseProgressChecker, not SimpleProgressChecker, since TODO 40.
+      #
+      # SimpleProgressChecker counts TRANSLATION ONLY. That is the whole of the
+      # problem: this rover legitimately spends long stretches turning and going
+      # nowhere, and the checker called every one of them a stall. The 40 s
+      # allowance below was inflated to 40 for exactly that reason -- it was
+      # buying room for a manoeuvre the checker should never have been judging.
+      #
+      # PoseProgressChecker is the same check plus `required_movement_angle`:
+      # rotating far enough also counts as progress. So a rotate-to-heading, or
+      # a Spin recovery, resets the clock the way driving does, and the
+      # allowance can go back to meaning "stuck" rather than "turning".
+      plugin: nav2_controller::PoseProgressChecker
       # 0.25 m in 40 s, from 0.5 m in 15 s, and the reason is that TURNING IS
       # NOT MOVEMENT as far as this checker is concerned.
       #
@@ -68,6 +93,12 @@ controller_server:
       # wrong with the goal; the checker simply called a legal manoeuvre a stall.
       required_movement_radius: 0.25
       movement_time_allowance: 40.0
+      # 0.5 rad = 29 deg. At the ~0.42 rad/s this chassis actually turns, that
+      # is 1.2 s of real rotation -- comfortably inside the allowance, so any
+      # turn that is genuinely turning keeps resetting it. Kept well above the
+      # 3.68 deg of rotational noise in the baseline (TODO 37) so that standing
+      # still and jittering does NOT read as progress.
+      required_movement_angle: 0.5
 
     general_goal_checker:
       plugin: nav2_controller::SimpleGoalChecker
@@ -186,9 +217,42 @@ controller_server:
       min_approach_linear_velocity: 0.05
       approach_velocity_scaling_dist: 0.25
 
+      # BOTH ADDED 2026-09-11 (TODO 40). RPP's cost regulation INVERTS the
+      # inflation layer's exponential to recover "how far am I from the nearest
+      # obstacle", and it does it with its own copy of the decay constant:
+      #
+      #   regulation_functions.hpp, costConstraint():
+      #     min_distance_to_obstacle = inscribed + ln(253 / pose_cost) / f
+      #     if (min_distance_to_obstacle < cost_scaling_dist)
+      #         vel *= cost_scaling_gain * min_distance_to_obstacle
+      #                                  / cost_scaling_dist
+      #
+      # `f` is this parameter and it defaulted to 3.0, while inflation_layer
+      # below decays at cost_scaling_factor 2.0. Two different constants for one
+      # curve: RPP was reading every cost as 1/3 CLOSER to the obstacle than it
+      # is. Setting it to 2.0 is not a tuning choice, it is the value that makes
+      # the inverse the actual inverse. Change both together or neither.
+      inflation_cost_scaling_factor: 2.0
+      # 0.6 was the default and it is longer than the inflation layer's useful
+      # range here: min_distance_to_obstacle can never fall below the inscribed
+      # radius (0.20), so a 0.6 window meant the rover was ALWAYS inside it and
+      # always scaled -- capping it at 0.20/0.60 = 33% of desired_linear_vel,
+      # i.e. 0.06 m/s, any time a wall was in the costmap at all. That is the
+      # crawl-in-a-corridor half of TODO 40. 0.40 leaves a real 20 cm band
+      # between the inscribed radius and full speed, and floors the scaling at
+      # 0.20/0.40 = 50%, or 0.09 m/s.
+      cost_scaling_dist: 0.40
+
       transform_tolerance: 0.2
       use_collision_detection: true
-      max_allowed_time_to_collision_up_to_carrot: 1.5
+      # 1.0 s, from 1.5, on 2026-09-11 (TODO 40). This sweeps the PADDED
+      # footprint forward along the commanded arc and throws NoValidControl on
+      # any lethal cell -- FollowPath aborts, the BT drops into recovery, and
+      # from outside it looks exactly like the rover deciding to stop in a gap.
+      # At 0.18 m/s, 1.5 s projects 27 cm ahead; 1.0 s projects 18 cm, still far
+      # beyond the few centimetres this chassis needs to stop, and it stops the
+      # sweep from clipping a doorway jamb the rover has not reached yet.
+      max_allowed_time_to_collision_up_to_carrot: 1.0
 
 planner_server:
   ros__parameters:
@@ -250,18 +314,57 @@ global_costmap:
       # => 35 cm long x 38 cm wide. The tyre half-width is the one assumption;
       # verify with a tape before trusting it through a tight gap.
       footprint: "[[0.180, 0.190], [0.180, -0.190], [-0.170, -0.190], [-0.170, 0.190]]"
-      # 7 cm of padding, added 2026-08-23 after the rover was seen grazing
-      # obstacles by about 1 cm. That is geometry, not a planner bug: NavFn
-      # blocks cells at INSCRIBED, and the inscribed radius of this footprint is
-      # 0.17 m -- the distance to the NEAREST edge -- while the rover reaches
-      # 0.19 m at its widest. The centre can legally sit 0.17 m from an obstacle
-      # with a corner 2 cm inside it.
+      # 0.03, down from 0.07 on 2026-09-11 (TODO 40). The old comment ended
+      # "if it starts refusing doorways, this is why", and it did.
       #
-      # Padding inflates the footprint used for that calculation, so the
-      # inscribed radius becomes 0.24 m and the body keeps ~5 cm of real
-      # clearance. Cost: the rover now believes it is 52 cm wide and will refuse
-      # gaps narrower than that. If it starts refusing doorways, this is why.
-      footprint_padding: 0.07
+      # WHY PADDING DECIDES WHICH GAPS EXIST. Padding expands the footprint used
+      # to compute the INSCRIBED RADIUS, and inscribed radius is a hard gate in
+      # two separate places:
+      #   - NavFn treats any cell at cost >= 253 as solid, and InflationLayer
+      #     writes 253 to every cell within the inscribed radius of an obstacle.
+      #     So a path can only exist down a corridor WIDER THAN TWICE it.
+      #   - RPP's use_collision_detection sweeps the SAME padded footprint
+      #     forward along its arc and aborts FollowPath on any lethal cell.
+      # A gap the rover fits through but the planner rejects therefore fails
+      # twice over: no path, and no permission to drive the path there isn't.
+      #
+      # The inscribed radius here is set by the REAR overhang (0.170 m), not by
+      # the half-width (0.190 m) -- the rear edge is the nearest one to centre.
+      # So padding p gives inscribed radius 0.170 + p:
+      #
+      #   padding | inscribed | narrowest gap the planner accepts | real margin
+      #   --------|-----------|-----------------------------------|------------
+      #    0.07   |  0.24 m   |  0.48 m                           |  5 cm/side
+      #    0.05   |  0.22 m   |  0.44 m                           |  3 cm/side
+      #    0.03   |  0.20 m   |  0.40 m   <- here                 |  1 cm/side
+      #    0.02   |  0.19 m   |  0.38 m                           |  0 cm/side
+      #    0.00   |  0.17 m   |  0.34 m                           | -2 cm/side
+      #
+      # The rover is 0.38 m across the tyres. Read the last row: at ZERO padding
+      # the planner would route it through a 0.35 m gap it physically cannot
+      # enter, because the gate is the rear overhang and the body is wider than
+      # that. **0.02 is the floor**, and it is not a safety margin -- it is the
+      # correction that makes the inscribed radius equal the true half-width.
+      # Only padding above 0.02 buys real clearance, at 1 cm per extra cm.
+      #
+      # At 0.07 the refused band was gaps of roughly 0.38-0.53 m: passable,
+      # rejected. That is most interior doorways once nvblox's 0.05 m voxels
+      # thicken each jamb. 0.03 narrows the band to 0.38-0.45 m and leaves
+      # 1 cm/side of planner margin plus whatever the voxel rounding adds.
+      #
+      # SPINNING NEEDS MORE THAN PASSING. A rotation in place sweeps the
+      # CIRCUMSCRIBED radius, hypot(0.180+p, 0.190+p):
+      #   p=0.07 -> 0.36 m, needs 0.72 m of clear floor to turn around in
+      #   p=0.03 -> 0.30 m, needs 0.61 m
+      # The Spin recovery collision-checks against that, so padding also decides
+      # whether the rover is allowed to turn its way out of a tight spot.
+      #
+      # What still protects it: inflation_layer below (0.45 m radius) makes the
+      # planner PREFER open floor even where it is permitted to hug, and RPP's
+      # forward collision sweep runs every tick. What is given up is honest:
+      # 4 cm/side of planner margin, in exchange for the rover being willing to
+      # use doorways. Raise this first if it starts grazing again.
+      footprint_padding: 0.03
 
       plugins: [nvblox_layer, inflation_layer]
       nvblox_layer:
@@ -329,18 +432,57 @@ local_costmap:
       # a 12 m grid; worth it for something you have to be able to look at.
       always_send_full_costmap: true
       footprint: "[[0.180, 0.190], [0.180, -0.190], [-0.170, -0.190], [-0.170, 0.190]]"
-      # 7 cm of padding, added 2026-08-23 after the rover was seen grazing
-      # obstacles by about 1 cm. That is geometry, not a planner bug: NavFn
-      # blocks cells at INSCRIBED, and the inscribed radius of this footprint is
-      # 0.17 m -- the distance to the NEAREST edge -- while the rover reaches
-      # 0.19 m at its widest. The centre can legally sit 0.17 m from an obstacle
-      # with a corner 2 cm inside it.
+      # 0.03, down from 0.07 on 2026-09-11 (TODO 40). The old comment ended
+      # "if it starts refusing doorways, this is why", and it did.
       #
-      # Padding inflates the footprint used for that calculation, so the
-      # inscribed radius becomes 0.24 m and the body keeps ~5 cm of real
-      # clearance. Cost: the rover now believes it is 52 cm wide and will refuse
-      # gaps narrower than that. If it starts refusing doorways, this is why.
-      footprint_padding: 0.07
+      # WHY PADDING DECIDES WHICH GAPS EXIST. Padding expands the footprint used
+      # to compute the INSCRIBED RADIUS, and inscribed radius is a hard gate in
+      # two separate places:
+      #   - NavFn treats any cell at cost >= 253 as solid, and InflationLayer
+      #     writes 253 to every cell within the inscribed radius of an obstacle.
+      #     So a path can only exist down a corridor WIDER THAN TWICE it.
+      #   - RPP's use_collision_detection sweeps the SAME padded footprint
+      #     forward along its arc and aborts FollowPath on any lethal cell.
+      # A gap the rover fits through but the planner rejects therefore fails
+      # twice over: no path, and no permission to drive the path there isn't.
+      #
+      # The inscribed radius here is set by the REAR overhang (0.170 m), not by
+      # the half-width (0.190 m) -- the rear edge is the nearest one to centre.
+      # So padding p gives inscribed radius 0.170 + p:
+      #
+      #   padding | inscribed | narrowest gap the planner accepts | real margin
+      #   --------|-----------|-----------------------------------|------------
+      #    0.07   |  0.24 m   |  0.48 m                           |  5 cm/side
+      #    0.05   |  0.22 m   |  0.44 m                           |  3 cm/side
+      #    0.03   |  0.20 m   |  0.40 m   <- here                 |  1 cm/side
+      #    0.02   |  0.19 m   |  0.38 m                           |  0 cm/side
+      #    0.00   |  0.17 m   |  0.34 m                           | -2 cm/side
+      #
+      # The rover is 0.38 m across the tyres. Read the last row: at ZERO padding
+      # the planner would route it through a 0.35 m gap it physically cannot
+      # enter, because the gate is the rear overhang and the body is wider than
+      # that. **0.02 is the floor**, and it is not a safety margin -- it is the
+      # correction that makes the inscribed radius equal the true half-width.
+      # Only padding above 0.02 buys real clearance, at 1 cm per extra cm.
+      #
+      # At 0.07 the refused band was gaps of roughly 0.38-0.53 m: passable,
+      # rejected. That is most interior doorways once nvblox's 0.05 m voxels
+      # thicken each jamb. 0.03 narrows the band to 0.38-0.45 m and leaves
+      # 1 cm/side of planner margin plus whatever the voxel rounding adds.
+      #
+      # SPINNING NEEDS MORE THAN PASSING. A rotation in place sweeps the
+      # CIRCUMSCRIBED radius, hypot(0.180+p, 0.190+p):
+      #   p=0.07 -> 0.36 m, needs 0.72 m of clear floor to turn around in
+      #   p=0.03 -> 0.30 m, needs 0.61 m
+      # The Spin recovery collision-checks against that, so padding also decides
+      # whether the rover is allowed to turn its way out of a tight spot.
+      #
+      # What still protects it: inflation_layer below (0.45 m radius) makes the
+      # planner PREFER open floor even where it is permitted to hug, and RPP's
+      # forward collision sweep runs every tick. What is given up is honest:
+      # 4 cm/side of planner margin, in exchange for the rover being willing to
+      # use doorways. Raise this first if it starts grazing again.
+      footprint_padding: 0.03
       plugins: [nvblox_layer, inflation_layer]
       nvblox_layer:
         plugin: nvblox::nav2::NvbloxCostmapLayer
@@ -392,18 +534,47 @@ behavior_server:
     global_frame: odom
     robot_base_frame: base_link
     cycle_frequency: 10.0
-    # NO-PIVOT: Spin is deliberately absent. It is nav2's usual first recovery
-    # and it is the one manoeuvre this rover cannot perform -- it would command
-    # a rotation, sit still, and time out, turning a recoverable situation into
-    # a stuck one. BackUp and Wait remain.
-    behavior_plugins: [backup, wait]
+    # SPIN RESTORED 2026-09-11 (TODO 40). It had been absent since TODO 14, on
+    # the grounds that this rover cannot turn in place. It can, since 2026-08-22
+    # -- 65 deg/s, measured on the floor -- and with Spin gone the only recovery
+    # left was BackUp, into the one direction this rover cannot see.
+    behavior_plugins: [spin, backup, wait]
+    spin:
+      plugin: nav2_behaviors::Spin
     backup:
       plugin: nav2_behaviors::BackUp
     wait:
       plugin: nav2_behaviors::Wait
-    max_rotational_vel: 0.6
-    min_rotational_vel: 0.2
-    rotational_acc_lim: 1.0
+
+    # THESE THREE ARE THE TRAP, and they are why re-enabling Spin is not just
+    # adding it to the list above. Spin reads them from the SERVER, unnamespaced
+    # (nav2_behaviors/src/plugins/spin.cpp, onConfigure), and clamps every
+    # command into [min_rotational_vel, max_rotational_vel]. The old values were
+    # 0.6 / 0.2 / 1.0 -- ENTIRELY INSIDE the 0.8 rad/s scrub breakaway measured
+    # in TODO 14. Spin would have commanded 0.2-0.6 rad/s, the wheels would have
+    # sat still, and the behaviour would have timed out: the exact symptom that
+    # made "this rover cannot pivot" look true in the first place. Restoring
+    # Spin with stock numbers would have reproduced the original bug and
+    # confirmed the wrong diagnosis a second time.
+    #
+    # 1.5 matches the velocity_smoother's angular cap so nothing downstream
+    # clips it (~0.42 rad/s actual, 24 deg/s -- a quarter turn in ~4 s).
+    max_rotational_vel: 1.5
+    # 1.0, not 0.2. The floor must sit ABOVE the breakaway, because Spin slows
+    # as it approaches its target angle: with a low floor the last few degrees
+    # are commanded below 0.8 and the rover stops short with the behaviour still
+    # running. 1.0 commanded is ~0.21 rad/s actual -- slow, but moving.
+    min_rotational_vel: 1.0
+    # 10.0, same reasoning as the controller's max_angular_accel: the ramp is
+    # acc_lim * dt, and at 1.0 rad/s^2 the first 100 ms tick commands 0.1 rad/s,
+    # deep in the deadband. 10.0 clears 0.8 on the very first tick.
+    rotational_acc_lim: 10.0
+    # 1.0 s, from the 2.0 default. Spin collision-checks the CIRCUMSCRIBED
+    # sweep (0.30 m at the padding set above, so 0.61 m of floor needed to turn
+    # around in). Projecting 2 s of rotation ahead through a costmap that is
+    # mostly unobserved vetoes turns the rover could make; 1 s still refuses a
+    # spin into something it can actually see.
+    simulate_ahead_time: 1.0
 
 velocity_smoother:
   ros__parameters:

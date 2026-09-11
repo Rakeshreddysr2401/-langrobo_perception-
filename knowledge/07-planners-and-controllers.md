@@ -10,7 +10,7 @@
 > overridden or `bt_navigator` refuses to load at all. Every such setting is
 > marked `NO-PIVOT` so they can be reverted together. See [PHASE3](../PHASE3.md).
 
-**Code:** `phase3/config/nav2.yaml`, `phase3/bt/navigate_no_spin.xml`
+**Code:** `phase3/config/nav2.yaml`, `phase3/bt/navigate_to_pose.xml`
 
 ---
 
@@ -91,16 +91,34 @@ Nodes are composed:
 The classic nav2 tree is roughly: *follow the path; if that fails, try recovery
 behaviours; if those fail, abort.*
 
-### Ours deliberately has no Spin or BackUp
+### Ours recovers by turning first, not by reversing
 
 Standard nav2 recovery is: clear the costmap, spin in place, back up, try again.
 
-Those are **blind** moves. On a rover that is tethered and sees only 87°
-forwards, "back up" means reversing into space it has literally never observed.
+This page used to claim our tree omitted both Spin and BackUp because they are
+blind moves. That was half wrong and the wrong half mattered. The tree never had
+Spin — removed under TODO 14, when the rover genuinely could not pivot — but it
+always had **two** BackUps, so the only recovery it could actually perform was
+the blind one. On a rover that sees 87° forwards, nothing below 10 cm and
+nothing at all behind it, reversing is the move with no sensor behind it.
 
-So `phase3/bt/navigate_no_spin.xml` omits them. The plugins are still loaded in
-`nav2.yaml` — loading a plugin is not calling it — but the tree never invokes
-them. Failing cleanly beats recovering blindly.
+TODO 14 was fixed on 2026-08-22 (65 °/s, measured). TODO 40 rebuilt the recovery
+round-robin around that:
+
+    clear costmaps → Spin +90° → BackUp 0.30 m → Spin −90° → Wait 5 s
+
+Spin first, because turning is the recovery this rover can *watch itself do* —
+it swings the camera onto new ground, which frees the rover and simultaneously
+gives nvblox something to observe. An unobserved cell under the robot is one of
+the standard reasons NavFn returns no path at all, so the turn often fixes the
+planner as a side effect.
+
+**The trap, if you ever re-tune this:** `behavior_server`'s `max_rotational_vel`
+/ `min_rotational_vel` / `rotational_acc_lim` are read unnamespaced by Spin, and
+stock nav2 values (0.6 / 0.2 / 1.0) sit *entirely inside* this chassis's
+0.8 rad/s scrub breakaway. Spin would command a rotation, the wheels would sit,
+and the behaviour would time out — reproducing TODO 14's symptom exactly and
+"confirming" a fault that no longer exists. See `nav2.yaml`.
 
 **This becomes interesting in task 08.** Autonomous exploration needs *some*
 answer to being stuck. The answer will not be a blind recovery; it will be
