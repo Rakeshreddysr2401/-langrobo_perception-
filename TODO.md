@@ -2328,3 +2328,87 @@ Nothing here has been driven. Required, in order:
 Related: **§34** (the observations this explains), **§14** (the pivot fix whose
 consequences were only half applied), **§13/§22** (why commanded ≠ actual wz),
 **§37** (rotation-induced x,y drift — more spinning will exercise it).
+
+---
+
+## 🟡 41. A live Spin test found one side's wheels may not be turning at all (2026-09-14)
+
+Ran the test §40 item 2 and §37 both called for and neither had: commanded a
+**pure rotation through Nav2 itself** (`nav2_msgs/action/Spin`, not raw
+`/cmd_vel`) and logged `/odom` x, y **and** yaw throughout, not just yaw. New
+script: `logs/spin_via_nav2.py`.
+
+### Two Spin runs, at two different angular caps — neither pivoted cleanly
+
+| run | `max_rotational_vel` | commanded | result | drift |
+|---|---|---|---|---|
+| 1 | 1.5 rad/s (as shipped in §40) | 180° | TIMEOUT at 15s, only **59°** covered (FUSED) — operator watching the floor read closer to **~85°, plus visible forward movement** | 16.2 cm max |
+| 2 | 3.0 rad/s (raised for this test) | 180° | TIMEOUT at 15s, only **42.7°** covered | 11.0 cm max |
+
+Run 2 covering *less* ground than run 1 despite a higher speed cap is the
+important result — it rules out "just needs more angular authority" as a
+sufficient fix on its own, and doesn't match the nav2.yaml velocity_smoother
+comment's own claim (a wz sweep from 2026-08-23 predicted 1.5 commanded ≈
+24 deg/s, a quarter turn in ~4s — nowhere close to what a sustained 15s Spin
+actually produced). That comment's number came from a yaw-**rate** sweep,
+exactly the measurement §40 item 2 already warned cannot tell a pivot from a
+curve; this result says it may also not predict a *sustained* turn's behavior
+even for that.
+
+**The config changes from run 2 were reverted** (`git checkout` on
+`phase3/config/nav2.yaml`) — chasing the angular-cap number further stopped
+being the right move once the next finding came in.
+
+### The operator watched run 2 and saw only one side's wheels moving
+
+Direct observation, not inferred: during the pivot, one side's wheels turned
+and the other side's did not move at all. This reframes both rows in the
+table above — a rover missing a working motor/driver channel on one side
+can't pivot at *any* commanded speed, and would produce exactly this kind of
+non-monotonic, run-to-run-inconsistent behavior that looked like noise until
+someone was watching the chassis instead of the numbers.
+
+New script `logs/wheel_log.py` logs `/wheel_state`'s left/right rows
+(`x`=velL, `y`=velR) with wall-clock timestamps, to check this against the
+firmware's own report rather than eyes alone. First capture (teleop, manual
+mode) is short but consistent with the observation:
+
+```
+  t(s)   velL     velR
+  ...    +0.000   +0.000     (43.5s of the 45s window: no motion at all —
+                               teleop wasn't yet driving)
+  44.0   +0.000   +0.034
+  44.5   +0.000   +0.047
+  45.0   +0.000   +0.034
+```
+
+LEFT reads exactly `0.000` for the entire 45s window, including the ~1.5s
+where RIGHT shows real values. A second, longer capture (60s) caught no real
+driving at all (session paused mid-window) — two tiny blips at t≈20s
+(+0.021 / +0.009, noise-floor) are the only non-zero LEFT readings across
+both captures combined.
+
+**Not yet confirmed — this is one short sample, not a clean multi-second
+capture.** Left unresolved because the session paused here, deliberately.
+
+### What settles it, next session
+
+1. **A clean `wheel_log.py` capture**: hold a pivot for a full 3-5 seconds
+   via teleop while logging, and read whether LEFT stays at zero throughout —
+   not just at the tail of a window.
+2. **Physical inspection of the left-side drive**: motor, motor-driver
+   channel, and connector, since a firmware-level asymmetry would be
+   surprising (`rover_firmware_v2.ino`'s `pidStep` is applied identically to
+   both sides — see §3 of the Pi 5 repo's `INTEGRATION_GAPS.md` for the same
+   firmware's other characteristics).
+3. **If confirmed**: this is a strong candidate root cause for §37 (rotation
+   x,y drift) and for why every wz sweep in this project's history
+   (§13/§14/§22, and the two runs above) has produced inconsistent numbers —
+   a one-side-dead chassis doesn't pivot at *any* speed, so no amount of
+   `nav2.yaml` tuning was ever going to fix what these tests were actually
+   seeing.
+
+Related: **§40 item 2** (the test this entry runs), **§37** (rotation drift —
+likely the same cause), **§33/§24** (this same wheel link's prior
+intermittency, though a fully-silent link is a different symptom than one
+side silent while the other works).
