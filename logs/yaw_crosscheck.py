@@ -4,7 +4,7 @@
 THE POINT: no tape measure. A 360 deg turn is the one manoeuvre whose ground
 truth you know without measuring anything -- you end up facing where you
 started. So a powered spin grades every heading source at once, and they are
-independent enough that agreement means something:
+independent enough  that agreement means something:
 
     gyro        integrated /gyro/base, bias-corrected. Does not care about light.
     cuvslam     /vo/odom yaw. Rotation is visual odometry's WEAKEST case (TODO 5).
