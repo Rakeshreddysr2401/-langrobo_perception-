@@ -1,9 +1,22 @@
 # LangRobo rover live view.
 #
-# Fixed Frame is `odom`, NOT `map`. The map frame only exists when loop closure
-# publishes a correction, and that is currently gated off as implausible
-# (TODO 16). With Fixed Frame set to map you get a blank window and an error
-# that reads like a data fault.
+# Fixed Frame is `map`, and that is a DELIBERATE change from `odom` (2026-09-22).
+#
+# `map` is published by slam_toolbox (`./rover slam`) since the lidar went in.
+# Which frame is fixed decides what the picture means, and only one of the two
+# answers the question "where is the rover in the room":
+#
+#   Fixed Frame = odom   the ROOM slides under a stationary rover every time
+#                        the correction updates. The map is the thing moving.
+#   Fixed Frame = map    the room holds still and the ROVER moves through it,
+#                        jumping slightly whenever the lidar corrects it.
+#
+# The second is what you want to look at, and it is what makes the two track
+# lines legible (see them below). The cost is that `./rover slam` MUST be up:
+# with no map frame this window is blank and the error reads like a data fault.
+# `./rover view` checks for map -> odom and says so rather than letting you
+# hunt. If you need to look at the stack with slam deliberately down, set
+# Fixed Frame back to `odom` in the Displays panel -- nothing else changes.
 #
 # Load it with -d. `rviz2 rover_live.rviz` silently ignores the file and starts
 # with defaults. It must be `rviz2 -d rover_live.rviz`.
@@ -70,10 +83,10 @@ Visualization Manager:
       Color Transformer: FlatColor
       Decay Time: 0
       Enabled: true
-      Name: Lidar
+      Name: Lidar ring (live)
       Position Transformer: XYZ
       Selectable: false
-      Size (Pixels): 3
+      Size (Pixels): 4
       Style: Points
       Topic:
         Depth: 5
@@ -85,15 +98,18 @@ Visualization Manager:
       Use rainbow: false
       Value: true
 
-    # ── the lidar's map of the room (slam_toolbox, map frame) ───────────
-    # Drawn under everything else. Shows up only while ./rover slam is up,
-    # and RViz places it through map -> odom, so Fixed Frame can stay odom.
-    - Alpha: 0.6
+    # ── THE ROOM: the lidar's map (slam_toolbox), and the frame we live in ──
+    # Drawn under everything else, and opaque -- this is the primary map now,
+    # not a translucent overlay on top of nvblox's. 5 cm cells. Black is a wall
+    # the lidar has actually seen, light grey is confirmed-open floor, and mid
+    # grey is unknown: the difference between "there is nothing there" and
+    # "nothing has looked there yet" is most of what you are reading on a map.
+    - Alpha: 1
       Class: rviz_default_plugins/Map
       Color Scheme: map
       Draw Behind: true
       Enabled: true
-      Name: Lidar map
+      Name: Room (lidar)
       Topic:
         Depth: 1
         Durability Policy: Transient Local
@@ -109,7 +125,25 @@ Visualization Manager:
       Use Timestamp: false
       Value: true
 
-    # ── where it has been ───────────────────────────────────────────────
+    # ── where it has been: TWO lines, and the gap between them is the ───
+    # ── whole point ─────────────────────────────────────────────────────
+    #
+    # GREEN  /fusion/path_map   the lidar-corrected track. Each point was
+    #                           transformed through map -> odom AT THE MOMENT
+    #                           IT WAS RECORDED, so old points do not move when
+    #                           a new correction lands.
+    # RED    /fusion/path       the same drive as raw dead reckoning, stamped
+    #                           `odom`, which never gets corrected -- by
+    #                           definition, since that is what `odom` means.
+    #
+    # So the two lines leave the origin together and separate exactly where the
+    # estimate was wrong, by exactly how much. That gap IS the drift, in metres,
+    # measurable on screen with the Measure tool. It is the thing to watch on a
+    # pivot: if turning shifts x,y, this is where you see it happen.
+    #
+    # Green sits above red (Z offset) so that where they agree you still see
+    # green rather than a flickering mix of the two.
+
     - Alpha: 1
       Buffer Length: 1
       Class: rviz_default_plugins/Path
@@ -119,8 +153,37 @@ Visualization Manager:
       Head Length: 0
       Length: 0.3
       Line Style: Billboards
-      Line Width: 0.035
-      Name: Track
+      Line Width: 0.04
+      Name: Track - lidar corrected
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0.02
+      Pose Color: 255; 85; 255
+      Pose Style: None
+      Radius: 0.03
+      Shaft Diameter: 0.02
+      Shaft Length: 0.05
+      Topic:
+        Depth: 5
+        Durability Policy: Transient Local
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /fusion/path_map
+      Value: true
+
+    - Alpha: 0.85
+      Buffer Length: 1
+      Class: rviz_default_plugins/Path
+      Color: 255; 70; 70
+      Enabled: true
+      Head Diameter: 0
+      Head Length: 0
+      Length: 0.3
+      Line Style: Billboards
+      Line Width: 0.028
+      Name: Track - raw odometry
       Offset:
         X: 0
         Y: 0
@@ -139,14 +202,19 @@ Visualization Manager:
         Value: /fusion/path
       Value: true
 
-    # ── the room as it is discovered ────────────────────────────────────
+    # ── nvblox's own grid. OFF by default since the lidar arrived ───────
+    # It is not redundant -- it is built from depth, so it sees what the lidar
+    # plane cannot: things below 21 cm and above it. But two occupancy grids
+    # stacked in the same place is unreadable, and the lidar's is the one the
+    # pose is corrected against. Turn this on when the question is specifically
+    # "is there an obstacle the lidar cannot see".
     - Alpha: 0.85
       Binary representation: false
       Class: rviz_default_plugins/Map
       Color Scheme: costmap
       Draw Behind: true
-      Enabled: true
-      Name: Map
+      Enabled: false
+      Name: Room (nvblox depth)
       Topic:
         Depth: 1
         Durability Policy: Volatile
@@ -160,7 +228,7 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /nvblox_node/static_occupancy_grid_updates
       Use Timestamp: false
-      Value: true
+      Value: false
 
     # ── what nav2 plans on. OFF by default: it hides the map underneath. ─
     - Alpha: 0.55
@@ -222,7 +290,7 @@ Visualization Manager:
   Enabled: true
   Global Options:
     Background Color: 26; 26; 32
-    Fixed Frame: odom
+    Fixed Frame: map
     Frame Rate: 20
   Name: root
   Tools:
@@ -255,7 +323,12 @@ Visualization Manager:
       Name: Top down
       Near Clip Distance: 0.01
       Scale: 90
-      Target Frame: base_link
+      # <Fixed Frame>, not base_link. With base_link the camera rides the rover,
+      # so the rover is pinned to the centre of the screen and the map slides
+      # past it -- you can never see where it is IN the room, which is the one
+      # thing this view is for. The saved 'Orbit' view keeps base_link, so
+      # switching views gives you the follow-cam when you want it.
+      Target Frame: <Fixed Frame>
       Value: TopDownOrtho (rviz_default_plugins)
       X: 0
       Y: 0

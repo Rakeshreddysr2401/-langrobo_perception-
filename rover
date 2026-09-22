@@ -15,7 +15,7 @@
 #   ./rover nav        nav2 — click a goal, it plans and drives there (Phase 3)
 #   ./rover vlm        VLM pixel -> Nav2 goal bridge, for the Pi 5 brain (Phase 4)
 #   ./rover rviz       view it on the Jetson's own screen (costs GPU)
-#   ./rover view       RViz on the laptop — finds it on DHCP, checks it renders
+#   ./rover view       RViz on the laptop (--restart to re-read the config) — finds it on DHCP, checks it renders
 #   ./rover up         everything above, in order, + ESP32 + Pi 5 + Studio + view.
 #                      Add --voice to also bring up Pi 5 STT/TTS and the speaker.
 #                      Tears down and restarts the container — do not run this
@@ -58,7 +58,16 @@ LIDAR_PORT=${LIDAR_PORT:-/dev/ttyUSB0}
 # front of the nose and "front" must be the one that drops).
 LIDAR_X=${LIDAR_X:-0.135}
 LIDAR_Z=${LIDAR_Z:-0.21}
-LIDAR_YAW=${LIDAR_YAW:-0.0}
+# -pi/2, from the owner's RViz observation 2026-09-22: an object physically in
+# FRONT of the rover was drawing on its LEFT, i.e. the scan was rotated +90 deg
+# from the body, so the mount is cancelled by turning it -90 deg back.
+#
+# PROVISIONAL, to the nearest quadrant -- it is the reading a person can make
+# by eye, and it is almost certainly right to within a few degrees, but "a few
+# degrees" is precisely what slam_toolbox turns into a rotating correction.
+# Measure it properly with `./rover lidar --yaw` (box 50 cm off the nose) and
+# replace this with the number that prints.
+LIDAR_YAW=${LIDAR_YAW:--1.5708}
 CAM_NS=/camera/camera0
 
 # The cuvslam wheel ships its own libcuvslam.so and CUDA-12 userspace libs, and
@@ -218,7 +227,12 @@ pose)
 
   echo "[pose] visual odometry  (stereo IR -> /vo/odom, TF odom -> base_link)"
   kill_match "[v]o_node.py"
-  dexec "export LD_LIBRARY_PATH=$CU12:\$LD_LIBRARY_PATH; exec python3 $SRC/nodes/vo_node.py --ros-args -p publish_tf:=false -p slam:=\${SLAM:-true} > /tmp/vo.log 2>&1"
+  # ${SLAM:-true} is expanded HERE, on the host, not escaped into the container.
+  # It used to be \${SLAM:-true}, which `docker exec bash -lc` expanded inside
+  # the container where SLAM is never set -- so it always resolved to true and
+  # `SLAM=false ./rover pose` did nothing at all, silently. That knob is what
+  # hands map -> odom to slam_toolbox, so it has to actually work.
+  dexec "export LD_LIBRARY_PATH=$CU12:\$LD_LIBRARY_PATH; exec python3 $SRC/nodes/vo_node.py --ros-args -p publish_tf:=false -p slam:=${SLAM:-true} > /tmp/vo.log 2>&1"
 
   echo "[pose] gyro  (D555 IMU, re-framed into base_link -> /gyro/base)"
   kill_match "[g]yro_node.py"
@@ -366,6 +380,36 @@ slam)
   echo "  checking the fused pose and the lidar are up before correcting them..."
   assert_rate /odom 15 "fused odom" || die "no fused pose — run ./rover fused"
   assert_rate /scan  8 "laser scan" || die "no /scan — run ./rover lidar"
+
+  # ONLY ONE THING MAY OWN map -> odom. cuVSLAM publishes it whenever vo_node
+  # runs with slam:=true, which is ./rover pose's DEFAULT (SLAM:-true) -- so on
+  # a normal bring-up the frame already has an owner before slam_toolbox starts.
+  #
+  # Two publishers of one transform is the failure fusion_node.py's docstring
+  # already describes for odom -> base_link: TF goes non-deterministic and the
+  # rover jitters between two poses with nothing in any log. Here it would be
+  # worse than confusing -- the two corrections disagree by construction, one
+  # from visual loop closure and one from scan matching, so the pose would flip
+  # between them at the TF publish rate.
+  #
+  # slam_toolbox is the one we want: it corrects against walls, every scan,
+  # rather than only when cuVSLAM recognises a place (which TODO 16 says it has
+  # never actually done here). So cuVSLAM's must be turned off, not this one.
+  if docker exec "$NAME" bash -lc 'pgrep -af "[v]o_node.py" | grep -q "slam:=true"' 2>/dev/null; then
+    echo
+    echo "  ✗ cuVSLAM is already publishing map -> odom (vo_node has slam:=true)."
+    echo "    Two owners of one transform makes TF non-deterministic — the pose"
+    echo "    would flip between visual loop closure and scan matching."
+    echo
+    echo "    slam_toolbox should own it: it corrects against walls on every"
+    echo "    scan, where cuVSLAM only corrects when it recognises a place."
+    echo
+    echo "    Hand it over, in this order:"
+    echo "        SLAM=false ./rover pose     # cuVSLAM keeps tracking, stops correcting"
+    echo "        ./rover fused"
+    echo "        ./rover slam"
+    exit 1
+  fi
   kill_match '[a]sync_slam_toolbox_node'
   echo "[slam] slam_toolbox (online async, mapping) -> map -> odom TF, /map"
   dexec "exec ros2 launch slam_toolbox online_async_launch.py \
@@ -658,6 +702,16 @@ view)
   # find it rather than hardcode it. It is the host that answers ssh AND has the
   # view script — the Jetson and the Pi 5 both answer ssh too.
   echo "[view] RViz on the laptop"
+  # The config's Fixed Frame is `map`, published by slam_toolbox. With slam
+  # down there is no map frame and RViz renders an EMPTY WINDOW with an error
+  # that reads exactly like a dead publisher -- the same trap the old config
+  # avoided by staying in `odom`. Say it here, before the hunt starts.
+  if ! docker exec "$NAME" bash -lc "$ENVSET timeout 6 ros2 run tf2_ros tf2_echo map odom 2>&1 | grep -q Translation" 2>/dev/null; then
+    echo "  ! no map -> odom transform: ./rover slam is not up."
+    echo "    RViz's Fixed Frame is 'map', so the window will be EMPTY until it is."
+    echo "    Either run ./rover slam, or set Fixed Frame to 'odom' in the"
+    echo "    Displays panel — everything except the room still draws there."
+  fi
   ip="${LAPTOP_IP:-}"
   if [ -z "$ip" ]; then
     printf "  looking for the laptop"
@@ -733,9 +787,21 @@ view)
   [ -n "$auth" ] || auth='$HOME/.Xauthority'
   echo "  display ${disp:-:0}"
 
+  # RViz reads its config ONCE, at startup. "already running" therefore means
+  # it is showing whatever the config said when it started, which after any
+  # edit to rover_live.rviz is the old picture -- and the sync above prints
+  # "config synced" either way, so it looks like it took. `./rover view
+  # --restart` is how you actually apply a config change.
+  if [ "${2:-}" = "--restart" ]; then
+    echo "  --restart: stopping rviz2 so the synced config is re-read"
+    timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$ip" 'pkill -x rviz2' 2>/dev/null || true
+    sleep 2
+  fi
+
   # pgrep -x, never -f: -f matches our own ssh command line and always "succeeds".
   if timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$ip" 'pgrep -x rviz2 >/dev/null' 2>/dev/null; then
     echo "  already running — look at the laptop screen"
+    echo "  (config changed? it is only read at startup: ./rover view --restart)"
   else
     timeout 25 ssh -o BatchMode=yes "$LAPTOP_USER@$ip" \
       "DISPLAY=${disp:-:0} XAUTHORITY=$auth XDG_RUNTIME_DIR=/run/user/\$(id -u) \
@@ -751,7 +817,7 @@ view)
 
   # Running is not the same as receiving. A blank RViz still shows as running.
   echo "  subscriptions (0 means it is connected to nothing):"
-  for t in /rover/model /scan /map /fusion/path /nvblox_node/static_occupancy_grid; do
+  for t in /rover/model /scan /map /fusion/path /fusion/path_map; do
     c=$(timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$ip" \
         "source /opt/ros/jazzy/setup.bash; export ROS_DOMAIN_ID=0; unset ROS_DISCOVERY_SERVER; \
          timeout 6 ros2 topic info $t 2>/dev/null | grep -oP 'Subscription count: \K[0-9]+'" 2>/dev/null)

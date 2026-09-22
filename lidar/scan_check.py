@@ -5,8 +5,15 @@
 pointing the right way. This prints the range straight ahead, left, behind and
 right of base_link, so the box test (`./rover lidar`) has a number to look at.
 
-The four values are taken in the `laser` frame with LIDAR_YAW already applied
-by the static TF, so once the yaw is right, "front" here IS the nose.
+The four directions are the ROBOT's, resolved through the live base_link ->
+laser transform, so "front" here IS the nose whatever LIDAR_YAW happens to be.
+
+That transform used to be ignored: the beams were indexed straight out of the
+raw scan array, which makes the four labels the LIDAR's own front/left/back/
+right, not the robot's. With a 90 deg mount the two differ by a quarter turn,
+so the box test ("front must be the one that drops") confirmed the wrong thing
+and changing LIDAR_YAW did not move the numbers at all -- while RViz, which
+does apply the transform, disagreed with them. Fixed 2026-09-22.
 
 It also asserts that `base_link -> laser` exists at all. A scan nothing can
 transform is worse than no scan: the rate gate stays green and the failure is
@@ -59,8 +66,20 @@ def main():
     print(f"      {len(m.ranges)} beams, {math.degrees(m.angle_increment):.2f} deg apart, "
           f"{100 * len(valid) / len(m.ranges):.0f}% valid, "
           f"nearest {min(valid):.2f} m, farthest {max(valid):.2f} m")
+    # The yaw of base_link -> laser. A direction `deg` in the ROBOT's frame is
+    # found at bearing (deg - yaw) in the scan's own, so this is what turns the
+    # labels below from the lidar's directions into the rover's.
+    yaw = 0.0
+    if tf_ok:
+        t = buf.lookup_transform("base_link", m.header.frame_id, rclpy.time.Time())
+        q = t.transform.rotation
+        yaw = math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))
+        print(f"      base_link -> {m.header.frame_id}: yaw {math.degrees(yaw):+.1f} deg "
+              f"(LIDAR_YAW) — the four directions below are the ROVER's")
+
     for name, deg in zip(NAMES, (0, 90, 180, -90)):
-        i = int(round((math.radians(deg) - m.angle_min) / m.angle_increment)) % len(m.ranges)
+        beta = math.radians(deg) - yaw
+        i = int(round((beta - m.angle_min) / m.angle_increment)) % len(m.ranges)
         # median of the 7 beams around the direction, so one dropout cannot fool us
         win = sorted(m.ranges[(i + d) % len(m.ranges)] for d in range(-3, 4)
                      if math.isfinite(m.ranges[(i + d) % len(m.ranges)]) and m.ranges[(i + d) % len(m.ranges)] > 0)
