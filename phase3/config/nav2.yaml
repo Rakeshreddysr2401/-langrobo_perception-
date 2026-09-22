@@ -307,13 +307,17 @@ global_costmap:
       # a 12 m grid; worth it for something you have to be able to look at.
       always_send_full_costmap: true
 
-      # MEASURED, not guessed. From the rover centre:
-      #   front  +0.180  camera front face (17.0 cm + ~1 cm deep)
-      #   rear   -0.170  rear wheel centre + wheel radius (12.5 + 4.25)
-      #   side   +/-0.190  wheel centre (17.0) + ~2 cm tyre half-width
-      # => 35 cm long x 38 cm wide. The tyre half-width is the one assumption;
-      # verify with a tape before trusting it through a tight gap.
-      footprint: "[[0.180, 0.190], [0.180, -0.190], [-0.170, -0.190], [-0.170, 0.190]]"
+      # The OUTER box, tyres included, as the owner described the rover on
+      # 2026-09-22: body 36 x 28 cm, tyres 5 cm past each end and 7 cm past
+      # each side => 46 cm long x 42 cm wide, centred on base_link.
+      #   front/rear  +/-0.230
+      #   side        +/-0.210
+      # The previous box (35 x 38, "rear wheel centre + radius", "wheel centre
+      # + 2 cm") was 11 cm shorter and 4 cm narrower — i.e. the tyres were
+      # partly OUTSIDE the footprint nav2 was keeping clear. Not tape-measured
+      # yet: if a doorway that used to pass starts failing, measure tyre-to-tyre
+      # and nose-to-tail and trim these, not the padding.
+      footprint: "[[0.230, 0.210], [0.230, -0.210], [-0.230, -0.210], [-0.230, 0.210]]"
       # 0.03, down from 0.07 on 2026-09-11 (TODO 40). The old comment ended
       # "if it starts refusing doorways, this is why", and it did.
       #
@@ -431,7 +435,7 @@ local_costmap:
       # nothing at all despite the costmap running perfectly. Costs bandwidth on
       # a 12 m grid; worth it for something you have to be able to look at.
       always_send_full_costmap: true
-      footprint: "[[0.180, 0.190], [0.180, -0.190], [-0.170, -0.190], [-0.170, 0.190]]"
+      footprint: "[[0.230, 0.210], [0.230, -0.210], [-0.230, -0.210], [-0.230, 0.210]]"
       # 0.03, down from 0.07 on 2026-09-11 (TODO 40). The old comment ended
       # "if it starts refusing doorways, this is why", and it did.
       #
