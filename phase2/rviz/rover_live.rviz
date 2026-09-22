@@ -60,6 +60,55 @@ Visualization Manager:
         Value: /rover/model
       Value: true
 
+    # ── the lidar ring: what the C1 sees, in the laser frame ────────────
+    # Points, not squares — 720 of them at 10 Hz. Best-effort QoS to match
+    # the driver; Reliable would show nothing.
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Class: rviz_default_plugins/LaserScan
+      Color: 255; 85; 0
+      Color Transformer: FlatColor
+      Decay Time: 0
+      Enabled: true
+      Name: Lidar
+      Position Transformer: XYZ
+      Selectable: false
+      Size (Pixels): 3
+      Style: Points
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /scan
+      Use Fixed Frame: true
+      Use rainbow: false
+      Value: true
+
+    # ── the lidar's map of the room (slam_toolbox, map frame) ───────────
+    # Drawn under everything else. Shows up only while ./rover slam is up,
+    # and RViz places it through map -> odom, so Fixed Frame can stay odom.
+    - Alpha: 0.6
+      Class: rviz_default_plugins/Map
+      Color Scheme: map
+      Draw Behind: true
+      Enabled: true
+      Name: Lidar map
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /map
+      Update Topic:
+        Depth: 1
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /map_updates
+      Use Timestamp: false
+      Value: true
+
     # ── where it has been ───────────────────────────────────────────────
     - Alpha: 1
       Buffer Length: 1

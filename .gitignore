@@ -25,3 +25,7 @@ logs/smoke.txt
 #   python3 -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
 # Binary, not source, and not ours -- ./rover detect names the recovery.
 models/*.pt
+
+# The lidar driver workspace. src/ is a pinned upstream clone and build/install/
+# log are its compiled output; lidar/build.sh recreates all of it in ~30 s.
+lidar/ws/

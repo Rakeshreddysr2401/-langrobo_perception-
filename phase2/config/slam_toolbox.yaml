@@ -1,0 +1,82 @@
+# slam_toolbox, online async mapping — the lidar's job in the pose stack.
+#
+# WHAT IT ADDS. fusion_node (gyro heading + wheel distance + cuVSLAM direction)
+# is dead reckoning: every input estimates MOTION, none of them can look at the
+# room and correct the accumulated error. This node can. It matches each scan
+# against the walls it has already seen and publishes the difference as the
+# map -> odom transform. odom -> base_link stays fusion_node's; nothing below
+# it changes. The corrected pose is map -> base_link, and the by-product is a
+# 2D occupancy grid on /map that can be saved and localised against later.
+#
+# Tuned for a 10 Hz / 720-beam C1 on a small indoor rover. Numbers that are
+# not the package defaults say why.
+slam_toolbox:
+  ros__parameters:
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: None
+
+    odom_frame: odom
+    map_frame: map
+    base_frame: base_link
+    scan_topic: /scan
+    use_map_saver: true
+    mode: mapping
+    # Not "map_start_pose": the map origin IS wherever the rover was when this
+    # started, same convention as odom, so the two frames begin coincident.
+
+    debug_logging: false
+    throttle_scans: 1
+    # 50 Hz TF, not the 0.05 s default: nav2 extrapolates map->base_link from the
+    # last two transforms and a slow map->odom made it stutter on the sim body.
+    transform_publish_period: 0.02
+    map_update_interval: 2.0
+    resolution: 0.05             # matches nvblox and the costmaps
+    min_laser_range: 0.15        # the C1's own floor is 0.05; below 15 cm is the rover
+    max_laser_range: 12.0        # C1 reaches 16 m outdoors; indoors 12 keeps far junk out
+    minimum_time_interval: 0.2
+    transform_timeout: 0.2
+    tf_buffer_duration: 30.0
+    stack_size_to_use: 40000000
+    enable_interactive_mode: false
+
+    use_scan_matching: true
+    use_scan_barycenter: true
+    # Add a node every 10 cm or ~6 deg. The rover pivots in place a lot; the
+    # default 0.5 rad heading gate would skip most of a turn, which is exactly
+    # where the correction is wanted.
+    minimum_travel_distance: 0.10
+    minimum_travel_heading: 0.10
+    scan_buffer_size: 10
+    scan_buffer_maximum_scan_distance: 10.0
+    link_match_minimum_response_fine: 0.1
+    link_scan_maximum_distance: 1.5
+    loop_search_maximum_distance: 3.0
+    do_loop_closing: true
+    loop_match_minimum_chain_size: 10
+    loop_match_maximum_variance_coarse: 3.0
+    loop_match_minimum_response_coarse: 0.35
+    loop_match_minimum_response_fine: 0.45
+
+    # Correlation (scan-to-map matcher)
+    correlation_search_space_dimension: 0.5
+    correlation_search_space_resolution: 0.01
+    correlation_search_space_smear_deviation: 0.1
+    # Loop closure
+    loop_search_space_dimension: 8.0
+    loop_search_space_resolution: 0.05
+    loop_search_space_smear_deviation: 0.03
+    # How much to trust odometry vs the match. Rotation is where our odometry
+    # is weakest (cuVSLAM +11 % on a 90, gyro bias), so the angle penalty is
+    # left at the default 1.0 -- lower it only if turns start fighting the map.
+    distance_variance_penalty: 0.5
+    angle_variance_penalty: 1.0
+    fine_search_angle_offset: 0.00349
+    coarse_search_angle_offset: 0.349
+    coarse_angle_resolution: 0.0349
+    minimum_angle_penalty: 0.9
+    minimum_distance_penalty: 0.5
+    use_response_expansion: true

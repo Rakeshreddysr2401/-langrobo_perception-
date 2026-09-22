@@ -3,11 +3,14 @@
 #
 #   ./rover camera     the D555, and nothing else
 #   ./rover pose       + visual odometry and the gyro
+#   ./rover lidar      RPLidar C1 -> /scan, and its base_link -> laser TF
+#                      --yaw  measure LIDAR_YAW off a target at the nose
 #   ./rover wheels     check the ESP32 link (diagnose only; cannot fix from here)
 #   ./rover compare    the side-by-side readout — the Phase 1 instrument
 #   ./rover values     every sensor's current reading, in one place
 #   ./rover status     what is alive right now
 #   ./rover fused      the fused pose -> /odom + TF, what nav2 consumes
+#   ./rover slam       + the lidar correction: slam_toolbox -> map -> odom, /map
 #   ./rover map        nvblox — build the room as it drives (Phase 2)
 #   ./rover nav        nav2 — click a goal, it plans and drives there (Phase 3)
 #   ./rover vlm        VLM pixel -> Nav2 goal bridge, for the Pi 5 brain (Phase 4)
@@ -19,7 +22,7 @@
 #                      against a stack that is already up and working.
 #   ./rover voice      Pi 5 STT/TTS + the speaker, on its own (safe any time —
 #                      it touches nothing on the Jetson and skips if already up)
-#   ./rover logs <n>   tail a layer's log (camera|vo|gyro|fused)
+#   ./rover logs <n>   tail a layer's log (camera|vo|gyro|fused|lidar|slam)
 #   ./rover stop       tear the container down
 #
 # WHY LAYERS. Four machines and a camera that can be knocked offline by being
@@ -39,6 +42,23 @@ HOSTSRC="$REPO/phase1"
 SRC2=/opt/rover2
 SRC3=/opt/rover3
 SRC4=/opt/rover4
+# The RPLidar C1 driver (sllidar_ros2) is COMPILED, not a script, so it lives in
+# its own colcon workspace under lidar/ws, built by lidar/build.sh INSIDE this
+# same image (never installed into it) and mounted at the path it was built at.
+LIDAR=/opt/lidar
+# The plain node, not /dev/serial/by-id/...: the Slamtec SDK refuses the symlink
+# (error 80008004) but opens the node it points at. It is the only CP210x here.
+LIDAR_PORT=${LIDAR_PORT:-/dev/ttyUSB0}
+# base_link -> laser. x: the C1 sits directly above the camera, 3.5 cm behind
+# its lens (camera is at 0.17) -- the same answer as "5 cm back from the nose of
+# a 36 cm body". z: ground to the middle of the rotating window, measured
+# 20-22 cm; refine with a ruler if the fusion ever cares. yaw: which way the
+# C1's zero beam points is NOT marked on the case; it is set from the box test
+# (`./rover lidar` prints the front/left/back/right readings -- hold a box in
+# front of the nose and "front" must be the one that drops).
+LIDAR_X=${LIDAR_X:-0.135}
+LIDAR_Z=${LIDAR_Z:-0.21}
+LIDAR_YAW=${LIDAR_YAW:-0.0}
 CAM_NS=/camera/camera0
 
 # The cuvslam wheel ships its own libcuvslam.so and CUDA-12 userspace libs, and
@@ -83,7 +103,7 @@ pose_honest(){ rexec "python3 $SRC/nodes/health.py"; }
 
 start_container(){
   docker rm -f "$NAME" >/dev/null 2>&1 || true
-  mkdir -p "$REPO/logs"
+  mkdir -p "$REPO/logs" "$REPO/maps"
   # phase1/ is mounted READ-ONLY: edit a node on the host, restart the layer,
   # no rebuild. The image has no build recipe, so it must never be modified.
   docker run -d --name "$NAME" --entrypoint /bin/bash \
@@ -95,6 +115,8 @@ start_container(){
     -v "$REPO/phase3":$SRC3:ro \
     -v "$REPO/phase4":$SRC4:ro \
     -v "$REPO/models":/models:ro \
+    -v "$REPO/lidar":$LIDAR:ro \
+    -v "$REPO/maps":/maps \
     -v "$REPO/logs":/logs \
     "$IMAGE" -c 'sleep infinity' >/dev/null
   sleep 2
@@ -208,6 +230,44 @@ pose)
   echo "      ./rover compare --spin 360        rotate 360 deg by hand"
   ;;
 
+# ── lidar ───────────────────────────────────────────────────────────────────
+# Independent of the camera: it only needs the container and the USB port. It
+# is a layer of its own so that "no /scan" has one owner and one log.
+lidar)
+  need_container
+  # --yaw measures LIDAR_YAW instead of starting anything: it needs the layer
+  # already up, and a target ~50 cm in front of the nose. See lidar/yaw_find.py.
+  if [ "${2:-}" = "--yaw" ]; then
+    assert_rate /scan 8 "laser scan" || die "no /scan — run ./rover lidar first"
+    echo "  target ~50 cm DIRECTLY in front of the nose, nothing else within 1.5 m:"
+    rexec "python3 $LIDAR/yaw_find.py"; exit
+  fi
+  [ -x "$REPO/lidar/ws/build/sllidar_ros2/sllidar_node" ] \
+    || die "driver not built — run: lidar/build.sh   (one-off, ~30 s)"
+  [ -e "$LIDAR_PORT" ] || die "no $LIDAR_PORT — is the C1's USB cable in? (lsusb: Silicon Labs CP210x)"
+  kill_match '[s]llidar_node'
+  kill_match 'child-frame-id laser'
+  echo "[lidar] static TF base_link -> laser (x $LIDAR_X z $LIDAR_Z yaw $LIDAR_YAW)"
+  dexec "exec ros2 run tf2_ros static_transform_publisher --x $LIDAR_X --y 0.0 --z $LIDAR_Z --yaw $LIDAR_YAW \
+            --frame-id base_link --child-frame-id laser > /tmp/lidartf.log 2>&1"
+  echo "[lidar] RPLidar C1 on $LIDAR_PORT -> /scan  (10 Hz, 720 beams, 0.5 deg)"
+  dexec "source $LIDAR/ws/install/setup.bash; exec ros2 run sllidar_ros2 sllidar_node --ros-args \
+            -p serial_port:=$LIDAR_PORT -p serial_baudrate:=460800 -p frame_id:=laser \
+            -p inverted:=false -p angle_compensate:=true -p scan_mode:=Standard > /tmp/lidar.log 2>&1"
+  sleep 5
+  echo
+  echo "  GATE lidar:"
+  assert_rate /scan 8 "laser scan" || {
+    rexec "grep -E 'ERROR|health' /tmp/lidar.log | tail -3"; die "no /scan — see ./rover logs lidar"; }
+  # Four beams, in the ROBOT's directions, not the lidar's. Trust these only
+  # after the box test that sets LIDAR_YAW (see the comment at the top).
+  rexec "python3 $LIDAR/scan_check.py" || true
+  echo
+  echo "  Orientation check, to the nearest quadrant: put a box ~50 cm in front"
+  echo "  of the NOSE and re-run — 'front' must be the reading that drops."
+  echo "  To MEASURE the yaw instead of guessing it:   ./rover lidar --yaw"
+  ;;
+
 # ── wheels ──────────────────────────────────────────────────────────────────
 wheels)
   need_container
@@ -270,6 +330,45 @@ fused)
   echo
   echo "  Health, live:  ./rover compare"
   echo "  Raw status:    ros2 topic echo /fusion/status"
+  ;;
+
+# ── slam ────────────────────────────────────────────────────────────────────
+# The lidar's job in the pose stack. fusion_node is dead reckoning and cannot
+# correct itself; slam_toolbox matches every scan against the walls and
+# publishes what dead reckoning got wrong as map -> odom. Nothing under it
+# changes: odom -> base_link is still fusion_node's, nav2 still plans in odom
+# until it is deliberately moved to map (that is a separate, driven change --
+# see phase2/config/SLAM.md). What this layer gives you today is the corrected pose
+# (map -> base_link), a 2D map of the room on /map, and both in RViz.
+slam)
+  need_container
+  case "${2:-}" in
+    --check) rexec "python3 $SRC2/config/slam_check.py"; exit ;;
+    --save)
+      [ -n "${3:-}" ] || die "usage: ./rover slam --save <name>   (written to maps/<name>.posegraph + .yaml/.pgm)"
+      mkdir -p "$REPO/maps"
+      rexec "cd /maps && ros2 service call /slam_toolbox/serialize_map slam_toolbox/srv/SerializePoseGraph \"{filename: '/maps/$3'}\" >/dev/null \
+             && ros2 run nav2_map_server map_saver_cli -f /maps/$3 --ros-args -p map_subscribe_transient_local:=true >/dev/null 2>&1" \
+        && echo "  saved maps/$3.posegraph (+ .data) and maps/$3.pgm/.yaml" || die "save failed — is ./rover slam up?"
+      exit ;;
+  esac
+  echo "  checking the fused pose and the lidar are up before correcting them..."
+  assert_rate /odom 15 "fused odom" || die "no fused pose — run ./rover fused"
+  assert_rate /scan  8 "laser scan" || die "no /scan — run ./rover lidar"
+  kill_match '[a]sync_slam_toolbox_node'
+  echo "[slam] slam_toolbox (online async, mapping) -> map -> odom TF, /map"
+  dexec "exec ros2 launch slam_toolbox online_async_launch.py \
+            slam_params_file:=$SRC2/config/slam_toolbox.yaml use_sim_time:=false autostart:=true > /tmp/slam.log 2>&1"
+  sleep 8
+  echo
+  echo "  GATE slam:"
+  assert_rate /map 0.3 "lidar map" || { rexec "grep -iE 'error|fail' /tmp/slam.log | tail -3"; die "no /map — see ./rover logs slam"; }
+  rexec "python3 $SRC2/config/slam_check.py" || true
+  echo
+  echo "  The correction row is what the lidar changed. Drive a zig-zag and a"
+  echo "  couple of pivots, then re-run:   ./rover slam --check"
+  echo "  In RViz (./rover view) the 'Lidar map' display is this node's room."
+  echo "  Save the room once it is complete:  ./rover slam --save <name>"
   ;;
 
 # ── map ─────────────────────────────────────────────────────────────────────
@@ -366,8 +465,8 @@ vlm)
 # running well — running it against a healthy stack throws the healthy state
 # away for no reason.
 up)
-  echo "═══ full bring-up: camera → pose → fused → map → nav → vlm → wheels → Pi5 → Studio → view ═══"
-  for layer in camera pose fused map nav vlm; do
+  echo "═══ full bring-up: camera → lidar → pose → fused → slam → map → nav → vlm → wheels → Pi5 → Studio → view ═══"
+  for layer in camera lidar pose fused slam map nav vlm; do
     echo
     "$0" "$layer" || die "'$layer' failed — fix it (see above) before continuing. Re-run: ./rover up"
   done
@@ -641,7 +740,7 @@ view)
 
   # Running is not the same as receiving. A blank RViz still shows as running.
   echo "  subscriptions (0 means it is connected to nothing):"
-  for t in /rover/model /fusion/path /nvblox_node/static_occupancy_grid; do
+  for t in /rover/model /scan /map /fusion/path /nvblox_node/static_occupancy_grid; do
     c=$(timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$ip" \
         "source /opt/ros/jazzy/setup.bash; export ROS_DOMAIN_ID=0; unset ROS_DISCOVERY_SERVER; \
          timeout 6 ros2 topic info $t 2>/dev/null | grep -oP 'Subscription count: \K[0-9]+'" 2>/dev/null)
@@ -686,8 +785,10 @@ status)
       "camera:$CAM_NS/depth/image_rect_raw:10" \
       "pose:/vo/odom:10" \
       "pose:/gyro/base:50" \
+      "lidar:/scan:8" \
       "wheels:/wheel_state:15" \
       "fused:/odom:15" \
+      "slam:/map:0.3" \
       "map:/nvblox_node/static_occupancy_grid:1" \
       "nav:/global_costmap/costmap:0.5" \
       "nav:/local_costmap/costmap:1" \
