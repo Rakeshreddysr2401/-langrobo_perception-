@@ -2384,3 +2384,90 @@ to the LEFT: the printed `LIDAR_YAW` must not move. Then set the default in
 `kill_match` on the binary) on every bring-up, silently, with all gates green.
 Fixed and verified; `scan_check.py` now asserts the transform resolves and the
 gate fails if it does not. See commit `967d61f`.
+
+---
+
+## 🔴 43. Turning is 11% of commanded, asymmetric, and that asymmetry IS the x,y shift (2026-09-22, measured)
+
+§37 recorded a report that turning shifts x,y, and said it was not yet a
+reproducible bug. It is now, with numbers, and the cause is not what §37
+guessed at.
+
+### What was measured
+
+`./rover pivot` and the probes in `logs/` drove the rover and read
+`/wheel_state` (x = left side m/s, y = right side m/s, z = commanded linear)
+against `/odom`.
+
+**Pivots reach ~11% of the commanded wheel speed.** At `wz = 1.5 rad/s` each
+side should run ±0.289 m/s. Measured mean across six pivots: **0.032 m/s**.
+Achieved yaw rate ~0.11 rad/s against 1.5 commanded — **7%**.
+
+A sweep of commanded `wz` from 0.4 to 2.5, both directions, never exceeded
+**5%** of the commanded rate. It is not a scaling constant that could be
+trimmed: peak wheel speed saturates near 0.11 m/s no matter what is asked.
+
+**Straight driving is fine.** The same wheels reach 0.094 m/s for a commanded
+0.08 m/s — over 100%. So neither motor is weak and neither side is dead. The
+deficit appears only when the wheels have to SCRUB, which is what a four fixed
+wheel skid-steer must do to rotate.
+
+### The asymmetry, which is the actual answer to §37
+
+The two sides do counter-rotate with the correct signs, every time. They do not
+counter-rotate at the same SPEED:
+
+| dir | \|L\| | \|R\| | ICR offset | drag per 90° |
+|---|---|---|---|---|
+| left | 0.040 | 0.024 | −4.8 cm | 6.8 cm |
+| right | 0.024 | 0.054 | +7.4 cm | 10.5 cm |
+| left | 0.036 | 0.025 | −3.5 cm | 4.9 cm |
+| right | 0.035 | 0.045 | +2.4 cm | 3.4 cm |
+| left | 0.032 | 0.016 | −6.4 cm | 9.1 cm |
+| right | 0.003 | 0.045 | +16.8 cm | 23.8 cm |
+
+For a differential drive the instantaneous centre of rotation sits at
+`TRACK_HALF · (vR + vL)/(vR − vL)` from the centre. Equal and opposite speeds
+put it AT the centre and the rover spins in place. These speeds put it a mean
+**6.9 cm** off, so the rover swings about a point outside itself and its centre
+travels an arc — **~9.7 cm of sideways drag per 90° turn.**
+
+That is the reported x,y shift, and it is not drift, noise or a sensor fault.
+It is the rover genuinely not pivoting about its centre.
+
+### A wrong turn taken, recorded so it is not retaken
+
+A first trace sampled `/wheel_state` instantaneously every 0.5 s and showed
+`L = +0.000` throughout a pivot, which read exactly like a dead left side —
+and matched §41's "one wheel side may not be turning". It was an artifact:
+the encoder reports 0 between its own updates, so point samples catch it idle.
+Averaging over the whole command window shows the left side moving correctly
+every time. **Do not conclude a side is dead from point samples of
+`/wheel_state`.** §41 may well be the same artifact.
+
+### What this invalidates
+
+- **§36's timed turns.** Confirmed from the other side: the rover reaches ~7%
+  of a commanded yaw rate, so any turn computed against the commanded rate
+  overshoots by more than an order of magnitude. Turns must close the loop on
+  measured yaw, never on time.
+- **nav2's rotational limits.** `phase3/config/nav2.yaml` allows 1.5 rad/s.
+  The rover cannot do a tenth of that. Every plan that budgets a turn is
+  budgeting against a fiction.
+
+### Not yet known — needs the floor and the hardware, not the Jetson
+
+Whether this is torque, traction or power is NOT established. The candidates,
+in the order worth checking:
+
+1. **Battery voltage under load.** Scrubbing draws far more current than
+   rolling, and a sagging pack would produce exactly this: straight driving
+   fine, pivots weak. There is no battery telemetry in `/wheel_state` — that
+   is itself a gap.
+2. **Floor surface.** Carpet or rubber multiplies scrub friction against a
+   46 cm wheelbase.
+3. **Firmware's angular mixing.** Whether the ESP32 is even commanding
+   ±0.289 m/s, or clamping. Cannot be read from the Jetson.
+
+Until one of those is settled, do not tune anything in nav2 against these
+numbers — they are the symptom, measured, not the cause.

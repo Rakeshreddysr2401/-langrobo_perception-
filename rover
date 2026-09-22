@@ -6,6 +6,8 @@
 #   ./rover lidar      RPLidar C1 -> /scan, and its base_link -> laser TF
 #                      --yaw    measure LIDAR_YAW off a target at the nose
 #                      --watch  live: hold a box at the nose and read it
+#                      --calibrate  DRIVES 0.20 m and measures the yaw itself
+#   ./rover pivot      SPINS: how far a turn-in-place really slides (TODO 37)
 #   ./rover wheels     check the ESP32 link (diagnose only; cannot fix from here)
 #   ./rover compare    the side-by-side readout — the Phase 1 instrument
 #   ./rover values     every sensor's current reading, in one place
@@ -59,16 +61,22 @@ LIDAR_PORT=${LIDAR_PORT:-/dev/ttyUSB0}
 # front of the nose and "front" must be the one that drops).
 LIDAR_X=${LIDAR_X:-0.135}
 LIDAR_Z=${LIDAR_Z:-0.21}
-# -pi/2, from the owner's RViz observation 2026-09-22: an object physically in
-# FRONT of the rover was drawing on its LEFT, i.e. the scan was rotated +90 deg
-# from the body, so the mount is cancelled by turning it -90 deg back.
+# MEASURED 2026-09-22 by `./rover lidar --calibrate`: +1.5463 rad, +88.60 deg.
 #
-# PROVISIONAL, to the nearest quadrant -- it is the reading a person can make
-# by eye, and it is almost certainly right to within a few degrees, but "a few
-# degrees" is precisely what slam_toolbox turns into a rotating correction.
-# Measure it properly with `./rover lidar --yaw` (box 50 cm off the nose) and
-# replace this with the number that prints.
-LIDAR_YAW=${LIDAR_YAW:--1.5708}
+# Six driven legs (three out-and-back pairs of 0.20 m), five usable, spread
+# 0.76 deg, ICP residuals 0.5-0.7 cm. Out and back bias any drive curvature in
+# opposite directions, so averaging the pair cancels most of it.
+#
+# The mount is genuinely 1.4 deg off a clean quarter turn -- that is larger
+# than the 0.76 deg spread, so it is skew, not noise. Do not "tidy" this to
+# pi/2: 1.4 deg of residual is exactly what slam_toolbox turns into a rotating
+# correction that grows with every heading change.
+#
+# Two earlier values were guesses from descriptions of the RViz picture (0.0,
+# then -1.5708) and BOTH were wrong -- the sign was inverted. The lidar and the
+# wheels agreeing on the distance of the same move is what makes this one
+# trustworthy; nobody's eyes are in the loop.
+LIDAR_YAW=${LIDAR_YAW:-1.5463}
 CAM_NS=/camera/camera0
 
 # The cuvslam wheel ships its own libcuvslam.so and CUDA-12 userspace libs, and
@@ -258,6 +266,15 @@ lidar)
   need_container
   # --yaw measures LIDAR_YAW instead of starting anything: it needs the layer
   # already up, and a target ~50 cm in front of the nose. See lidar/yaw_find.py.
+  # --calibrate DRIVES. It is the only lidar subcommand that does, and it is
+  # the one that answers the yaw without a human in the loop.
+  if [ "${2:-}" = "--calibrate" ]; then
+    assert_rate /scan 8 "laser scan"  || die "no /scan — run ./rover lidar first"
+    assert_rate /odom 15 "fused odom" || die "no /odom — run ./rover fused"
+    assert_rate /wheel_state 15 "wheel link" || die "wheel link down — ./rover wheels"
+    echo "  THIS MOVES THE ROVER: 0.20 m forward, 0.07 m/s. Watch it."
+    rexec "python3 $LIDAR/yaw_calibrate.py"; exit
+  fi
   if [ "${2:-}" = "--yaw" ] || [ "${2:-}" = "--watch" ]; then
     assert_rate /scan 8 "laser scan" || die "no /scan — run ./rover lidar first"
     if [ "${2:-}" = "--watch" ]; then
@@ -297,6 +314,20 @@ lidar)
   echo "  Orientation check, to the nearest quadrant: put a box ~50 cm in front"
   echo "  of the NOSE and re-run — 'front' must be the reading that drops."
   echo "  To MEASURE the yaw instead of guessing it:   ./rover lidar --yaw"
+  ;;
+
+# ── pivot ───────────────────────────────────────────────────────────────────
+# Measures TODO 37 -- how far a "turn in place" actually slides -- against the
+# walls, which is the only instrument in this rig that is not itself under
+# suspicion. Needs LIDAR_YAW measured first (./rover lidar --calibrate).
+pivot)
+  need_container
+  assert_rate /scan 8 "laser scan"  || die "no /scan — run ./rover lidar"
+  assert_rate /odom 15 "fused odom" || die "no /odom — run ./rover fused"
+  assert_rate /wheel_state 15 "wheel link" || die "wheel link down — ./rover wheels"
+  echo "  THIS SPINS THE ROVER IN PLACE. Clear around it, and watch."
+  shift
+  rexec "python3 $LIDAR/pivot_test.py $*"
   ;;
 
 # ── wheels ──────────────────────────────────────────────────────────────────
