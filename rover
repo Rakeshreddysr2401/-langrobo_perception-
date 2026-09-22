@@ -4,7 +4,8 @@
 #   ./rover camera     the D555, and nothing else
 #   ./rover pose       + visual odometry and the gyro
 #   ./rover lidar      RPLidar C1 -> /scan, and its base_link -> laser TF
-#                      --yaw  measure LIDAR_YAW off a target at the nose
+#                      --yaw    measure LIDAR_YAW off a target at the nose
+#                      --watch  live: hold a box at the nose and read it
 #   ./rover wheels     check the ESP32 link (diagnose only; cannot fix from here)
 #   ./rover compare    the side-by-side readout — the Phase 1 instrument
 #   ./rover values     every sensor's current reading, in one place
@@ -257,8 +258,13 @@ lidar)
   need_container
   # --yaw measures LIDAR_YAW instead of starting anything: it needs the layer
   # already up, and a target ~50 cm in front of the nose. See lidar/yaw_find.py.
-  if [ "${2:-}" = "--yaw" ]; then
+  if [ "${2:-}" = "--yaw" ] || [ "${2:-}" = "--watch" ]; then
     assert_rate /scan 8 "laser scan" || die "no /scan — run ./rover lidar first"
+    if [ "${2:-}" = "--watch" ]; then
+      # Live. Hold something at the nose and read 'renders at' -- no describing
+      # the picture to anyone, no sign to get backwards.
+      rexec "python3 $LIDAR/yaw_find.py --watch"; exit
+    fi
     echo "  target ~50 cm DIRECTLY in front of the nose, nothing else within 1.5 m:"
     rexec "python3 $LIDAR/yaw_find.py"; exit
   fi
