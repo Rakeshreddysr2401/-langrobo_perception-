@@ -205,7 +205,13 @@ pose)
   # base_link -> camera0_link must exist BEFORE the pose starts, or the first
   # poses land in a frame tree with a missing link.
   echo "[pose] static TF base_link -> camera0_link"
-  kill_match "[s]tatic_transform_publisher"
+  # Match THIS publisher's child frame, not every static_transform_publisher.
+  # The broad match also killed the lidar's base_link -> laser, and ./rover up
+  # runs lidar BEFORE pose -- so every full bring-up silently destroyed the
+  # laser frame while ./rover lidar's own gate stayed green (/scan is published
+  # by the driver and does not need the TF). RViz drew no ring and slam_toolbox
+  # could never have worked. Same pattern as the lidar layer's own kill_match.
+  kill_match 'child-frame-id camera0_link'
   dexec "exec ros2 run tf2_ros static_transform_publisher --x 0.17 --y 0.0 --z 0.163 \
             --frame-id base_link --child-frame-id camera0_link > /tmp/statictf.log 2>&1"
   sleep 1
@@ -260,8 +266,13 @@ lidar)
   assert_rate /scan 8 "laser scan" || {
     rexec "grep -E 'ERROR|health' /tmp/lidar.log | tail -3"; die "no /scan — see ./rover logs lidar"; }
   # Four beams, in the ROBOT's directions, not the lidar's. Trust these only
-  # after the box test that sets LIDAR_YAW (see the comment at the top).
-  rexec "python3 $LIDAR/scan_check.py" || true
+  # after the yaw has been measured (./rover lidar --yaw).
+  #
+  # NOT `|| true`: scan_check also asserts base_link -> laser exists, and that
+  # is a hard failure. A scan nothing can transform is invisible everywhere
+  # except RViz, so if it does not fail here it does not fail anywhere.
+  rexec "python3 $LIDAR/scan_check.py" \
+    || die "the scan cannot be transformed into base_link — see above"
   echo
   echo "  Orientation check, to the nearest quadrant: put a box ~50 cm in front"
   echo "  of the NOSE and re-run — 'front' must be the reading that drops."
