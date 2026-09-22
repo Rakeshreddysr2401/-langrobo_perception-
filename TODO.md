@@ -2328,3 +2328,59 @@ Nothing here has been driven. Required, in order:
 Related: **§34** (the observations this explains), **§14** (the pivot fix whose
 consequences were only half applied), **§13/§22** (why commanded ≠ actual wz),
 **§37** (rotation-induced x,y drift — more spinning will exercise it).
+
+---
+
+## 🔴 42. The lidar is in, but its yaw is a placeholder — nothing downstream may be trusted yet (2026-09-22)
+
+The RPLidar C1 is a layer now (`./rover lidar`), `slam_toolbox` is configured
+(`./rover slam`), and both RViz displays are wired. All of it is unusable until
+one number is measured.
+
+### The number
+
+`LIDAR_YAW` in `./rover` is still `0.0`, a placeholder. Which way the C1's zero
+beam points is **not marked on the case**, and the quadrant test the layer
+prints ("front must be the one that drops") resolves it only to the nearest
+90°.
+
+90° is not the tolerance that matters here. `slam_toolbox` matches each scan
+against the walls and pushes the residual into `map -> odom`. A scan rotated
+even 10° from the body turns that correction into a rotating error that grows
+with every heading change — i.e. it would make the pivot drift this whole
+effort exists to fix (§37) measurably **worse**, while looking like it is
+working.
+
+### What to do
+
+```
+./rover lidar --yaw     # target ~50 cm directly off the nose, nothing else inside 1.5 m
+```
+
+`lidar/yaw_find.py` averages 10 scans, takes the nearest cluster, and prints
+the yaw that puts it at 0°. It refuses an answer when the scan-to-scan spread
+exceeds 5° — that is what "it is locking onto clutter, not your target" looks
+like, and the bench run on 2026-09-22 produced exactly that (spread 5.8–9.0°,
+no deliberate target present). Confirm the answer by repeating with the target
+to the LEFT: the printed `LIDAR_YAW` must not move. Then set the default in
+`./rover`, not the environment — two processes read that file.
+
+### What is NOT proven, and must not be claimed until it is
+
+- **`./rover slam` has never been run.** The config is written and reviewed;
+  no scan has ever reached `slam_toolbox` on this rig.
+- **No floor test.** The whole point — that the correction shrinks pivot drift
+  — has no measurement behind it. `./rover slam --check` prints the correction;
+  it has never printed a real one.
+- **nav2 still plans in `odom`.** The correction is visible but unused. Moving
+  nav2's global frame and the Pi 5's `LANGROBO_NAV_FRAME` to `map` is the step
+  that makes "return to 0,0,0" actually land, and it touches both repos and the
+  Pi 5 CLAUDE.md's "everything is odom, never map" rule. See
+  `phase2/config/SLAM.md` — do it as a driven change, with a tape measure.
+
+### Already fixed on the way in
+
+`./rover pose` was killing the lidar's `base_link -> laser` TF (broad
+`kill_match` on the binary) on every bring-up, silently, with all gates green.
+Fixed and verified; `scan_check.py` now asserts the transform resolves and the
+gate fails if it does not. See commit `967d61f`.
