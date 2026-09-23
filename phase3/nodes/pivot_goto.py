@@ -170,56 +170,52 @@ def R(t):
     return np.array([[c, -s], [s, c]])
 
 
+# Turning is where the error comes from (~5 cm per 90 deg the pose misses,
+# plus whatever the pivot model is off by); driving straight is good to a few
+# percent. So a plan pays for turning and, much less, for driving: one metre of
+# driving costs the same as TURN_PER_M radians of turning.
+TURN_PER_M = 1.5
+
+
 def plan(cur, tgt):
-    """(th1, d, th2) taking the centre from pose cur to pose tgt, both (x, y, yaw).
+    """(th1, d1, th2, d2) taking the centre from pose cur to pose tgt.
 
-    With ONE pivot P the slide depends only on the total rotation and the leg
-    has a closed form (see the docstring). With a pivot per DIRECTION it does
-    not: rotating th1 about P1, driving d, then th2 about P2 ends the centre at
+    Rotate th1 about its pivot P1, drive d1, rotate th2 about P2, drive d2.
+    The rotations must add to the heading change psi, and the centre ends at
 
-        (I - R(th1)) P1  +  d u(th1)  +  R(th1) (I - R(th2)) P2
+        (I - R(th1)) P1 + d1 u(th1) + R(th1) (I - R(th2)) P2 + d2 u(psi)
 
-    so for each th1 the leg must be w(th1) = T - (I-R(th1))P1 - R(th1)(I-R(th2))P2,
-    and a straight leg can only run along u(th1). Search th1 for the angles
-    where w is parallel to u, take d = u . w, and keep the solution that turns
-    least.
+    For any th1 that is a 2x2 linear system in (d1, d2), so every th1 has an
+    exact plan; search th1 and keep the cheapest. The first version had no d2
+    and therefore exactly one straight leg: a correction of "9 cm too far
+    back, 5 deg over" had ONE exact solution, a 127 deg swing, and taking it
+    slid the rover 49 cm (2026-09-23). With the second leg the same correction
+    is a nudge.
     """
     T = R(-cur[2]) @ (np.array(tgt[:2]) - np.array(cur[:2]))
     psi = wrap(tgt[2] - cur[2])
-
-    def resid(th1):
+    upsi = np.array([math.cos(psi), math.sin(psi)])
+    best = None
+    for th1 in np.radians(np.arange(-180.0, 180.0, 0.5)):
         th2 = wrap(psi - th1)
         w = T - (np.eye(2) - R(th1)) @ pivot_for(th1) \
               - R(th1) @ (np.eye(2) - R(th2)) @ pivot_for(th2)
-        u = np.array([math.cos(th1), math.sin(th1)])
-        return u[0] * w[1] - u[1] * w[0], float(u @ w)
-
-    grid = np.linspace(-math.pi, math.pi, 1441)
-    vals = [resid(a)[0] for a in grid]
-    best = None
-    for i in range(len(grid) - 1):
-        f0, f1 = vals[i], vals[i + 1]
-        if f0 == 0.0 or f0 * f1 < 0.0:
-            a, b = grid[i], grid[i + 1]
-            for _ in range(50):                      # bisect to the root
-                m = 0.5 * (a + b)
-                if resid(a)[0] * resid(m)[0] <= 0.0:
-                    b = m
-                else:
-                    a = m
-            th1 = wrap(0.5 * (a + b))
-            # the pivot switches at th = 0, so the residual JUMPS there and a
-            # bisection happily "finds" a root at the jump. Keep real ones only.
-            if abs(resid(th1)[0]) > 1e-6:
+        u1 = np.array([math.cos(th1), math.sin(th1)])
+        A = np.column_stack([u1, upsi])
+        if abs(np.linalg.det(A)) < 0.05:          # legs (nearly) parallel
+            # then only the component along them can be fixed; take it if
+            # nothing across them is needed
+            if abs(u1[0] * w[1] - u1[1] * w[0]) > 0.005:
                 continue
-            d = resid(th1)[1]
-            th2 = wrap(psi - th1)
-            cost = abs(th1) + abs(th2) + 0.5 * abs(d)   # prefer less turning, then less driving
-            if best is None or cost < best[0]:
-                best = (cost, th1, d, th2)
+            d1, d2 = float(u1 @ w), 0.0
+        else:
+            d1, d2 = (float(v) for v in np.linalg.solve(A, w))
+        cost = abs(th1) + abs(th2) + TURN_PER_M * (abs(d1) + abs(d2))
+        if best is None or cost < best[0]:
+            best = (cost, float(th1), d1, float(th2), d2)
     if best is None:
-        return 0.0, 0.0, psi
-    return best[1], best[2], best[3]
+        return 0.0, 0.0, psi, 0.0
+    return best[1:]
 
 
 class Driver(Node):
@@ -390,22 +386,25 @@ class Driver(Node):
             ey = wrap(tgt[2] - cur[2])
             if e < POS_TOL and abs(ey) < YAW_TOL:
                 break
-            th1, d, th2 = plan(cur, tgt)
-            if abs(d) > MAX_LEG:
-                print(f"      ✗ straight leg {d:+.2f} m exceeds {MAX_LEG} m — use nav2 for long moves")
+            th1, d1, th2, d2 = plan(cur, tgt)
+            if max(abs(d1), abs(d2)) > MAX_LEG:
+                print(f"      ✗ straight leg over {MAX_LEG} m — use nav2 for long moves")
                 return False
-            # A correction pass that needs two big turns to fix a few cm would
-            # cost more error than it removes (~7 cm per 90 deg, TODO 43).
+            # A correction pass that needs big turns to fix a few cm would cost
+            # more error than it removes (~5 cm per 90 deg, TODO 43).
             if it > 1 and e < 0.06 and abs(th1) + abs(th2) > math.radians(60) \
                     and abs(ey) < math.radians(5):
                 print(f"      stopping at {e*100:.1f} cm: fixing it would take "
                       f"{math.degrees(abs(th1) + abs(th2)):.0f} deg of turning, which "
                       f"slides more than it corrects")
                 break
-            print(f"      pass {it}: rotate {math.degrees(th1):+6.1f} deg, "
-                  f"{'forward' if d >= 0 else 'reverse'} {abs(d)*100:5.1f} cm, "
-                  f"rotate {math.degrees(th2):+6.1f} deg")
-            if not (self.rotate(th1) and self.straight(d) and self.rotate(th2)):
+
+            def leg(d):
+                return f"{'fwd' if d >= 0 else 'rev'} {abs(d)*100:4.1f} cm"
+            print(f"      pass {it}: rotate {math.degrees(th1):+6.1f}, {leg(d1)}, "
+                  f"rotate {math.degrees(th2):+6.1f}, {leg(d2)}")
+            if not (self.rotate(th1) and self.straight(d1)
+                    and self.rotate(th2) and self.straight(d2)):
                 return False
             self.spin(1.5)            # let slam_toolbox match the new view
             cur = self.map_pose()

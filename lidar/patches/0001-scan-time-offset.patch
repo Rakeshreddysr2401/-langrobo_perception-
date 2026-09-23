@@ -1,0 +1,40 @@
+diff --git a/src/sllidar_node.cpp b/src/sllidar_node.cpp
+index 5abfd0f..952b073 100644
+--- a/src/sllidar_node.cpp
++++ b/src/sllidar_node.cpp
+@@ -78,6 +78,10 @@ class SLlidarNode : public rclcpp::Node
+         this->declare_parameter<bool>("angle_compensate", false);
+         this->declare_parameter<std::string>("scan_mode",std::string());
+         this->declare_parameter<float>("scan_frequency",10);
++        // rover: seconds to ADD to each scan's stamp. now() is read BEFORE
++        // grabScanDataHq() blocks for the next complete revolution, so the stamp
++        // leads the measurement. Measured on the C1 by lidar/scan_lag.py.
++        this->declare_parameter<double>("scan_time_offset", 0.0);
+         
+         this->get_parameter_or<std::string>("channel_type", channel_type, "serial");
+         this->get_parameter_or<std::string>("tcp_ip", tcp_ip, "192.168.0.7"); 
+@@ -94,6 +98,7 @@ class SLlidarNode : public rclcpp::Node
+             this->get_parameter_or<float>("scan_frequency", scan_frequency, 20.0);
+         else
+             this->get_parameter_or<float>("scan_frequency", scan_frequency, 10.0);
++        this->get_parameter_or<double>("scan_time_offset", scan_time_offset, 0.0);
+     }
+ 
+     bool getSLLIDARDeviceInfo(ILidarDriver * drv)
+@@ -209,7 +214,7 @@ class SLlidarNode : public rclcpp::Node
+         static int scan_count = 0;
+         auto scan_msg = std::make_shared<sensor_msgs::msg::LaserScan>();
+ 
+-        scan_msg->header.stamp = start;
++        scan_msg->header.stamp = start + rclcpp::Duration::from_seconds(scan_time_offset);
+         scan_msg->header.frame_id = frame_id;
+         scan_count++;
+ 
+@@ -460,6 +465,7 @@ public:
+     size_t angle_compensate_multiple = 1;//it stand of angle compensate at per 1 degree
+     std::string scan_mode;
+     float scan_frequency;
++    double scan_time_offset = 0.0;
+ 
+     ILidarDriver * drv;    
+ };

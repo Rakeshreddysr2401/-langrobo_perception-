@@ -21,6 +21,17 @@ if [ ! -d "$HERE/ws/src/sllidar_ros2/.git" ]; then
   git -C "$HERE/ws/src/sllidar_ros2" checkout -q "$SLLIDAR_REV"
 fi
 
+# Our patches on top of the pinned upstream, in order. Idempotent: a patch that
+# already applies in REVERSE is already in, so a re-run does not double it.
+for p in "$HERE"/patches/*.patch; do
+  [ -e "$p" ] || continue
+  if git -C "$HERE/ws/src/sllidar_ros2" apply --reverse --check "$p" 2>/dev/null; then
+    echo "[lidar] patch already in: $(basename "$p")"
+  else
+    git -C "$HERE/ws/src/sllidar_ros2" apply "$p" && echo "[lidar] applied: $(basename "$p")"
+  fi
+done
+
 echo "[lidar] colcon build in $IMAGE (≈30 s)"
 docker run --rm --user "$(id -u):$(id -g)" --entrypoint bash \
   -v "$HERE":/opt/lidar "$IMAGE" -c \

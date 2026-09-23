@@ -79,6 +79,16 @@ LIDAR_Z=${LIDAR_Z:-0.21}
 # wheels agreeing on the distance of the same move is what makes this one
 # trustworthy; nobody's eyes are in the loop.
 LIDAR_YAW=${LIDAR_YAW:-1.5463}
+# Seconds to ADD to every /scan stamp. MEASURED 2026-09-23 by
+# `./rover lidar --lag`: three runs, +68 / +94 / +85 ms, same sign every time,
+# no fixed bias. sllidar_node reads now() BEFORE blocking for the next full
+# revolution, so its stamps lead the measurement by most of a scan period.
+# slam_toolbox looks the pose up at the stamp, so during a turn every scan was
+# matched against a pose ~0.6 deg away, in the direction of the turn -- and two
+# +90 turns left slam with an 8 deg heading correction that odometry and
+# direct wall registration both said was wrong. Needs the patched driver
+# (lidar/patches/, applied by lidar/build.sh).
+LIDAR_TIME_OFFSET=${LIDAR_TIME_OFFSET:-0.082}
 CAM_NS=/camera/camera0
 
 # The cuvslam wheel ships its own libcuvslam.so and CUDA-12 userspace libs, and
@@ -282,6 +292,14 @@ lidar)
   # already up, and a target ~50 cm in front of the nose. See lidar/yaw_find.py.
   # --calibrate DRIVES. It is the only lidar subcommand that does, and it is
   # the one that answers the yaw without a human in the loop.
+  # --lag TURNS the rover briefly each way and measures whether /scan is
+  # stamped when it was measured (lidar/scan_lag.py). slam trusts the stamp.
+  if [ "${2:-}" = "--lag" ]; then
+    assert_rate /scan 8 "laser scan"  || die "no /scan — run ./rover lidar first"
+    assert_rate /odom 15 "fused odom" || die "no /odom — run ./rover fused"
+    echo "  THIS TURNS THE ROVER: ~3.5 s each way. Watch it."
+    rexec "PIVOT_ANCHOR=hold python3 $LIDAR/scan_lag.py"; exit
+  fi
   if [ "${2:-}" = "--calibrate" ]; then
     assert_rate /scan 8 "laser scan"  || die "no /scan — run ./rover lidar first"
     assert_rate /odom 15 "fused odom" || die "no /odom — run ./rover fused"
@@ -310,7 +328,8 @@ lidar)
   echo "[lidar] RPLidar C1 on $LIDAR_PORT -> /scan  (10 Hz, 720 beams, 0.5 deg)"
   dexec "source $LIDAR/ws/install/setup.bash; exec ros2 run sllidar_ros2 sllidar_node --ros-args \
             -p serial_port:=$LIDAR_PORT -p serial_baudrate:=460800 -p frame_id:=laser \
-            -p inverted:=false -p angle_compensate:=true -p scan_mode:=Standard > /tmp/lidar.log 2>&1"
+            -p inverted:=false -p angle_compensate:=true -p scan_mode:=Standard \
+            -p scan_time_offset:=$LIDAR_TIME_OFFSET > /tmp/lidar.log 2>&1"
   sleep 5
   echo
   echo "  GATE lidar:"
