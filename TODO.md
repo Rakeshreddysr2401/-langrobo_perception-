@@ -2471,3 +2471,52 @@ in the order worth checking:
 
 Until one of those is settled, do not tune anything in nav2 against these
 numbers — they are the symptom, measured, not the cause.
+
+### 43, continued — 2026-09-23, with motor power confirmed on, graded against the walls
+
+`./rover wheels --nudge` first: command 0.050 m/s, both sides 0.051. Then
+`./rover pivot 90 -90 90 -90`, which registers LiDAR scans either side of each
+turn (LIDAR_YAW measured, +1.5463) and compares with `/odom`:
+
+| turn | odom° | lidar° | LIDAR x,y cm | ODOM x,y cm | gap cm |
+|---|---|---|---|---|---|
+| +90 | +89.85 | +88.30 | +23.5, +14.8 | +19.7, +20.7 | 7.1 |
+| −90 | −89.87 | −89.01 | −20.0, +26.0 | −25.2, +29.2 | 6.1 |
+| +90 | +89.80 | +89.29 | +24.5, +16.6 | +22.8, +22.5 | 6.1 |
+| −90 | −89.86 | −88.69 | −16.8, +26.8 | −23.9, +30.0 | 7.8 |
+
+ICP residuals 0.5–0.6 cm throughout.
+
+**Three separate findings, not one:**
+
+1. **Heading is good.** −1.6° to +1.2° per 90°, scale 0.989. The gyro does
+   its job; turning is not a heading problem.
+2. **The rover really does slide ~30 cm per 90° "pivot"** (27.8–32.8). This is
+   not a sensor error — the walls say so. The direction of the slide fits
+   rotation about the LEFT wheels in BOTH directions: a left turn swings the
+   centre forward-left, a right turn back-left. So in a pivot the right side
+   drives and the left side barely contributes. Straight, the left side is
+   fine (0.051 of 0.050). **The left drivetrain is the one short of torque
+   under scrub** — motor, gearbox, driver, wiring, or weight bias. This is the
+   asymmetry §43 first measured, now with a side named.
+3. **The pose sees most of the slide but not all: 6–8 cm error per 90° turn.**
+   Odometry over-reads the slide by ~12% on average — close to the "+11%
+   cuVSLAM during pivots" PHASE1 recorded. A lever-arm error (camera or LiDAR
+   x from the rotation centre) would produce a gap of this size; four samples
+   in two directions do not fit a single consistent lever-arm vector, so it is
+   not established. **Both lever arms (`cam_x` 0.17, `LIDAR_X` 0.135) are from
+   a description, not a tape.**
+
+**slam_toolbox is correcting it.** After those turns plus two nudges,
+`./rover slam --check`: odom alone (−0.576, −0.332, −3.8°), LiDAR-corrected
+(−0.412, −0.321, −2.8°), correction 16 cm / 1.0°. Which is right needs a tape
+from a marked start; that test has not been run.
+
+**What is next, and none of it is software:**
+- Lift test (wheels off the floor, command a pivot): full speed on both sides
+  in the air → the left side is losing to floor load; still weak in the air →
+  the left driver or wiring.
+- Tape: wheel centre L↔R (firmware says 0.34, the RViz model 0.385), axle
+  front↔rear, and camera and LiDAR x from the midpoint of the four wheels.
+- Then the end-to-end test the owner actually asked for: tape a mark, drive a
+  pattern with turns, return to the mark on the LiDAR-corrected pose, measure.

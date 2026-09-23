@@ -200,8 +200,14 @@ def main():
         print(f"      commanding {WZ:.2f} rad/s. Turns: "
               f"{', '.join(f'{a:+.0f}' for a in angles)} deg")
         print()
-        print(f"      {'turn':>6s} {'odom deg':>9s} {'lidar deg':>10s} {'err':>7s}   "
-              f"{'SHIFT x,y (cm)':>16s} {'|shift|':>8s} {'resid':>7s}")
+        # Two shifts, because they answer different questions. LIDAR is where
+        # the centre REALLY went (the room says so). ODOM is where the pose
+        # thinks it went. If they agree, the slide is real motion that the pose
+        # tracks, and a goal-seeking drive simply corrects it. Only the GAP
+        # between them is localization error -- that is the column that decides
+        # whether "go back to 0,0,0" lands on 0,0,0.
+        print(f"      {'turn':>6s} {'odom deg':>9s} {'lidar deg':>10s} {'err':>6s}  "
+              f"{'LIDAR x,y cm':>14s} {'ODOM x,y cm':>14s} {'GAP cm':>7s} {'resid':>6s}")
 
         rows = []
         for a in angles:
@@ -223,10 +229,16 @@ def main():
             th, t, resid, used = r
             err = math.degrees(wrap(th - d_odom))
             shift = float(np.linalg.norm(t))
+            # odometry's own displacement, in the body frame the turn STARTED in
+            # -- the same frame the ICP translation t is expressed in
+            dw = p1 - p0
+            c, sn = math.cos(-y0), math.sin(-y0)
+            od = np.array([c * dw[0] - sn * dw[1], sn * dw[0] + c * dw[1]])
+            gap = float(np.linalg.norm(t - od))
             print(f"      {a:+6.0f} {math.degrees(d_odom):+9.2f} {math.degrees(th):+10.2f} "
-                  f"{err:+7.2f}   {t[0]*100:+7.1f},{t[1]*100:+7.1f} {shift*100:7.1f} "
-                  f"{resid*100:6.1f}")
-            rows.append((a, math.degrees(d_odom), math.degrees(th), err, shift, resid))
+                  f"{err:+6.2f}  {t[0]*100:+6.1f},{t[1]*100:+6.1f} "
+                  f"{od[0]*100:+6.1f},{od[1]*100:+6.1f} {gap*100:7.1f} {resid*100:6.1f}")
+            rows.append((a, math.degrees(d_odom), math.degrees(th), err, shift, resid, gap))
 
         if not rows:
             print("      no usable turns")
@@ -237,12 +249,16 @@ def main():
         print(f"      heading error : {min(r[3] for r in rows):+.2f} to "
               f"{max(r[3] for r in rows):+.2f} deg   "
               f"(odom/lidar scale {np.mean(scale):.4f})")
-        print(f"      pivot shift   : {min(r[4] for r in rows)*100:.1f} to "
+        print(f"      real slide    : {min(r[4] for r in rows)*100:.1f} to "
               f"{max(r[4] for r in rows)*100:.1f} cm   "
-              f"(mean {np.mean([r[4] for r in rows])*100:.1f} cm)")
+              f"(mean {np.mean([r[4] for r in rows])*100:.1f} cm)   <- the rover moved")
+        print(f"      pose error    : {min(r[6] for r in rows)*100:.1f} to "
+              f"{max(r[6] for r in rows)*100:.1f} cm   "
+              f"(mean {np.mean([r[6] for r in rows])*100:.1f} cm)   <- odom did not see it")
         print()
-        print("      SHIFT is how far the rover's centre actually moved during a turn")
-        print("      it believes was in place. That is TODO 37, with a number.")
+        print("      A big slide with a small pose error is fine: the pose knows, and")
+        print("      driving to a goal corrects it. A big POSE ERROR is what stops the")
+        print("      rover landing back on 0,0,0.")
         return 0
     finally:
         try:
