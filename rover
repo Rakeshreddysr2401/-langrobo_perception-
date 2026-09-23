@@ -8,6 +8,7 @@
 #                      --watch  live: hold a box at the nose and read it
 #                      --calibrate  DRIVES 0.20 m and measures the yaw itself
 #   ./rover pivot      SPINS: how far a turn-in-place really slides (TODO 37)
+#   ./rover drive      DRIVES: exact short moves that plan around the pivot fault
 #   ./rover wheels     check the ESP32 link (diagnose only; cannot fix from here)
 #                      --nudge  MOVES ~7 cm: proves the motors are powered, not just the link
 #   ./rover compare    the side-by-side readout — the Phase 1 instrument
@@ -97,6 +98,18 @@ die(){ echo "  ✗ $*" >&2; exit 1; }
 kill_match(){ docker exec "$NAME" bash -lc "for p in \$(pgrep -f '$1'); do kill -9 \$p 2>/dev/null; done; true" >/dev/null 2>&1 || true; }
 
 need_container(){ running || die "no container. Run: ./rover camera"; }
+
+# Host env does NOT reach `docker exec bash -lc` -- that is how `SLAM=false
+# ./rover pose` silently did nothing for months. The motion tools read these,
+# so forward the ones that are SET, and only those: an empty value would
+# override a tool's own default with "".
+pivot_env(){
+  local v out=""
+  for v in PIVOT_ANCHOR PIVOT_X PIVOT_Y PIVOT_WZ; do
+    [ -n "${!v:-}" ] && out="$out $v=${!v}"
+  done
+  echo "$out"
+}
 
 # Measure a topic's rate. Rates are the honest signal: every failure this rig
 # has had was a rate collapsing, not a topic disappearing.
@@ -328,7 +341,27 @@ pivot)
   assert_rate /wheel_state 15 "wheel link" || die "wheel link down — ./rover wheels"
   echo "  THIS SPINS THE ROVER IN PLACE. Clear around it, and watch."
   shift
-  rexec "python3 $LIDAR/pivot_test.py $*"
+  rexec "$(pivot_env) python3 $LIDAR/pivot_test.py $*"
+  ;;
+
+# ── drive ───────────────────────────────────────────────────────────────────
+# Exact short moves on a rover that cannot pivot about its centre (TODO 43).
+# Plans rotate / straight / rotate around the measured pivot point near the
+# left tyres, re-plans from the LiDAR-corrected pose each pass. Map frame.
+#   ./rover drive X Y [DEG]        ./rover drive 0 0 90 --rel   (turn in place)
+#   ./rover drive --mark NAME      ./rover drive --to NAME
+drive)
+  need_container
+  shift
+  if [ "${1:-}" != "--mark" ]; then
+    assert_rate /scan 8 "laser scan"  || die "no /scan — run ./rover lidar"
+    assert_rate /odom 15 "fused odom" || die "no /odom — run ./rover fused"
+    assert_rate /map 0.3 "slam map"   || die "no map frame — run ./rover slam"
+    mode=$(timeout 5 curl -s http://192.168.1.16:8091/mode 2>/dev/null)
+    case "$mode" in *'"manual": true'*) die "teleop is in MANUAL — it streams zeros over every command. Tap AUTO." ;; esac
+    echo "  THIS DRIVES THE ROVER. Watch it; the LiDAR is blind below 21 cm."
+  fi
+  rexec "$(pivot_env) python3 $SRC3/nodes/pivot_goto.py $*"
   ;;
 
 # ── wheels ──────────────────────────────────────────────────────────────────

@@ -2520,3 +2520,38 @@ from a marked start; that test has not been run.
   front↔rear, and camera and LiDAR x from the midpoint of the four wheels.
 - Then the end-to-end test the owner actually asked for: tape a mark, drive a
   pattern with turns, return to the mark on the LiDAR-corrected pose, measure.
+
+### 43, continued — making turns predictable, then planning around them (2026-09-23)
+
+**Pure `wz` turns are a coin flip.** Over eight turns, seven pivoted about the
+left tyres (~(4, 21) cm, ±1.5) and one about the centre. The same happened in
+a planned −90: it pivoted near the centre and landed 35 cm off. Cause: the
+left side is asked to reverse at 0.255 m/s and can only just do it — usually
+that cancels the drag and the tyres look planted, occasionally it wins.
+
+**Left OFF is worse.** Commanding `vx = wz·B/2` (firmware `B` = 0.34) zeroes
+the left target and the firmware switches that side off. It then free-rolls
+behind the right: pivot 75 cm to the left, ~60 cm of slide per 45°. Kept as
+`PIVOT_ANCHOR=left` for the record only.
+
+**Left HELD is the fix.** `vx = wz·B/2 − sign(wz)·0.02` gives the left side a
+0.02 m/s target, so the PI actively holds it near zero — it can neither
+free-roll nor reverse properly:
+
+| | pure wz | left held |
+|---|---|---|
+| slide per 45° | 5–18 cm | **21.0–21.6 cm** |
+| pivot spread | 11.7 cm | **1.5 cm** |
+| heading error | up to 4.6° | **≤ 0.56°** |
+
+Held pivots, by direction: left turns (3.1, 27.7) at 45° and (4.7, 24.9) at
+90°; right turns (0.3, 27.1) at 45° and (−0.7, 37.6) at 90°. Left turns sit on
+one point; right turns sit farther out the bigger the turn (one −90 sample).
+
+**`./rover drive`** (`phase3/nodes/pivot_goto.py`) plans every move as rotate
+→ straight → rotate about the pivot for that direction, and re-plans from the
+LiDAR-corrected pose each pass. With pure-wz pivots, a +90 in place held the
+centre to **1.0 cm** (slam) / 1.2 cm (walls, no slam). The held-left version
+is verified in simulation (1500 random moves, 0 failures) but **not yet on the
+floor**: the room is too tight for its legs (a +90 in place needs ~38 cm of
+reverse, and the swept-area check found something 7 cm from the swing).

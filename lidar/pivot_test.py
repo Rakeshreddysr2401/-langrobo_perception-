@@ -53,6 +53,47 @@ STALL_S = 8.0
 # The spin sweeps a circle of this radius: half the 46 x 42 footprint diagonal
 # plus 5 cm. Anything the lidar sees inside it gets hit.
 SWEEP_R = math.hypot(0.23, 0.21) + 0.05
+
+# LEFT-ANCHORED TURNS (PIVOT_ANCHOR=left). Commanded as a pure wz, this rover
+# picks between two behaviours unpredictably: usually the left wheels stay
+# planted and it rotates about the left tyres, sometimes the left side joins in
+# and it rotates about the centre (2026-09-23: 7 of 8, then a -90 that pivoted
+# near the centre and landed a planned turn 35 cm off). A planner cannot plan
+# around a coin flip. The firmware mixes wL = vx - wz*B/2 and switches a side
+# OFF (duty 0, braked) when its target is under 0.01 m/s, so commanding
+# vx = wz*B/2 makes the left target exactly zero and removes the choice: the
+# right side swings the rover about the planted left tyres every time. B is the
+# FIRMWARE's WHEEL_BASE_M, not the physical track -- it has to cancel the
+# firmware's own arithmetic.
+FW_HALF_B = 0.17
+ANCHOR = os.environ.get("PIVOT_ANCHOR", "none").strip().lower()
+
+
+# "left" -- left side OFF -- was tried first and is WRONG: an unpowered left
+# side does not stay planted, it free-rolls behind the right. Measured
+# 2026-09-23: the rover swung about a point 75 cm to its left, ~60 cm of slide
+# per 45 deg. Kept only so that result can be reproduced.
+#
+# "hold" is the fix: give the left side a small target, HOLD_V against the turn
+# direction, so the firmware's PI actively holds it near zero. It cannot then
+# free-roll forward (the "left" failure), and it cannot reverse at full speed
+# either (the occasional centre-pivot that made pure wz a coin flip). It also
+# stops the left motor sitting at full duty against a 0.255 m/s target it
+# cannot reach, which is what a pure-wz turn asks of it for seconds at a time.
+HOLD_V = 0.02
+
+
+def turn_twist(wz):
+    """Twist for a turn at wz, in the mode ANCHOR selects."""
+    t = Twist()
+    t.angular.z = wz
+    if ANCHOR == "left":
+        t.linear.x = wz * FW_HALF_B
+    elif ANCHOR == "hold":
+        # wL = vx - wz*B/2 = -sign(wz) * HOLD_V
+        t.linear.x = wz * FW_HALF_B - math.copysign(HOLD_V, wz)
+    return t
+
 RANGE_LO, RANGE_HI = 0.20, 6.0
 SETTLE = 1.5
 
@@ -154,8 +195,7 @@ class Pivot(Node):
         """Closed loop on odom yaw. Returns None if it stalls."""
         target = math.radians(deg)
         _, y0 = self.pose()
-        t = Twist()
-        t.angular.z = math.copysign(WZ, target)
+        t = turn_twist(math.copysign(WZ, target))
         deadline = time.time() + min(abs(target) / MIN_RATE + 10.0, 120.0)
         turned = 0.0
         prev = y0
@@ -195,8 +235,21 @@ def main():
         if near < SWEEP_R:
             print("      ✗ something is inside the spin circle — not turning. Clear it.")
             return 1
+        # A held-left turn does not spin about the centre: it swings about a
+        # point 28 cm to the left, and the far corner sweeps ~0.55 m from it.
+        # The centre circle above misses the right-hand side of that sweep.
+        if ANCHOR == "hold":
+            piv = np.array([0.017, 0.277])
+            corners = np.array([[0.23, 0.21], [0.23, -0.21], [-0.23, -0.21], [-0.23, 0.21]])
+            need = float(np.max(np.linalg.norm(corners - piv, axis=1))) + 0.05
+            got = float(np.min(np.linalg.norm(scan_in_base(n.scan, lx, lyaw) - piv, axis=1)))
+            print(f"      nearest thing to the pivot : {got:.2f} m (the swing sweeps {need:.2f} m)")
+            if got < need:
+                print("      ✗ something is inside the swing — not turning. Clear it.")
+                return 1
 
         angles = [float(a) for a in sys.argv[1:]] or [90, -90, 180, -180]
+        print(f"      turn mode: {dict(left='LEFT OFF (free-rolls; kept for the record)', hold='LEFT HELD near zero').get(ANCHOR, 'pure wz')}")
         print(f"      commanding {WZ:.2f} rad/s. Turns: "
               f"{', '.join(f'{a:+.0f}' for a in angles)} deg")
         print()
@@ -238,7 +291,16 @@ def main():
             print(f"      {a:+6.0f} {math.degrees(d_odom):+9.2f} {math.degrees(th):+10.2f} "
                   f"{err:+6.2f}  {t[0]*100:+6.1f},{t[1]*100:+6.1f} "
                   f"{od[0]*100:+6.1f},{od[1]*100:+6.1f} {gap*100:7.1f} {resid*100:6.1f}")
-            rows.append((a, math.degrees(d_odom), math.degrees(th), err, shift, resid, gap))
+            # The point the rover ACTUALLY rotated about, in the start body
+            # frame: a rotation th about P moves the centre by (I - R(th)) P,
+            # so P = (I - R(th))^-1 t. Ill-conditioned for small turns (det =
+            # 2 - 2cos th), so only reported from ~30 deg up.
+            piv = None
+            if abs(th) > math.radians(30):
+                c, sn = math.cos(th), math.sin(th)
+                A = np.array([[1 - c, sn], [-sn, 1 - c]])
+                piv = np.linalg.solve(A, t)
+            rows.append((a, math.degrees(d_odom), math.degrees(th), err, shift, resid, gap, piv))
 
         if not rows:
             print("      no usable turns")
@@ -255,6 +317,13 @@ def main():
         print(f"      pose error    : {min(r[6] for r in rows)*100:.1f} to "
               f"{max(r[6] for r in rows)*100:.1f} cm   "
               f"(mean {np.mean([r[6] for r in rows])*100:.1f} cm)   <- odom did not see it")
+        piv = [r[7] for r in rows if r[7] is not None]
+        if piv:
+            P = np.mean(piv, axis=0)
+            spread = max(float(np.linalg.norm(q - P)) for q in piv)
+            print(f"      pivot point   : x {P[0]*100:+.1f} cm, y {P[1]*100:+.1f} cm from the centre "
+                  f"(spread {spread*100:.1f} cm over {len(piv)} turns)")
+            print(f"                      -> PIVOT_X={P[0]:.3f} PIVOT_Y={P[1]:.3f}")
         print()
         print("      A big slide with a small pose error is fine: the pose knows, and")
         print("      driving to a goal corrects it. A big POSE ERROR is what stops the")
