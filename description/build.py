@@ -23,7 +23,8 @@ as it is NOW -- never a stale generated file. That --rsp path needs only PyYAML
 (the system python3 has it), not build123d.
 
 DRIFT. Some numbers are still copied by hand: nav2.yaml's footprint,
-rover_marker.py, vo_node's camera defaults, the firmware and the pivot scripts.
+vo_node's fallback camera defaults, the firmware, the Phase 1 odometry
+constants and the pivot scripts.
 The check reads each copy and fails if it disagrees with what this derives, so a
 new measurement cannot land in one place and not the others.
 """
@@ -245,11 +246,6 @@ def drift(g):
         ('firmware WHEEL_DIAMETER_M', grab('phase1/firmware/rover_firmware_v2.ino',
                                            r'#define WHEEL_DIAMETER_M\s+([\d.]+)f'), v['odometry.wheel_diameter']),
         ('nav2 footprint', fp, (F, S, F, -S, -R, -S, -R, S)),
-        ('rover_marker FRONT', grab('phase2/nodes/rover_marker.py', r'^FRONT = ([-\d.]+)'), F),
-        ('rover_marker REAR', grab('phase2/nodes/rover_marker.py', r'^REAR = ([-\d.]+)'), -R),
-        ('rover_marker SIDE', grab('phase2/nodes/rover_marker.py', r'^SIDE = ([-\d.]+)'), S),
-        ('rover_marker LIDAR_X', grab('phase2/nodes/rover_marker.py', r'^LIDAR_X = ([-\d.]+)'), g['lidar'][0]),
-        ('rover_marker LIDAR_Z', grab('phase2/nodes/rover_marker.py', r'^LIDAR_Z = ([-\d.]+)'), g['lidar'][2]),
     ]
     corners = r'^CORNERS = np\.array\(\[' + r',\s*'.join([rf'\[{num},\s*{num}\]'] * 4) + r'\]\)'
     for rel in ('phase3/nodes/pivot_goto.py', 'lidar/pivot_test.py'):
@@ -259,6 +255,8 @@ def drift(g):
         checks.append((f'{name} WHEEL_BASE_M', grab(rel, r'^WHEEL_BASE_M = ([\d.]+)'), v['wheels.track']))
         checks.append((f'{name} WHEEL_BASE_ROT_M', grab(rel, r'^WHEEL_BASE_ROT_M = ([\d.]+)'),
                        v['odometry.effective_track']))
+        checks.append((f'{name} METRES_PER_COUNT diameter',
+                       grab(rel, r'^METRES_PER_COUNT = math\.pi \* ([\d.]+) /'), v['odometry.wheel_diameter']))
 
     bad = 0
     for name, got, want in checks:

@@ -115,7 +115,7 @@ occurrence is a glance rather than an investigation.
 | `/fusion/path_map` | `Path` | 2 Hz | `fusion_node` — the same track through `map → odom` **as it was when recorded**; its gap from `/fusion/path` is the drift slam corrected |
 | `/scan` | `LaserScan` | 10 Hz | `sllidar_node` — 720 beams, BEST_EFFORT, stamps shifted +82 ms to the measurement (LOCALIZATION.md §2.3) |
 | `/map` | `OccupancyGrid` | ~0.5 Hz | `slam_toolbox` — the LiDAR's room, 5 cm cells, TRANSIENT_LOCAL |
-| `/rover/model` | `MarkerArray` | 1 Hz | `rover_marker` — the rover drawn at its measured 36 × 28 frame / 36 × 38 envelope, in `base_link` |
+| `/robot_description` | `String` | latched | `robot_state_publisher` — the URDF from `description/params.yaml`; RViz draws it (replaced `rover_marker`, 2026-09-24) |
 
 ### Mapping and navigation
 

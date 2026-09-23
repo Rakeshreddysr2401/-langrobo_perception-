@@ -14,8 +14,8 @@ cad/          GENERATED: rover.step (open in FreeCAD / Onshape) + one .stl per p
 2. Put it in `params.yaml` the way it was measured (from the nose, from the
    floor...). Unknown stays `value: null`. **No guesses, no placeholder masses.**
 3. `description/build`: rewrites `rover.urdf` and `cad/`, prints the derived frames,
-   and checks the 17 hand copies of these numbers (nav2 footprint, `vo_node`,
-   `rover_marker`, firmware, pivot safety corners). Exit 1 = a copy
+   and checks the hand copies of these numbers that remain (nav2 footprint,
+   `vo_node`'s fallback, firmware, odometry constants, pivot safety corners). Exit 1 = a copy
    disagrees; the output says what it should be.
 4. Fix the copies it names, rerun until `drift: N/N`, commit.
 
@@ -55,10 +55,13 @@ still overrides the yaw for one run.
 
 RViz (`phase2/rviz/rover_live.rviz`) draws the URDF from `/robot_description`.
 
+`vo_node` reads its camera offset from TF (`base_link -> camera0_link`) at
+start; its constants are only the fallback, and it logs an ERROR if it uses them.
+
 Still copied by hand, and held to params.yaml by the drift check: nav2's
-footprint, `vo_node`'s camera defaults, `rover_marker.py`, the firmware, and the
-pivot scripts' corners. Next: vo_node reads its camera offset from TF, and
-`rover_marker.py` retires.
+footprint, `vo_node`'s fallback, the firmware and the Phase 1 odometry constants
+(`WHEEL_BASE_M`, `WHEEL_BASE_ROT_M`, `METRES_PER_COUNT`), and the pivot
+scripts' corners.
 
 ## Placeholders
 

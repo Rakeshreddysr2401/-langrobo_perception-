@@ -244,12 +244,19 @@ def main():
             self.declare_parameter('cam_y', CAM_Y_DEFAULT)
             self.declare_parameter('cam_z', CAM_Z_DEFAULT)
             self.declare_parameter('cam_yaw_deg', CAM_YAW_DEG_DEFAULT)
+            # true: the mount comes from TF, i.e. from description/params.yaml via
+            # robot_state_publisher, and cam_x/y/z are only the fallback.
+            self.declare_parameter('cam_from_tf', True)
+            self.declare_parameter('camera_frame', 'camera0_link')
 
             g = lambda n: self.get_parameter(n).value
             self.ns = g('camera_ns')
             self.publish_tf = g('publish_tf')
             self.want_slam = g('slam')
-            self.B = base_from_optical(g('cam_x'), g('cam_y'), g('cam_z'), g('cam_yaw_deg'))
+            cam = (g('cam_x'), g('cam_y'), g('cam_z'))
+            if g('cam_from_tf'):
+                cam = self._camera_from_tf(g('camera_frame'), cam)
+            self.B = base_from_optical(*cam, g('cam_yaw_deg'))
             self.Binv = np.linalg.inv(self.B)
 
             self.bridge = CvBridge()
@@ -319,6 +326,42 @@ def main():
             self.create_timer(1.0, self._report)
             self.get_logger().info(f'vo_node up — waiting for camera_info on {self.ns}/infra{{1,2}}')
 
+
+        def _camera_from_tf(self, frame, fallback):
+            """base_link -> camera0_link as robot_state_publisher serves it.
+
+            The constants at the top of this file are only the fallback, and
+            using them is an ERROR, not a quiet default: they are a copy, and a
+            copy is what drifted before (0.170 / 0 / 0.163 for weeks).
+            cam_yaw_deg stays a parameter -- it is a VO mount correction
+            measured by pushing, not part of the rover's geometry.
+            """
+            from rclpy.duration import Duration
+            from rclpy.time import Time
+            from tf2_ros import Buffer, TransformListener
+            buf = Buffer()
+            # One lookup, then stop listening: kept alive, this would decode
+            # every /tf message for the life of the node, on a loaded Orin.
+            listener = TransformListener(buf, self, spin_thread=True)
+            try:
+                tf = buf.lookup_transform('base_link', frame, Time(),
+                                          timeout=Duration(seconds=15.0)).transform
+            except Exception as e:
+                self.get_logger().error(
+                    f'no base_link -> {frame} after 15 s ({type(e).__name__}); '
+                    f'using the built-in {fallback}. Is robot_state_publisher up? '
+                    f'(./rover pose starts it)')
+                return fallback
+            finally:
+                listener.unregister()
+            q = tf.rotation
+            if max(abs(q.x), abs(q.y), abs(q.z)) > 1e-3:
+                self.get_logger().warn(
+                    f'base_link -> {frame} is rotated ({q.x:.3f} {q.y:.3f} {q.z:.3f} {q.w:.3f}); '
+                    'only its translation is used')
+            cam = (tf.translation.x, tf.translation.y, tf.translation.z)
+            self.get_logger().info('camera mount from TF: x %.4f y %+.4f z %.4f' % cam)
+            return cam
         def _left_info(self, m):
             self.left_info = m
 

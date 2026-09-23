@@ -359,3 +359,68 @@ need new motors or wheels, and only if the cheap fixes are not enough.
 **To buy:** INA226 module · (maybe) a small digital scale per corner, or borrow
 one and use blocks · (only if §6.2 says so) 4× GB37 100 RPM, or a pair of omni
 wheels.
+
+---
+
+## 9. Sensor strategy — lean on the LiDAR and the camera, demote the wheels
+
+**The owner's direction (2026-09-24):** work on any surface and on road paths,
+keep working if the wheels change (omni / 360° wheels of the same radius are
+possible), and rotate precisely about the centre. The wheels are the sensor
+that cannot deliver that: what they report depends on the floor, the tyre, and
+the wheel type.
+
+### What each sensor is good for (measured here, or from its datasheet)
+
+| sensor | good at | fails when | evidence |
+|---|---|---|---|
+| **wheels** | "is it being driven", short straight distance on grippy floor | turning (over-read 1.53×, left side scrubs 1.60×), slippery or loose ground, **omni/mecanum rollers slip by design** | TODO §13, §43 |
+| **gyro** (D555 IMU) | heading rate, 200 Hz, any surface, any wheel | slow bias drift (re-measured when still) | −0.2 to −0.9% on turns, fusion.py |
+| **LiDAR** (RPLidar C1) | absolute position and heading against walls; no drift while it sees structure | nothing within 12 m (6 m for black surfaces); a long featureless corridor (slides along it); **direct sun: rated 40,000 lux, sunlight is ~100,000**; glass | C1 datasheet; slam_toolbox runs here |
+| **depth camera** (D555) | obstacles, texture-rich scenes, outdoors (passive stereo works in sun with the emitter off) | blank walls, dark, **nothing closer than ~52 cm** at full resolution (datasheet Min-Z); rotation is its weakest case (+11% on a 90°) | D555 datasheet; fusion.py |
+
+No single sensor covers "any surface, indoors and out". The design is a
+**hierarchy by job**, not "trust the LiDAR for everything":
+
+- **heading:** gyro for the fast part, corrected by LiDAR scan-matching (no
+  drift) whenever walls are in range. Already the best-measured piece.
+- **position:** LiDAR scan-matching where there is structure, visual odometry
+  where there is texture (outdoors, open spaces), wheels only as the last
+  fallback and as a slip detector (wheels say moving, LiDAR says not = slip).
+- **obstacles:** the LiDAR ring for 360° at one height (and from 5 cm, so it
+  covers the camera's near blind zone); the depth camera for what is above or
+  below that plane, out to ~6 m ahead.
+
+### Turning about the exact centre
+
+A skid-steer cannot pivot about its centre by construction (§0: every pivot
+needs the tyres to slip, and the weaker side slips first). Software can still
+**hold the centre closed-loop**: measure base_link's x,y from the LiDAR pose
+during the turn and mix a small forward/back command into the rotation. While
+the rover turns, "forward" sweeps round, so any drift direction becomes
+correctable within part of a turn. Target: centre held to ±2 cm, measured by
+the LiDAR itself (`./rover pivot`). With omni/mecanum wheels the rover becomes
+holonomic and this gets easy: it can move sideways to cancel drift directly.
+
+### Calibrating the small movements ("edges")
+
+Short moves, start/stop, the minimum duty that moves each side, and per-side
+speed mismatch all depend on the surface. Calibrate them **with the LiDAR as
+the ruler**, automatically, instead of with a tape: a `./rover calibrate`
+routine drives a fixed pattern (short steps, slow turns each way), measures
+the true motion from scan matching, and fits per-surface parameters. Stored
+per surface (tile, carpet, road), picked by name, re-run in two minutes when
+the wheels change.
+
+### Order
+
+| step | what | needs |
+|---|---|---|
+| 9.1 | **LiDAR odometry**: scan-to-scan ICP (the matcher in `lidar/yaw_calibrate.py` is a start) → `/lidar/odom`, with a "degenerate" flag when there is too little structure | nothing; C1 is up |
+| 9.2 | fusion takes LiDAR odometry for position when it is healthy; wheels demoted to fallback + slip detection; each source's health on `/fusion/status` | 9.1, tape runs to grade it (compare.py) |
+| 9.3 | closed-loop pivot on the fused pose, holding the centre | 9.2 |
+| 9.4 | `./rover calibrate`: small-move and per-side parameters per surface, LiDAR as ground truth | 9.2 |
+| 9.5 | outdoor check: C1 in shade vs sun, VO carrying position in open space | a day outside |
+
+Because the geometry now comes from one place (`description/`), a wheel change
+is a `params.yaml` edit plus a `./rover calibrate`, not a code change.

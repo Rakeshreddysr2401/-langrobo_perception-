@@ -432,22 +432,19 @@ fused)
   echo "  checking the pose layer is up before building on it..."
   assert_rate /vo/odom 10 "visual odometry" || die "no pose — run ./rover pose first"
   kill_match 'fusion_node.py'
-  kill_match 'rover_marker.py'
+  kill_match 'rover_marker.py'   # retired 2026-09-24; stops one left from before
   echo "[fused] PoseFusion -> /odom, and TF odom -> base_link"
   echo "        vo_node runs with publish_tf:=false; only one thing may own a"
   echo "        transform, and the raw cuvslam pose is the one that teleports."
   dexec "python3 $SRC/nodes/fusion_node.py > /tmp/fused.log 2>&1"
-  # The rover's body, on /rover/model. It belongs to this layer because it is
-  # drawn in base_link and base_link is what this layer starts publishing. It
-  # was never started by ANY layer until 2026-08-26, so RViz's "Rover" display
-  # had been empty since it was written and `./rover status` showed a permanent
-  # `--` on the view row. Nothing was broken; nothing had ever been run.
-  dexec "python3 $SRC2/nodes/rover_marker.py > /tmp/marker.log 2>&1"
+  # The rover's body is no longer drawn here: RViz shows the URDF that
+  # robot_state_publisher serves (description/), and the footprint nav2 keeps
+  # clear as nav2's own /local_costmap/published_footprint. rover_marker.py,
+  # which hand-copied both, is retired.
   sleep 4
   echo
   echo "  GATE fused:"
   assert_rate /odom 15 "fused odom" || true
-  assert_rate /rover/model 0.5 "rover body" || true
   # The honesty check belongs HERE, not in a doc telling you to run it by hand
   # after every bring-up -- which is what it was, and so it got skipped. This
   # is the layer that starts publishing /odom, so this is the layer that has to
@@ -932,7 +929,7 @@ view)
 
   # Running is not the same as receiving. A blank RViz still shows as running.
   echo "  subscriptions (0 means it is connected to nothing):"
-  for t in /rover/model /scan /map /fusion/path /fusion/path_map; do
+  for t in /robot_description /scan /map /fusion/path /fusion/path_map; do
     c=$(timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$ip" \
         "source /opt/ros/jazzy/setup.bash; export ROS_DOMAIN_ID=0; unset ROS_DISCOVERY_SERVER; \
          timeout 6 ros2 topic info $t 2>/dev/null | grep -oP 'Subscription count: \K[0-9]+'" 2>/dev/null)
@@ -984,8 +981,7 @@ status)
       "map:/nvblox_node/static_occupancy_grid:1" \
       "nav:/global_costmap/costmap:0.5" \
       "nav:/local_costmap/costmap:1" \
-      "vlm:/camera/color/image_raw/compressed:2" \
-      "view:/rover/model:0.5"; do
+      "vlm:/camera/color/image_raw/compressed:2"; do
     l=${row%%:*}; rest=${row#*:}; t=${rest%:*}; want=${rest##*:}
     r=$(rate_of "$t")
     if awk "BEGIN{exit !($r >= $want)}"; then v="OK"; else
@@ -993,6 +989,10 @@ status)
     fi
     printf '  %-9s %-40s %6.1f  %5s %s\n' "$l" "$t" "$r" "$want" "$v"
   done
+  # The fixed frames are latched once, not streamed, so a rate means nothing:
+  # ask whether their publisher is alive instead.
+  if docker exec "$NAME" pgrep -f '[r]obot_state_publisher' >/dev/null 2>&1; then v="OK"; else v="--"; fi
+  printf '  %-9s %-40s %6s  %5s %s\n' frames "robot_state_publisher (description/)" "" "" "$v"
 
   # cuVSLAM can be publishing at 30 Hz and still be lying. It has diverged three
   # times (TODO 21) and the fallback to dead reckoning is SILENT: every rate
