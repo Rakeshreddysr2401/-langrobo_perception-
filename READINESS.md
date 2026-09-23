@@ -52,7 +52,7 @@ The only exteroceptive sensor on the vehicle.
 | emitter / laser power | **OFF** / 0.0 — both load-bearing |
 | colour · motion · sync | off · on · off |
 | transport | PoE DDS, 192.168.11.55 — **not USB** |
-| mount x / y / z | 0.170 / 0.00 / 0.163 m — measured |
+| mount x / y / z | 0.173 / −0.0475 / 0.175 m — measured 2026-09-24 (`description/params.yaml`) |
 | mount yaw | 2.06° — measured |
 
 **🔴 It needs hands (§7).** Three distinct failure modes, all requiring a

@@ -152,8 +152,8 @@ YAW_TOL = math.radians(1.5)
 MAX_ITERS = 4
 STALL_S = 8.0
 
-# footprint 46 x 42, centred on base_link
-CORNERS = np.array([[0.23, 0.21], [0.23, -0.21], [-0.23, -0.21], [-0.23, 0.21]])
+# the measured envelope, 36 x 38 -- nav2.yaml's footprint (description/build)
+CORNERS = np.array([[0.182, 0.19], [0.182, -0.19], [-0.178, -0.19], [-0.178, 0.19]])
 SWEEP_MARGIN = 0.08   # m, clearance from the swept footprint during a turn
 
 

@@ -42,12 +42,12 @@ THE FRAME PROBLEM, WHICH IS THE WHOLE DIFFICULTY
 
     Run `vo_node.py --self-test` to check this numerically with no hardware.
 
-CAMERA MOUNT — CONFIRM WITH A TAPE MEASURE
-    cam_x / cam_z are where the camera sits relative to base_link, whose origin
-    is ON THE GROUND directly under the rover's centre of rotation. These
-    defaults are unverified on your rig. cam_x matters for Phase 1's 360 deg
-    spin test (a camera mounted forward of the centre swings on a lever arm),
-    and cam_z will matter for mapping later.
+CAMERA MOUNT — from description/params.yaml
+    cam_x / cam_y / cam_z are where camera0_link sits relative to base_link, whose
+    origin is ON THE GROUND midway between the wheel contact patches. Measured
+    2026-09-24; description/build derives them and checks this file agrees.
+    cam_x and cam_y matter for the 360 deg spin test (a camera off the centre
+    swings on a lever arm), and cam_z for mapping.
 """
 import argparse
 import json
@@ -57,16 +57,18 @@ import time
 
 import numpy as np
 
-# Measured on the rover 2026-08-15. base_link's origin is on the GROUND at the
-# centre of the four wheel contact patches, so cam_x is taken from the pivot, not
-# from the front face of the body:
-#     wheelbase (front axle to rear axle, one side) = 25.0 cm
-#     camera lens back to the front axle line       =  4.5 cm
-#     cam_x = 4.5 + 25.0/2                          = 17.0 cm
-# This was 10.0 cm as a guess, i.e. 7 cm short.
-CAM_X_DEFAULT = 0.170  # metres forward of base_link origin   -- MEASURED
-CAM_Y_DEFAULT = 0.00   # metres left (camera on the centreline)
-CAM_Z_DEFAULT = 0.163  # metres above the ground              -- confirmed
+# DERIVED by description/build from description/params.yaml, measured
+# 2026-09-24 -- change it there. base_link's origin is on the GROUND midway
+# between the axles, which sit 6.3 and 30.1 cm behind the nose, so the nose is
+# at +0.182. The frame is camera0_link = the LEFT IR imager:
+#     x  front glass, 0.9 cm inside the nose               = 0.173
+#     y  case centred, imager half the 95 mm baseline right = -0.0475
+#     z  lens centre off the floor                          = 0.175
+# The 2026-08-15 values (0.170, 0, 0.163) used a 25 cm wheelbase and the case
+# centre. y matters on turns: the imager swings on a lever arm about base_link.
+CAM_X_DEFAULT = 0.173    # metres forward of base_link origin  -- MEASURED
+CAM_Y_DEFAULT = -0.0475  # metres left                         -- MEASURED + datasheet
+CAM_Z_DEFAULT = 0.175    # metres above the ground             -- MEASURED
 
 # The camera is not quite square on its bracket. Two straight 2 m hand pushes,
 # 2026-08-15, with the heading changing by under 0.6 deg in each:
@@ -158,10 +160,14 @@ def self_test():
     #    camera translates even though base_link does not. Rotating the RIG in
     #    place about the body axis must still leave base_link's origin put.
     #    (Camera orbits the body centre: rig translation of r*sin/1-cos.)
-    r = CAM_X_DEFAULT
+    #    The camera sits at (cam_x, cam_y), so it moves by d = Rz(th).c - c in
+    #    base; in the camera's starting optical axes that is (-d_y, -d_z, d_x).
+    cx, cy = CAM_X_DEFAULT, CAM_Y_DEFAULT
+    dx = cx * (math.cos(th) - 1) - cy * math.sin(th)
+    dy = cx * math.sin(th) + cy * (math.cos(th) - 1)
     T = np.eye(4)
     T[:3, :3] = Rotation.from_euler('y', -th).as_matrix()
-    T[:3, 3] = [-r * math.sin(th), 0.0, -r * (1 - math.cos(th))]
+    T[:3, 3] = [-dy, 0.0, dx]
     check("pure body spin -> base_link origin does not move", (B @ T @ Binv)[:3, 3], [0, 0, 0], tol=1e-6)
 
     # 6. The mount-yaw correction, checked against the two real pushes that

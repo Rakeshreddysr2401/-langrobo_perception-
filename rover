@@ -54,15 +54,16 @@ LIDAR=/opt/lidar
 # The plain node, not /dev/serial/by-id/...: the Slamtec SDK refuses the symlink
 # (error 80008004) but opens the node it points at. It is the only CP210x here.
 LIDAR_PORT=${LIDAR_PORT:-/dev/ttyUSB0}
-# base_link -> laser. x: the C1 sits directly above the camera, 3.5 cm behind
-# its lens (camera is at 0.17) -- the same answer as "5 cm back from the nose of
-# a 36 cm body". z: ground to the middle of the rotating window, measured
-# 20-22 cm; refine with a ruler if the fusion ever cares. yaw: which way the
-# C1's zero beam points is NOT marked on the case; it is set from the box test
-# (`./rover lidar` prints the front/left/back/right readings -- hold a box in
-# front of the nose and "front" must be the one that drops).
-LIDAR_X=${LIDAR_X:-0.135}
-LIDAR_Z=${LIDAR_Z:-0.21}
+# base_link -> laser. DERIVED by description/build from description/params.yaml
+# (measured 2026-09-24) -- change it there, then copy what the build prints.
+# x: the C1's front edge is 2 cm behind the nose (nose at +0.182), centre half
+# its 55.6 mm case further back. y: centred. z: its base sits on the frame top
+# at 0.22 and the laser plane is 29.8 mm above that (C1 datasheet); the old
+# 0.21 was 4 cm low. yaw: which way the C1's zero beam points is NOT marked on
+# the case; it is measured by driving (below).
+LIDAR_X=${LIDAR_X:-0.1342}
+LIDAR_Y=${LIDAR_Y:-0.0}
+LIDAR_Z=${LIDAR_Z:-0.2498}
 # MEASURED 2026-09-22 by `./rover lidar --calibrate`: +1.5463 rad, +88.60 deg.
 #
 # Six driven legs (three out-and-back pairs of 0.20 m), five usable, spread
@@ -253,8 +254,12 @@ pose)
   # laser frame while ./rover lidar's own gate stayed green (/scan is published
   # by the driver and does not need the TF). RViz drew no ring and slam_toolbox
   # could never have worked. Same pattern as the lidar layer's own kill_match.
+  # camera0_link is the D555's LEFT IR imager, not the case centre: the case is
+  # centred on the frame, so the imager is half the 95 mm baseline to -y. x is
+  # the front glass, 0.9 cm inside the nose; z the lens, 17.5 cm off the floor.
+  # DERIVED by description/build from description/params.yaml (2026-09-24).
   kill_match 'child-frame-id camera0_link'
-  dexec "exec ros2 run tf2_ros static_transform_publisher --x 0.17 --y 0.0 --z 0.163 \
+  dexec "exec ros2 run tf2_ros static_transform_publisher --x 0.173 --y -0.0475 --z 0.175 \
             --frame-id base_link --child-frame-id camera0_link > /tmp/statictf.log 2>&1"
   sleep 1
 
@@ -322,8 +327,8 @@ lidar)
   [ -e "$LIDAR_PORT" ] || die "no $LIDAR_PORT — is the C1's USB cable in? (lsusb: Silicon Labs CP210x)"
   kill_match '[s]llidar_node'
   kill_match 'child-frame-id laser'
-  echo "[lidar] static TF base_link -> laser (x $LIDAR_X z $LIDAR_Z yaw $LIDAR_YAW)"
-  dexec "exec ros2 run tf2_ros static_transform_publisher --x $LIDAR_X --y 0.0 --z $LIDAR_Z --yaw $LIDAR_YAW \
+  echo "[lidar] static TF base_link -> laser (x $LIDAR_X y $LIDAR_Y z $LIDAR_Z yaw $LIDAR_YAW)"
+  dexec "exec ros2 run tf2_ros static_transform_publisher --x $LIDAR_X --y $LIDAR_Y --z $LIDAR_Z --yaw $LIDAR_YAW \
             --frame-id base_link --child-frame-id laser > /tmp/lidartf.log 2>&1"
   echo "[lidar] RPLidar C1 on $LIDAR_PORT -> /scan  (10 Hz, 720 beams, 0.5 deg)"
   dexec "source $LIDAR/ws/install/setup.bash; exec ros2 run sllidar_ros2 sllidar_node --ros-args \

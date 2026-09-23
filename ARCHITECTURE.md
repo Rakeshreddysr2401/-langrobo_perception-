@@ -115,7 +115,7 @@ occurrence is a glance rather than an investigation.
 | `/fusion/path_map` | `Path` | 2 Hz | `fusion_node` — the same track through `map → odom` **as it was when recorded**; its gap from `/fusion/path` is the drift slam corrected |
 | `/scan` | `LaserScan` | 10 Hz | `sllidar_node` — 720 beams, BEST_EFFORT, stamps shifted +82 ms to the measurement (LOCALIZATION.md §2.3) |
 | `/map` | `OccupancyGrid` | ~0.5 Hz | `slam_toolbox` — the LiDAR's room, 5 cm cells, TRANSIENT_LOCAL |
-| `/rover/model` | `MarkerArray` | 1 Hz | `rover_marker` — the rover drawn at 36 × 28 body / 46 × 42 envelope, in `base_link` |
+| `/rover/model` | `MarkerArray` | 1 Hz | `rover_marker` — the rover drawn at its measured 36 × 28 frame / 36 × 38 envelope, in `base_link` |
 
 ### Mapping and navigation
 
@@ -146,7 +146,7 @@ identically to a dead publisher.
 |---|---|---|
 | `map → odom` | **`slam_toolbox`** (since 2026-09-22) | the LiDAR correction. cuVSLAM also publishes it when `slam:=true`, so `./rover pose` runs with `SLAM=false` and `./rover slam` refuses a second owner |
 | `odom → base_link` | **`fusion_node`** | the guarded estimate, not the raw one |
-| `base_link → camera0_link` | static publisher | measured: x 0.170, z 0.163, yaw 2.06° |
+| `base_link → camera0_link` | static publisher | measured 2026-09-24: x 0.173, y −0.0475 (left imager), z 0.175 — `description/params.yaml`; vo_node adds yaw 2.06° |
 | `base_link → laser` | static publisher, `./rover lidar` | x 0.135, z 0.21 from a description; **yaw +88.60° measured by driving** (`./rover lidar --calibrate`) |
 
 `map → base_link` is the corrected pose; `./rover drive` steers on it. nav2

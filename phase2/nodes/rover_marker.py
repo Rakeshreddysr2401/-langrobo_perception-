@@ -17,10 +17,10 @@ body is genuinely ambiguous about which way it faces, and "which way is forward"
 is exactly what you are trying to read when the map looks wrong.
 
 WHAT IS DRAWN, and why each piece is separate
-    chassis    36 x 28 cm, the real body
+    chassis    36 x 28 x 16 cm frame, 6 cm off the floor
     wheels     at their real axles, so they stick out past the chassis and the
                silhouette BECOMES the envelope instead of a cube asserting it
-    footprint  a flat outline of the 46 x 42 cm polygon nav2 keeps clear. This
+    footprint  a flat outline of the 36 x 38 cm polygon nav2 keeps clear. This
                is the one to read for "does it fit through there" -- the body
                is smaller and the wheels only touch the envelope at four points
     lidar      the C1 puck on top. Every beam on screen originates here, so if
@@ -38,40 +38,44 @@ from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy, HistoryPo
 from visualization_msgs.msg import Marker, MarkerArray
 from geometry_msgs.msg import Point
 
-# THE OUTER ENVELOPE — deliberately the same numbers as phase3/config/nav2.yaml's
-# footprint. If these two ever disagree the picture is lying about the thing the
-# planner believes, which is the one job this node has.
+# EVERY NUMBER BELOW is derived by description/build from description/params.yaml
+# (tape-measured 2026-09-24) and checked against it on every build -- change
+# them there. This node retires once RViz shows the URDF (build plan step 4).
 #
-# As described by the owner 2026-09-22: body 36 x 28 cm, tyres 5 cm past each
-# end and 7 cm past each side => 46 x 42 cm overall. NOT TAPE-MEASURED YET.
-# The previous values here (35 x 38) put part of the tyres OUTSIDE the drawn
-# body, so the picture was smaller than the real rover in the exact direction
-# that matters for "does it fit". If a doorway that used to pass starts
-# failing, measure tyre-to-tyre and nose-to-tail and fix BOTH files.
-FRONT = 0.230        # m, outer edge of the front tyres
-REAR = -0.230        # m, outer edge of the rear tyres
-SIDE = 0.210         # m, outer face of the side tyres
+# THE OUTER ENVELOPE -- the same numbers as phase3/config/nav2.yaml's footprint.
+# If these two ever disagree the picture is lying about the thing the planner
+# believes, which is the one job this node has. Not centred: base_link is
+# midway between the axles, 2 mm ahead of the frame's centre.
+FRONT = 0.182        # m, the frame's nose
+REAR = -0.178        # m, the frame's tail (the tyres stop inside it)
+SIDE = 0.190         # m, outer face of the tyres
 
-# THE BODY ITSELF, which is smaller than the envelope. Drawing the body at its
-# real size and the wheels at their real positions means the silhouette comes
-# out as 46 x 42 on its own, instead of one cube asserting it.
-BODY_L = 0.36        # m, nose to tail, chassis only
-BODY_W = 0.28        # m, across the chassis, tyres excluded
-BODY_H = 0.10        # m, visual only
-BODY_Z = 0.105       # m, sits above the wheels
+# THE FRAME ITSELF, narrower than the envelope: the tyres stick out 5 cm past
+# each side, and drawing them at their real positions makes the silhouette.
+BODY_L = 0.36        # m, nose to tail
+BODY_W = 0.28        # m, across the frame, tyres excluded
+BODY_H = 0.16        # m, base frame to top
+BODY_X = (FRONT + REAR) / 2   # m, the frame's centre
+BODY_Z = 0.06 + BODY_H / 2    # m, the frame sits 6 cm off the floor
 
-WHEEL_R = 0.0425     # m, 85 mm tyre OD confirmed with a tape
-WHEEL_W = 0.035      # m, visual only
-WHEEL_X = FRONT - WHEEL_R      # m, axle, so the tyre's outer edge lands on FRONT
-WHEEL_Y = SIDE - WHEEL_W / 2   # m, so the tyre's outer face lands on SIDE
+WHEEL_R = 0.0415     # m, 83 mm across the grips
+WHEEL_W = 0.040      # m
+WHEEL_X = 0.119      # m, axles 6.3 and 30.1 cm behind the nose
+WHEEL_Y = 0.170      # m, half the 34 cm track
+WHEEL_Z = 0.041      # m, the axle: the motors hang below the frame
 
-# The RPLidar C1, on top, 3.5 cm behind the camera lens. Drawn because every
-# beam on screen originates here: if the ring ever looks offset from the walls,
-# the first question is whether this puck is where the TF says it is.
-LIDAR_X = 0.135
-LIDAR_Z = 0.21
-LIDAR_R = 0.038
-LIDAR_H = 0.04
+# The D555 case (167 x 48 x 42 mm), front glass 0.9 cm inside the nose.
+CAM_X = 0.173 - 0.024
+CAM_Z = 0.175
+
+# The RPLidar C1, on top, its front edge 2 cm behind the nose. Drawn because
+# every beam on screen originates here: if the ring ever looks offset from the
+# walls, the first question is whether this puck is where the TF says it is.
+LIDAR_X = 0.1342     # m, the rotor centre
+LIDAR_Z = 0.2498     # m, the laser plane: frame top 0.22 + 29.8 mm
+LIDAR_R = 0.0278     # m, half the 55.6 mm case
+LIDAR_H = 0.0413     # m, the case
+LIDAR_BASE = 0.22    # m, it sits on the frame top
 
 # Orange body against a blue-grey costmap and a magenta obstacle layer: nothing
 # else on screen is this colour, which is the whole point of picking it.
@@ -119,7 +123,7 @@ class RoverMarker(Node):
     def _wheel(self, mid, x, y):
         m = self._mk(mid, Marker.CYLINDER,
                      WHEEL_R * 2, WHEEL_R * 2, WHEEL_W,
-                     x, y, WHEEL_R, WHEEL_RGBA)
+                     x, y, WHEEL_Z, WHEEL_RGBA)
         # A cylinder's axis is +z; a wheel's axis is +y. Rotate 90 deg about x.
         h = math.pi / 4
         m.pose.orientation.x = math.sin(h)
@@ -129,27 +133,27 @@ class RoverMarker(Node):
     def _publish(self):
         a = MarkerArray()
 
-        # the chassis, at its OWN size. The wheels below stick out past it, so
-        # the silhouette becomes the 46 x 42 envelope without any cube claiming
+        # the frame, at its OWN size. The wheels below stick out past it, so
+        # the silhouette becomes the 36 x 38 envelope without any cube claiming
         # to be it.
         a.markers.append(self._mk(
             0, Marker.CUBE, BODY_L, BODY_W, BODY_H,
-            0.0, 0.0, BODY_Z, BODY_RGBA))
+            BODY_X, 0.0, BODY_Z, BODY_RGBA))
 
         # nose wedge — which way is forward, readable from directly above
         a.markers.append(self._mk(
             1, Marker.CUBE, 0.05, BODY_W - 0.06, BODY_H + 0.01,
-            BODY_L / 2 - 0.025, 0.0, BODY_Z, NOSE_RGBA))
+            FRONT - 0.025, 0.0, BODY_Z, NOSE_RGBA))
 
-        # the D555, sitting on the front face
+        # the D555, just inside the nose
         a.markers.append(self._mk(
-            2, Marker.CUBE, 0.03, 0.13, 0.04,
-            BODY_L / 2 - 0.015, 0.0, BODY_Z + BODY_H / 2 + 0.02, CAM_RGBA))
+            2, Marker.CUBE, 0.048, 0.167, 0.042,
+            CAM_X, 0.0, CAM_Z, CAM_RGBA))
 
         # the RPLidar C1, on top. Every beam on screen starts at this puck.
         a.markers.append(self._mk(
             3, Marker.CYLINDER, LIDAR_R * 2, LIDAR_R * 2, LIDAR_H,
-            LIDAR_X, 0.0, LIDAR_Z, LIDAR_RGBA))
+            LIDAR_X, 0.0, LIDAR_BASE + LIDAR_H / 2, LIDAR_RGBA))
 
         # four wheels
         for i, (x, y) in enumerate([(WHEEL_X, WHEEL_Y), (WHEEL_X, -WHEEL_Y),

@@ -50,9 +50,11 @@ WZ = float(os.environ.get("PIVOT_WZ", "1.5"))
 # still turning. Abort instead on NO PROGRESS for STALL_S.
 MIN_RATE = 0.03          # rad/s, the slowest turn still worth waiting for
 STALL_S = 8.0
-# The spin sweeps a circle of this radius: half the 46 x 42 footprint diagonal
-# plus 5 cm. Anything the lidar sees inside it gets hit.
-SWEEP_R = math.hypot(0.23, 0.21) + 0.05
+# The spin sweeps a circle of this radius: the furthest corner of the measured
+# 36 x 38 envelope (nav2.yaml's footprint) plus 5 cm. Anything the lidar sees
+# inside it gets hit.
+CORNERS = np.array([[0.182, 0.19], [0.182, -0.19], [-0.178, -0.19], [-0.178, 0.19]])
+SWEEP_R = float(np.max(np.linalg.norm(CORNERS, axis=1))) + 0.05
 
 # LEFT-ANCHORED TURNS (PIVOT_ANCHOR=left). Commanded as a pure wz, this rover
 # picks between two behaviours unpredictably: usually the left wheels stay
@@ -240,8 +242,7 @@ def main():
         # The centre circle above misses the right-hand side of that sweep.
         if ANCHOR == "hold":
             piv = np.array([0.017, 0.277])
-            corners = np.array([[0.23, 0.21], [0.23, -0.21], [-0.23, -0.21], [-0.23, 0.21]])
-            need = float(np.max(np.linalg.norm(corners - piv, axis=1))) + 0.05
+            need = float(np.max(np.linalg.norm(CORNERS - piv, axis=1))) + 0.05
             got = float(np.min(np.linalg.norm(scan_in_base(n.scan, lx, lyaw) - piv, axis=1)))
             print(f"      nearest thing to the pivot : {got:.2f} m (the swing sweeps {need:.2f} m)")
             if got < need:

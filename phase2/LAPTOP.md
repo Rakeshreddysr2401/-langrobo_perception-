@@ -66,7 +66,7 @@ changed.
 
 | display | topic | |
 |---|---|---|
-| **Rover** | `/rover/model` | the rover at its described size: 36 × 28 cm chassis, wheels at their axles, the **46 × 42 cm nav2 footprint** as a flat outline, the LiDAR puck on top, cyan nose + heading ray |
+| **Rover** | `/rover/model` | the rover at its measured size: 36 × 28 cm frame, wheels at their axles, the **36 × 38 cm nav2 footprint** as a flat outline, the LiDAR puck on top, cyan nose + heading ray |
 | **Lidar ring (live)** | `/scan` | orange points, all 360°. BEST_EFFORT, or it shows nothing |
 | **Room (lidar)** | `/map` | slam_toolbox's room, opaque, drawn under everything. Black = a wall the LiDAR has seen, light grey = confirmed floor, mid grey = not looked at yet |
 | **Track — lidar corrected** | `/fusion/path_map` | **green** — where it has been, corrected against the walls |

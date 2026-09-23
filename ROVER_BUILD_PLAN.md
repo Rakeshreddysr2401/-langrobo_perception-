@@ -23,16 +23,16 @@ the measurements in LOCALIZATION.md and TODO.md §43.
 | | value | source |
 |---|---|---|
 | motors | Rhino GB37 12 V, 200 RPM no-load, 1:30, **stall 3.5 kg·cm**, rated 0.3 A | `phase1/firmware/HARDWARE.md` §3 |
-| wheels | 85 mm OD, tape-checked | firmware `WHEEL_DIAMETER_M` |
+| wheels | **83 mm OD** across the grips, 40 mm wide, axle 41 mm off the floor **(measured 2026-09-24)**; odometry still counts with 85 mm until a taped 1 m drive decides | `description/params.yaml` |
 | drive | skid-steer, 4 driven wheels, 2 motors in parallel per BTS7960, one driver per side | HARDWARE.md §2, §4 |
 | control | per-side PI on encoder speed, 50 Hz, saturates to full duty when a side lags | firmware `pidStep` |
 | motor power | 3S pack → both BTS7960s; ESP32 on a separate 65 W USB bank | owner; HARDWARE.md §1 |
-| track, physical | **0.34 m** wheel centre to wheel centre — the firmware's `WHEEL_BASE_M` | TODO.md §13, HARDWARE.md |
+| track, physical | **0.34 m** wheel centre to wheel centre **(measured 2026-09-24)**; wheelbase **0.238 m**, axles 6.3 / 30.1 cm behind the nose | `description/params.yaml` |
 | track, effective for turns | **0.5216 m** `WHEEL_BASE_ROT_M` — measured over four 360° spins; the wheels over-read turns by ~1.53× | TODO.md §13 |
-| track, RViz model | 0.385 m — from the owner's description of the tyres, **disagrees with 0.34** | `rover_marker.py` |
-| body / envelope | 36 × 28 cm body, 46 × 42 cm with tyres — **described, not measured** | nav2.yaml |
-| camera | x 0.170, z 0.163 m | ARCHITECTURE.md §3 |
-| LiDAR | x 0.135, z 0.21 m **(described)**; yaw +88.60° **(measured)** | `./rover`, lidar/README.md |
+| track, RViz model | ~~0.385 m~~ — now 0.34, from the tape | `rover_marker.py` |
+| body / envelope | frame 36 × 28 × 16 cm, 6 cm off the floor; envelope **36 × 38 cm** with tyres (was a described 46 × 42) **(measured)** | `description/params.yaml` |
+| camera | camera0_link (left IR imager) x 0.173, **y −0.0475**, z 0.175 m **(measured + datasheet)** | `description/params.yaml` |
+| LiDAR | x 0.1342, **z 0.2498** m **(measured + datasheet; was 0.21)**; yaw +88.60° **(calibrated)** | `description/params.yaml` |
 | mass, CG, corner loads | **unknown** | — |
 | battery voltage under load | **unknown**: no telemetry | — |
 
@@ -91,6 +91,9 @@ Two consequences drive the rest of this plan:
 ---
 
 ## 1. Measure — the tape and the scales (you, ~30 min)
+
+**Done 2026-09-24:** rows 1–10 (geometry). They live in `description/params.yaml`;
+`description/build` derives every frame from them. Open: rows 11–14.
 
 Everything after this uses these numbers. Measure from **base_link = the
 point on the floor midway between the four wheel contact patches**, x forward,

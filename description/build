@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Regenerate rover.urdf + cad/ from params.yaml and check the repo for drift.
+# The CAD needs build123d, kept in its own venv so the system Python stays clean.
+set -e
+VENV=${CAD_VENV:-$HOME/.venvs/cad}
+if [ ! -x "$VENV/bin/python" ]; then
+  echo "  first run: creating $VENV with build123d (~1 min)"
+  python3 -m venv "$VENV"
+  "$VENV/bin/pip" install -q build123d pyyaml
+fi
+exec "$VENV/bin/python" "$(dirname "$0")/build.py" "$@"

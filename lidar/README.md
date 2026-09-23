@@ -5,7 +5,7 @@
 | sensor | Slamtec RPLidar C1 — 360°, 10 Hz, 720 beams (0.5°), 0.05–16 m, 5 kHz samples |
 | link | USB, Silicon Labs CP2102N bridge → `/dev/ttyUSB0`, 460800 baud |
 | mount | top of the rover, directly above the camera, 3.5 cm behind its lens, centred; window ≈21 cm off the floor |
-| frame | `laser`, child of `base_link` (x 0.135, z 0.21 from a description; **yaw +1.5463 rad / +88.60° measured**) |
+| frame | `laser`, child of `base_link` (x 0.1342, z 0.2498 from description/params.yaml, measured 2026-09-24; **yaw +1.5463 rad / +88.60° measured**) |
 | timing | driver stamps shifted **+82 ms** (`LIDAR_TIME_OFFSET`), measured — see below |
 | topic | `/scan` (`sensor_msgs/LaserScan`) |
 | driver | `sllidar_ros2` (Slamtec's own), pinned in `build.sh`, built once into `ws/install` |

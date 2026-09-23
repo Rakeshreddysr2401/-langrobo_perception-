@@ -1,0 +1,94 @@
+# The rover's geometry: the ONE place these numbers live.
+#
+# Rules (owner, 2026-09-24): a number goes in only if we have it. Unknown stays
+# `value: null` -- never a guess, never a "reasonable default".
+#
+# This file holds RAW measurements, the way they were taken (from the nose of the
+# frame, from the floor, ...). description/build derives every frame position
+# from them, so a re-measurement changes one line here and nothing else.
+#
+# base_link = on the FLOOR, midway between the four wheel contact patches.
+# x forward, y left, z up. Metres and radians.
+#
+# status:
+#   measured    tape/caliper/scale on the rover
+#   datasheet   the manufacturer's mechanical drawing
+#   calibrated  derived from driving data (a result, not a dimension)
+#   described   stated, not tape-checked
+#   unknown     not measured yet -- value must be null
+#
+# After editing: description/build
+
+# The chassis frame, as a box. Measured 2026-09-24 by the owner.
+frame:
+  length:   {value: 0.36, status: measured, source: "nose to tail of the base frame", date: 2026-09-24}
+  width:    {value: 0.28, status: measured, source: "left to right of the base frame", date: 2026-09-24}
+  bottom_z: {value: 0.06, status: measured, source: "floor to underside of the base frame", date: 2026-09-24}
+  height:   {value: 0.16, status: measured, source: "base frame to top; top is at 0.22 from the floor", date: 2026-09-24}
+
+wheels:
+  diameter:   {value: 0.083, status: measured, source: "OD across the dotted grips", date: 2026-09-24}
+  width:      {value: 0.040, status: measured, source: "tyre width", date: 2026-09-24}
+  axle_z:     {value: 0.041, status: measured, source: "floor to axle; motors hang below the base frame", date: 2026-09-24}
+  track:      {value: 0.34,  status: measured, source: "left tyre centre to right tyre centre", date: 2026-09-24}
+  # Both axles measured along the 36 cm side FROM THE NOSE, same on left and
+  # right. base_link is midway between them, so the nose is at
+  # x = (0.063 + 0.301) / 2 = +0.182 and the wheelbase is 0.238. (A direct
+  # axle-to-axle reading gave "24 cm", which agrees.)
+  front_axle_from_nose: {value: 0.063, status: measured, source: "along the 36 cm side", date: 2026-09-24}
+  rear_axle_from_nose:  {value: 0.301, status: measured, source: "along the 36 cm side", date: 2026-09-24}
+
+# What the ODOMETRY uses, kept apart from the geometry above on purpose. The
+# firmware counts distance with 85 mm; the tyre measures 83 mm. LiDAR-vs-wheel
+# distance checks have passed with 85, so it stays until a taped 1 m drive
+# decides (owner, 2026-09-24). Changing it shortens every wheel distance 2.4%.
+odometry:
+  wheel_diameter:  {value: 0.085,  status: calibrated, source: "firmware WHEEL_DIAMETER_M; pending a taped 1 m drive"}
+  # Skid-steer tyres slip sideways in a turn, so the effective width is wider
+  # than the physical track. A calibration result, not a dimension.
+  effective_track: {value: 0.5216, status: calibrated, source: "four 360 deg spins; WHEEL_BASE_ROT_M, TODO.md §13", date: 2026-08-21}
+
+# The D555. Case 167 (y) x 48 (x) x 42 (z) mm, 337 g, 95 mm stereo baseline.
+camera:
+  case_width:  {value: 0.167, status: datasheet, source: "D555 datasheet v1.1"}
+  case_depth:  {value: 0.048, status: datasheet, source: "D555 datasheet v1.1"}
+  case_height: {value: 0.042, status: datasheet, source: "D555 datasheet v1.1"}
+  baseline:    {value: 0.095, status: datasheet, source: "D555 datasheet v1.1; the driver's infra1->infra2 TF agrees"}
+  mass:        {value: 0.337, status: datasheet, source: "D555 datasheet v1.1"}
+  glass_inset: {value: 0.009, status: measured,  source: "front glass sits 0.8-1.0 cm inside the nose", date: 2026-09-24}
+  lens_z:      {value: 0.175, status: measured,  source: "floor to lens centre (11.5 above the base frame)", date: 2026-09-24}
+  case_y:      {value: 0.0,   status: measured,  source: "centred left-right on the frame", date: 2026-09-24}
+  pitch:       {value: 0.0,   status: described, source: "level; never measured"}
+  # camera0_link is the driver's root frame = the LEFT IR imager (infra1), not
+  # the case centre. The driver puts infra2 at +0.095 y from it, so with the
+  # case centred, infra1 sits half a baseline to -y: camera0_link y = -0.0475.
+  # The optical origin is some mm behind the front glass; the datasheet does
+  # not give it, so x is taken at the glass.
+  infra2_side: {value: 1.0, status: measured, source: "sign of y in live tf camera0_link->camera0_infra2_frame (+0.095)", date: 2026-09-24}
+
+# The RPLidar C1. Base 55.6 x 55.6, 41.3 tall, laser plane 29.8 above its base.
+lidar:
+  case_size:     {value: 0.0556, status: datasheet, source: "RPLIDAR C1 datasheet, Figure 4-1"}
+  case_height:   {value: 0.0413, status: datasheet, source: "RPLIDAR C1 datasheet, Figure 4-1"}
+  plane_above_base: {value: 0.0298, status: datasheet, source: "RPLIDAR C1 datasheet: laser receiving and emitting height"}
+  mass:          {value: 0.110, status: datasheet, source: "RPLIDAR C1 datasheet"}
+  front_gap:     {value: 0.02,   status: measured, source: "nose of the frame to the C1's front edge", date: 2026-09-24}
+  y:             {value: 0.0,    status: measured, source: "centred left-right", date: 2026-09-24}
+  # the C1's base sits directly on the frame top (owner, 2026-09-24)
+  yaw:           {value: 1.5463, status: calibrated, source: "./rover lidar --calibrate, +88.60 deg, 5 legs, spread 0.76 deg", date: 2026-09-22}
+
+# Everything else on the rover (battery, Jetson, Pi 5, motors, drivers, power
+# bank...), added as each is measured. Each is a box in base_link:
+#   - {name: battery, size: [x, y, z], centre: [x, y, z], mass: null, status: measured, date: ...}
+# size/centre are required; mass stays null until weighed.
+components: []
+
+# §1 rows 11-12. Nothing here until the scale says so: no masses are estimated,
+# so the URDF carries no <inertial> and no CG is reported.
+mass:
+  total: {value: null, status: unknown, source: "§1 row 11: bathroom scale"}
+  corner_loads:  # one scale under each wheel, the other three on blocks of the same height
+    LF: {value: null, status: unknown, source: "§1 row 12"}
+    LR: {value: null, status: unknown, source: "§1 row 12"}
+    RF: {value: null, status: unknown, source: "§1 row 12"}
+    RR: {value: null, status: unknown, source: "§1 row 12"}
