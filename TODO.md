@@ -2555,3 +2555,18 @@ centre to **1.0 cm** (slam) / 1.2 cm (walls, no slam). The held-left version
 is verified in simulation (1500 random moves, 0 failures) but **not yet on the
 floor**: the room is too tight for its legs (a +90 in place needs ~38 cm of
 reverse, and the swept-area check found something 7 cm from the swing).
+
+### 43, continued — slam's heading was being skewed by LiDAR timestamps (fixed 2026-09-23)
+
+Two +90 turns in the same direction left slam with an 8° heading correction
+that odometry and direct wall registration both contradicted, and
+`./rover drive` over-turned by ~10° steering to it. Cause: `sllidar_node`
+stamped scans ~82 ms before they were measured (`./rover lidar --lag`: +68,
++94, +85 ms), so every scan slam matched during a turn was checked against a
+pose ~0.6° off, and it built up with every turn in one direction. Fixed in the
+driver via `lidar/patches/0001-scan-time-offset.patch` and
+`LIDAR_TIME_OFFSET=0.082`; re-measured at **−2 ms**.
+
+**Any drive or slam number from before this fix that involved turning is
+suspect**, the 0.3 cm +90 result included. Re-run: `./rover drive 0 0 90
+--rel`, then the taped return-to-mark test.
