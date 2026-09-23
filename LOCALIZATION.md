@@ -238,3 +238,55 @@ drawn at its described size with the nav2 footprint outline and the LiDAR puck.
    (phase2/config/SLAM.md) and should wait for 1–2.
 7. **Give the brain `./rover drive`.** It is a script on the Jetson; the brain
    cannot call it yet.
+
+## 7. Stage A baseline, 2026-09-24 (partial): graded against LiDAR truth
+
+The first runs of the new harness (`phase1/harness/`, SENSOR_FUSION_PLAN.md
+§5), on the new geometry (robot_state_publisher; vo_node reading the camera
+mount from TF). Truth is the LiDAR scan at each stop matched against the
+start. Every checkpoint below passed the residual and two-guess gates.
+Errors: cm / degrees at the last checkpoint.
+
+| run | what really happened (truth) | fused | vo | wheels | wheels+gyro |
+|---|---|---|---|---|---|
+| `023642_still`, 34 s parked | nothing moved | 0.2 / **0.53** | 0.2 / 0.00 | 0.0 / 0.00 | 0.0 / 0.12 |
+| `023804_straight`, 0.5 m out and back | out **50.3 cm**, 1.1 cm sideways; back to −0.5 / +0.6 cm, heading −0.93° | 2.1 / 0.22 (3.1 at the far end) | 2.0 / 1.17 | 0.2 / 0.25 (2.2 at the far end) | 0.3 / 0.40 |
+| `023845_pivot90`, stopped after 2 of 8 turns | after +90: **slid to (−18.9, −27.6) cm**; after +180: (+17.3, −49.5) cm | **19.3 / 4.94** | 16.8 / 0.80 | 11.4 / 37.8 | 16.8 / 1.51 |
+
+What it says:
+
+- **The wheels over-read distance by ~1.4%.** They said 51.0 cm where the
+  truth measured 50.3 cm, in the direction the 85 mm (firmware) vs 83 mm
+  (tape) difference predicts (2.4%). That is one 0.5 m run, not the taped 1 m
+  drive, but it points the same way.
+- **The fused heading drifts while parked:** 0.53° in 34 s, where the gyro
+  plus wheels held 0.12° and VO held 0.00°. Stationary drift is exactly
+  what the zero-velocity lock (SENSOR_FUSION_PLAN.md §3.1) is for.
+- **In the pivot, the fused heading was worse than the gyro alone:** 4.94°
+  against 1.51° after 180°. The wheels' own heading was off by 37.8°.
+- **Position through a pivot is poor for every estimator** (11-19 cm after
+  two turns), because the rover slides ~33 cm per 90°. That is the case the
+  LiDAR odometry (stage C) and the closed-loop pivot (stage E) exist for.
+
+### The pivot run stalled, and the traces say why
+
+- **Actual rate ~0.06 rad/s (3°/s) for a commanded 1.5 rad/s.** One 90° took
+  30 s, the next 55 s. nav2.yaml records ~0.21 rad/s actual for 1.0
+  commanded, so the rover turned roughly three times slower than before.
+- **In a left (CCW) turn the RIGHT side barely drove:** left −5685 / −3978
+  ticks (front/rear), right +105 / +54. The rover pivoted about its right
+  side. That is the 33 cm slide.
+- **Then the right side ran BACKWARDS while commanded forward.** From about
+  84 s, and through all of the third turn, right went −22 → −2794 ticks with
+  wz +1.5 commanded. There were also stretches where the left wheels turned
+  and the gyro did not: pure slip.
+- The third turn stalled at +38.7° (gyro). Driving stopped there: the motors
+  were sitting near stall for minutes.
+
+Leading suspect: a **low battery**, which build plan §0 predicts would take
+the pivot's torque margin to zero. Nothing measures the voltage yet (the
+INA226, build plan §4). The right side reversing under a forward command is a
+separate question for the firmware's PI loop, or for the wiring on that side.
+
+**Still to record, after a charge:** the rest of `pivot90`, `pivot360`,
+`square`, `small`.
