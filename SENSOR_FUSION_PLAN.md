@@ -168,7 +168,7 @@ Nothing here is decided by argument. It is decided by recorded runs.
 
 | stage | what | done when |
 |---|---|---|
-| **A. Harness** | bag recording command, scenario checklist, grading script (metrics above), baseline numbers for today's `fusion.py` | the current fusion has a score on every scenario |
+| **A. Harness** | bag recording command, scenario checklist, grading script (metrics above), baseline numbers for today's `fusion.py` | the current fusion has a score on every scenario — **tools built and truth validated 2026-09-24 (`phase1/harness/`); baseline session pending** |
 | **B. Wheel node** | ICR skid-steer kinematics, per-wheel slip score, covariance from slip and ω, zero-velocity lock, stuck flag; ICR params fitted from bags, then online | wheel-only odometry beats today's wheel numbers in turns; slip flagged in the "wheels spinning" run |
 | **C. LiDAR odometry** | gyro de-skew, scan-to-submap PL-ICP, robust kernel, Hessian degeneracy → covariance, tilt gate | LiDAR-only odometry graded; corridor run shows the degeneracy flag |
 | **D. Fusion** | robot_localization with B + C + gyro + VO(cov); A/B against `fusion.py` on the bags; keep the winner | meets §5 acceptance on the recorded suite, then live |

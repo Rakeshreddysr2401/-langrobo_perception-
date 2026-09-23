@@ -336,24 +336,25 @@ def main():
             cam_yaw_deg stays a parameter -- it is a VO mount correction
             measured by pushing, not part of the rover's geometry.
             """
-            from rclpy.duration import Duration
             from rclpy.time import Time
             from tf2_ros import Buffer, TransformListener
             buf = Buffer()
             # One lookup, then stop listening: kept alive, this would decode
             # every /tf message for the life of the node, on a loaded Orin.
-            listener = TransformListener(buf, self, spin_thread=True)
-            try:
-                tf = buf.lookup_transform('base_link', frame, Time(),
-                                          timeout=Duration(seconds=15.0)).transform
-            except Exception as e:
+            # Spun here rather than with spin_thread=True, whose thread never
+            # wakes at shutdown and keeps the process alive.
+            listener = TransformListener(buf, self)
+            end = time.time() + 15.0
+            while not buf.can_transform('base_link', frame, Time()) and time.time() < end:
+                rclpy.spin_once(self, timeout_sec=0.1)
+            found = buf.can_transform('base_link', frame, Time())
+            tf = buf.lookup_transform('base_link', frame, Time()).transform if found else None
+            listener.unregister()
+            if tf is None:
                 self.get_logger().error(
-                    f'no base_link -> {frame} after 15 s ({type(e).__name__}); '
-                    f'using the built-in {fallback}. Is robot_state_publisher up? '
-                    f'(./rover pose starts it)')
+                    f'no base_link -> {frame} after 15 s; using the built-in {fallback}. '
+                    'Is robot_state_publisher up? (./rover pose starts it)')
                 return fallback
-            finally:
-                listener.unregister()
             q = tf.rotation
             if max(abs(q.x), abs(q.y), abs(q.z)) > 1e-3:
                 self.get_logger().warn(

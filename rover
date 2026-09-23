@@ -12,6 +12,8 @@
 #   ./rover wheels     check the ESP32 link (diagnose only; cannot fix from here)
 #                      --nudge  MOVES ~7 cm: proves the motors are powered, not just the link
 #   ./rover compare    the side-by-side readout — the Phase 1 instrument
+#   ./rover record S   bag one test scenario (SENSOR_FUSION_PLAN.md §5); straight/pivot90/... DRIVE
+#   ./rover grade      score every pose estimate in a run against LiDAR truth (--summary)
 #   ./rover values     every sensor's current reading, in one place
 #   ./rover status     what is alive right now
 #   ./rover fused      the fused pose -> /odom + TF, what nav2 consumes
@@ -955,6 +957,36 @@ compare)
   # motion watchdog permanently fed and would mask a teleop fault.
   kill_match 'keepalive.py'
   docker exec $ttyflag "$NAME" bash -lc "$ENVSET python3 $SRC/nodes/compare.py $*"
+  ;;
+
+# ── record / grade ──────────────────────────────────────────────────────────
+# The localization test harness (SENSOR_FUSION_PLAN.md §5, stage A). record
+# drives one scenario and bags the raw sensors plus every live estimate; grade
+# scores each estimate against where the LiDAR says the rover really was.
+#   ./rover record straight|pivot90|pivot360|square|small|still|manual [--dist M] [--images]
+#   ./rover grade [BAG ...]      (default: the newest)      ./rover grade --summary
+record)
+  need_container
+  shift
+  ttyflag=""; [ -t 0 ] && ttyflag="-it"   # Ctrl-C must reach Python: it stops the motors
+  docker exec $ttyflag -e GIT_REV="$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null)" \
+    -e RUN_STAMP="$(date +%Y%m%d-%H%M%S)" "$NAME" \
+    bash -lc "$ENVSET python3 $SRC/harness/run.py $(printf '%q ' "$@")"
+  ;;
+grade)
+  need_container
+  shift
+  if [ $# -eq 0 ]; then
+    last=$(ls -1d "$REPO"/logs/bags/*/ 2>/dev/null | tail -1)
+    [ -n "$last" ] || die "no runs in logs/bags -- ./rover record first"
+    set -- "$(basename "$last")"
+  fi
+  if [ "$1" = "--summary" ]; then
+    rexec "python3 $SRC/harness/grade.py --summary /logs/bags"
+  else
+    args=""; for b in "$@"; do args="$args /logs/bags/$(basename "$b")"; done
+    rexec "python3 $SRC/harness/grade.py $args"
+  fi
   ;;
 
 # ── status ──────────────────────────────────────────────────────────────────
