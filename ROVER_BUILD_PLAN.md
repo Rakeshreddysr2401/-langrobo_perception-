@@ -424,3 +424,55 @@ the wheels change.
 
 Because the geometry now comes from one place (`description/`), a wheel change
 is a `params.yaml` edit plus a `./rover calibrate`, not a code change.
+
+### 9.6 Edge cases: home and office now, parking later (2026-09-24)
+
+**"Weight the wheels down" is right, but make it adaptive, not a fixed low
+number.** There are situations where the wheels are the *only* sensor still
+telling the truth:
+
+| situation | LiDAR | camera (VO) | wheels | gyro | who carries it |
+|---|---|---|---|---|---|
+| turning in place | good | weak (+11%) | **bad** (scrub) | **best** | gyro + LiDAR |
+| standing still, people walking past | can "see" motion that is theirs | same | **certain: zero** | good | wheels (zero-velocity lock) |
+| long plain corridor | slides along its length | weak on plain walls | **good** (straight, hard floor) | good | wheels + gyro |
+| dark room (emitter is off for VO) | fine | **blind** | fine | fine | LiDAR |
+| glass doors / walls, mirrors | passes through or reflects: phantom rooms | also fails | unaffected | unaffected | wheels + gyro, and treat glass as a known risk |
+| crowded office | scans full of moving legs | moving features | fine | fine | reject outliers; lean on wheels + gyro |
+| rug edge, threshold, ramp (rover tilts) | laser plane hits the floor: phantom wall | fine | slip on the edge | tilt known from accelerometer | drop scans while tilted |
+| wheels spinning, rover stuck | not moving | not moving | "moving" | not turning | disagreement IS the stuck/slip detector |
+| picked up and carried | moves | moves | zero | moves | detect "kidnap", restart the map (fresh-start maps) |
+| lift/elevator (office) | small box | static interior | zero | fine | pause localization; new floor = new map |
+| open car park, daytime (later) | sun past its 40k lux rating; little in 12 m | good | good on asphalt | good | camera + wheels (+ GPS later) |
+| covered parking garage (later) | good: pillars, walls | good | good | good | LiDAR |
+| night outdoors (later) | fine | blind | good | good | LiDAR + wheels |
+| rain, puddles (later) | spurious returns (C1 IP54) | lens drops (D555 IP65) | slip | fine | reduced speed, more margin |
+
+So the rule for fusion is **weight by situation**: wheels near zero for
+position while turning or when they disagree with the LiDAR (slip); wheels
+trusted for "stopped" and for straight runs where the LiDAR is degenerate;
+LiDAR primary wherever it has structure; camera primary outdoors and where the
+LiDAR has nothing in range. With omni wheels the same logic holds, with the
+wheels trusted even less for sideways motion.
+
+**The gap nothing on the rover covers today: low and close.** The LiDAR sees
+one plane at 25 cm. The D555 sits 17.5 cm up looking level (58° vertical FOV),
+so the floor nearer than ~32 cm is out of view, and depth has a minimum range
+(52 cm at full resolution per the datasheet; it runs at 896×504, where it is
+shorter, roughly ~36 cm by the usual scaling, **to be measured**). Anything
+**lower than 25 cm and within ~40 cm of the nose** is invisible:
+shoes, cables, toys, pet bowls, door stops, and, most importantly at home,
+**the top of a staircase**. Options, cheapest first:
+
+1. Tilt the D555 down ~10-15° (`camera.pitch` in params.yaml; measure it). The
+   camera then sees the floor closer in, at the cost of some range ahead.
+2. Two to four small downward ToF sensors (VL53L0X-class) at the front
+   corners: cliff detection. Non-negotiable before it runs near stairs.
+3. A front bumper switch as the last line: it stops the motors in firmware,
+   whatever the software believes.
+
+**Hardware limits that no sensor fixes:** 6 cm ground clearance and a 41 mm
+axle, so thresholds and kerbs over ~2 cm, speed bumps, and potholes are out
+(parking needs bigger wheels, and a taller build is visible to drivers, a
+safety issue for a 22 cm robot among cars). The C1 is an indoor LiDAR; an
+outdoor parking robot will want a sunlight-rated one, plus GPS.
