@@ -15,6 +15,7 @@
 #   datasheet   the manufacturer's mechanical drawing
 #   calibrated  derived from driving data (a result, not a dimension)
 #   described   stated, not tape-checked
+#   assumed     a placeholder the owner asked for; listed on every build
 #   unknown     not measured yet -- value must be null
 #
 # After editing: description/build
@@ -83,10 +84,12 @@ lidar:
 # size/centre are required; mass stays null until weighed.
 components: []
 
-# §1 rows 11-12. Nothing here until the scale says so: no masses are estimated,
-# so the URDF carries no <inertial> and no CG is reported.
+# §1 rows 11-12. The total is a PLACEHOLDER the owner asked for (2026-09-24:
+# "assume 3-4 kg, will weigh it later"), so it is `assumed` and every build
+# prints it. Nothing derives geometry from it; the URDF still carries no
+# <inertial> and no CG is reported until the corner loads are weighed.
 mass:
-  total: {value: null, status: unknown, source: "§1 row 11: bathroom scale"}
+  total: {value: 3.5, status: assumed, range: [3.0, 4.0], source: "owner's estimate, 3-4 kg; §1 row 11: bathroom scale", date: 2026-09-24}
   corner_loads:  # one scale under each wheel, the other three on blocks of the same height
     LF: {value: null, status: unknown, source: "§1 row 12"}
     LR: {value: null, status: unknown, source: "§1 row 12"}

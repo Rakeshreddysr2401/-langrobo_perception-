@@ -273,7 +273,7 @@ def main():
         else:
             print(f"      {near90:.1f} deg off a clean quarter turn, and the spread is only")
             print(f"      {spread:.1f} deg — so the mount really is skewed. Use the measured value.")
-        print(f"      set it:  LIDAR_YAW={yaw:.4f} in ./rover, then ./rover lidar")
+        print(f"      set it:  lidar.yaw = {yaw:.4f} in description/params.yaml, then ./rover lidar")
         return 0
     finally:
         try:

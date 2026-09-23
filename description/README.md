@@ -14,8 +14,8 @@ cad/          GENERATED: rover.step (open in FreeCAD / Onshape) + one .stl per p
 2. Put it in `params.yaml` the way it was measured (from the nose, from the
    floor...). Unknown stays `value: null`. **No guesses, no placeholder masses.**
 3. `description/build`: rewrites `rover.urdf` and `cad/`, prints the derived frames,
-   and checks all 22 other copies of these numbers (`./rover`, nav2 footprint,
-   `vo_node`, `rover_marker`, firmware, pivot safety corners). Exit 1 = a copy
+   and checks the 17 hand copies of these numbers (nav2 footprint, `vo_node`,
+   `rover_marker`, firmware, pivot safety corners). Exit 1 = a copy
    disagrees; the output says what it should be.
 4. Fix the copies it names, rerun until `drift: N/N`, commit.
 
@@ -45,8 +45,23 @@ Two things that look like mistakes and are not:
   until a taped 1 m drive says which one gives true distances.
   Likewise `effective_track` (0.5216) is a turning calibration, not the 0.34 track.
 
-## Not yet (ROVER_BUILD_PLAN.md step 4)
+## Live
 
-The live TFs still come from `static_transform_publisher` calls in `./rover`. The
-switch is: `robot_state_publisher` on `rover.urdf`, RViz on the URDF, and
-`rover_marker.py` retired. Until then the drift check keeps the copies honest.
+`./rover pose` and `./rover lidar` both call `tf_up`, which runs
+`build.py --rsp` and starts ONE `robot_state_publisher` with the URDF derived
+from `params.yaml` at that moment. So a new measurement reaches the live TF on
+the next layer start, with no copy to update. `LIDAR_YAW=<rad> ./rover lidar`
+still overrides the yaw for one run.
+
+RViz (`phase2/rviz/rover_live.rviz`) draws the URDF from `/robot_description`.
+
+Still copied by hand, and held to params.yaml by the drift check: nav2's
+footprint, `vo_node`'s camera defaults, `rover_marker.py`, the firmware, and the
+pivot scripts' corners. Next: vo_node reads its camera offset from TF, and
+`rover_marker.py` retires.
+
+## Placeholders
+
+`mass.total` is **assumed 3.5 kg (3–4)**, on the owner's word until it is weighed.
+Every build prints it. Nothing uses it for geometry and the URDF has no
+`<inertial>` yet.

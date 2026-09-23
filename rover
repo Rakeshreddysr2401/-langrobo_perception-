@@ -54,16 +54,10 @@ LIDAR=/opt/lidar
 # The plain node, not /dev/serial/by-id/...: the Slamtec SDK refuses the symlink
 # (error 80008004) but opens the node it points at. It is the only CP210x here.
 LIDAR_PORT=${LIDAR_PORT:-/dev/ttyUSB0}
-# base_link -> laser. DERIVED by description/build from description/params.yaml
-# (measured 2026-09-24) -- change it there, then copy what the build prints.
-# x: the C1's front edge is 2 cm behind the nose (nose at +0.182), centre half
-# its 55.6 mm case further back. y: centred. z: its base sits on the frame top
-# at 0.22 and the laser plane is 29.8 mm above that (C1 datasheet); the old
-# 0.21 was 4 cm low. yaw: which way the C1's zero beam points is NOT marked on
-# the case; it is measured by driving (below).
-LIDAR_X=${LIDAR_X:-0.1342}
-LIDAR_Y=${LIDAR_Y:-0.0}
-LIDAR_Z=${LIDAR_Z:-0.2498}
+# base_link -> laser, base_link -> camera0_link and the rest of the fixed frames
+# live in description/params.yaml; robot_state_publisher serves them (tf_up
+# below). The laser's position is measured (2026-09-24); which way the C1's zero
+# beam points is NOT marked on the case, so its yaw is measured by driving:
 # MEASURED 2026-09-22 by `./rover lidar --calibrate`: +1.5463 rad, +88.60 deg.
 #
 # Six driven legs (three out-and-back pairs of 0.20 m), five usable, spread
@@ -79,7 +73,9 @@ LIDAR_Z=${LIDAR_Z:-0.2498}
 # then -1.5708) and BOTH were wrong -- the sign was inverted. The lidar and the
 # wheels agreeing on the distance of the same move is what makes this one
 # trustworthy; nobody's eyes are in the loop.
-LIDAR_YAW=${LIDAR_YAW:-1.5463}
+#
+# That value is lidar.yaw in description/params.yaml. `LIDAR_YAW=<rad> ./rover
+# lidar` still overrides it for one run, to try a value before recording it.
 # Seconds to ADD to every /scan stamp. MEASURED 2026-09-23 by
 # `./rover lidar --lag`: three runs, +68 / +94 / +85 ms, same sign every time,
 # no fixed bias. sllidar_node reads now() BEFORE blocking for the next full
@@ -107,6 +103,26 @@ rexec(){ docker exec    "$NAME" bash -lc "$ENVSET $1"; }
 running(){ [ "$(docker inspect -f '{{.State.Running}}' "$NAME" 2>/dev/null)" = "true" ]; }
 die(){ echo "  ✗ $*" >&2; exit 1; }
 kill_match(){ docker exec "$NAME" bash -lc "for p in \$(pgrep -f '$1'); do kill -9 \$p 2>/dev/null; done; true" >/dev/null 2>&1 || true; }
+
+# Every fixed frame on the rover -- base_link -> camera0_link, laser, wheels,
+# chassis -- from ONE robot_state_publisher serving the URDF that
+# description/build.py derives from params.yaml at this moment (never a stale
+# generated file). It replaces two static_transform_publishers, one per layer,
+# whose kill patterns once took each other out and lost the laser frame.
+# Idempotent: both the pose and lidar layers call it, and a restart republishes
+# the same latched /tf_static.
+tf_up(){
+  local f; f=$(mktemp) || die "mktemp"
+  python3 "$REPO/description/build.py" --rsp "$f" ${LIDAR_YAW:+--lidar-yaw "$LIDAR_YAW"} \
+    || { rm -f "$f"; die "description/build.py --rsp failed -- is description/params.yaml valid?"; }
+  docker cp "$f" "$NAME":/tmp/rover_rsp.yaml >/dev/null; rm -f "$f"
+  kill_match 'child-frame-id camera0_link'   # the old per-layer publishers
+  kill_match 'child-frame-id laser'
+  kill_match '[r]obot_state_publisher'
+  dexec "exec ros2 run robot_state_publisher robot_state_publisher --ros-args \
+            --params-file /tmp/rover_rsp.yaml > /tmp/rsp.log 2>&1"
+  sleep 2
+}
 
 need_container(){ running || die "no container. Run: ./rover camera"; }
 
@@ -247,21 +263,10 @@ pose)
 
   # base_link -> camera0_link must exist BEFORE the pose starts, or the first
   # poses land in a frame tree with a missing link.
-  echo "[pose] static TF base_link -> camera0_link"
-  # Match THIS publisher's child frame, not every static_transform_publisher.
-  # The broad match also killed the lidar's base_link -> laser, and ./rover up
-  # runs lidar BEFORE pose -- so every full bring-up silently destroyed the
-  # laser frame while ./rover lidar's own gate stayed green (/scan is published
-  # by the driver and does not need the TF). RViz drew no ring and slam_toolbox
-  # could never have worked. Same pattern as the lidar layer's own kill_match.
-  # camera0_link is the D555's LEFT IR imager, not the case centre: the case is
-  # centred on the frame, so the imager is half the 95 mm baseline to -y. x is
-  # the front glass, 0.9 cm inside the nose; z the lens, 17.5 cm off the floor.
-  # DERIVED by description/build from description/params.yaml (2026-09-24).
-  kill_match 'child-frame-id camera0_link'
-  dexec "exec ros2 run tf2_ros static_transform_publisher --x 0.173 --y -0.0475 --z 0.175 \
-            --frame-id base_link --child-frame-id camera0_link > /tmp/statictf.log 2>&1"
-  sleep 1
+  # camera0_link is the D555's LEFT IR imager, not the case centre -- see
+  # description/README.md for why its y is -0.0475 on a centred camera.
+  echo "[pose] fixed frames from description/params.yaml (robot_state_publisher)"
+  tf_up
 
   echo "[pose] visual odometry  (stereo IR -> /vo/odom, TF odom -> base_link)"
   kill_match "[v]o_node.py"
@@ -326,10 +331,8 @@ lidar)
     || die "driver not built — run: lidar/build.sh   (one-off, ~30 s)"
   [ -e "$LIDAR_PORT" ] || die "no $LIDAR_PORT — is the C1's USB cable in? (lsusb: Silicon Labs CP210x)"
   kill_match '[s]llidar_node'
-  kill_match 'child-frame-id laser'
-  echo "[lidar] static TF base_link -> laser (x $LIDAR_X y $LIDAR_Y z $LIDAR_Z yaw $LIDAR_YAW)"
-  dexec "exec ros2 run tf2_ros static_transform_publisher --x $LIDAR_X --y $LIDAR_Y --z $LIDAR_Z --yaw $LIDAR_YAW \
-            --frame-id base_link --child-frame-id laser > /tmp/lidartf.log 2>&1"
+  echo "[lidar] fixed frames from description/params.yaml (robot_state_publisher)"
+  tf_up
   echo "[lidar] RPLidar C1 on $LIDAR_PORT -> /scan  (10 Hz, 720 beams, 0.5 deg)"
   dexec "source $LIDAR/ws/install/setup.bash; exec ros2 run sllidar_ros2 sllidar_node --ros-args \
             -p serial_port:=$LIDAR_PORT -p serial_baudrate:=460800 -p frame_id:=laser \

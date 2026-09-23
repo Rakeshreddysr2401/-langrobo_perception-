@@ -151,7 +151,7 @@ def main():
               f"{FAR:.2f} m, or the target moved. Clear the area and re-run.")
     else:
         print(f"      set it:  LIDAR_YAW={-bearing:.3f} ./rover lidar")
-        print(f"      then make it permanent in ./rover (LIDAR_YAW default).")
+        print(f"      then make it permanent: lidar.yaw in description/params.yaml")
 
     n.destroy_node()
     rclpy.shutdown()

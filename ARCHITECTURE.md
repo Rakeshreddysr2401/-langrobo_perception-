@@ -146,8 +146,8 @@ identically to a dead publisher.
 |---|---|---|
 | `map → odom` | **`slam_toolbox`** (since 2026-09-22) | the LiDAR correction. cuVSLAM also publishes it when `slam:=true`, so `./rover pose` runs with `SLAM=false` and `./rover slam` refuses a second owner |
 | `odom → base_link` | **`fusion_node`** | the guarded estimate, not the raw one |
-| `base_link → camera0_link` | static publisher | measured 2026-09-24: x 0.173, y −0.0475 (left imager), z 0.175 — `description/params.yaml`; vo_node adds yaw 2.06° |
-| `base_link → laser` | static publisher, `./rover lidar` | x 0.135, z 0.21 from a description; **yaw +88.60° measured by driving** (`./rover lidar --calibrate`) |
+| `base_link → camera0_link` | robot_state_publisher (`description/`) | measured 2026-09-24: x 0.173, y −0.0475 (left imager), z 0.175 — `description/params.yaml`; vo_node adds yaw 2.06° |
+| `base_link → laser` | robot_state_publisher (`description/`) | x 0.1342, z 0.2498 measured 2026-09-24; **yaw +88.60° measured by driving** (`./rover lidar --calibrate`) |
 
 `map → base_link` is the corrected pose; `./rover drive` steers on it. nav2
 and the Pi 5 brain still plan in `odom` — moving them is a separate, driven

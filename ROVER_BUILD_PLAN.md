@@ -344,8 +344,8 @@ the loop, rather than by raising the cap and hoping.
 |---|---|---|
 | 1. §1 measurements + corner weights | owner | tape, a scale, blocks |
 | 2. finish the live tests (tile, go-and-return, lift) | both | the X on the floor |
-| 3. `description/params.yaml` from §1, then the URDF | Claude | step 1 |
-| 4. switch the TFs, RViz, footprint to the URDF; re-validate | Claude | step 3 |
+| 3. `description/params.yaml` from §1, then the URDF | Claude | step 1 — ✅ 2026-09-24 |
+| 4. switch the TFs, RViz, footprint to the URDF; re-validate | Claude | step 3 — switched 2026-09-24; **re-validate on the rover** |
 | 5. INA226 on GPIO16/17, `/rover_diag` y/z = V/A | owner wires, Claude firmware | the board |
 | 6. voltage sweep (§4.2) | both | step 5 |
 | 7. weight balance (§5), re-measure the turns | owner, CAD if built | step 1 |
