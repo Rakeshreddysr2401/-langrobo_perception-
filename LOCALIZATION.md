@@ -45,7 +45,7 @@ number, are TODO.md §42 and §43.
 when its loop closure is on (`slam:=true`, `./rover pose`'s default), so
 `./rover up` now starts pose with `SLAM=false`, and `./rover slam` refuses to
 start if cuVSLAM already owns the frame. nav2 and the Pi 5 brain still plan in
-`odom`; see §7.
+`odom`; see §6.
 
 ---
 
@@ -126,11 +126,12 @@ genuinely 1.4° off a clean quarter turn.
 ## 3. Making turns predictable: the left side is HELD
 
 The firmware mixes `wL = vx − wz·0.17`, `wR = vx + wz·0.17`, and switches a
-side **off** when its target is under 0.01 m/s. That gives three ways to turn:
+side **off** when its target is under 0.01 m/s. The ways to turn, as measured:
 
 | mode | command | result |
 |---|---|---|
 | pure `wz` | `vx = 0` | left asked to reverse at full speed; usually stalls (pivot at the left tyres), sometimes does not (pivot at the centre) — a coin flip |
+| pure `wz` at **5.0 rad/s** (the brain's turns) | `vx = 0` | worse: 31–68 cm per turn, pivot spread 36 cm, one stall at 67° of 90° (2026-09-24) |
 | left **off** | `vx = wz·0.17` | left free-rolls behind the right: pivot **75 cm** out, ~60 cm of slide per 45° |
 | left **held** | `vx = wz·0.17 − sign(wz)·0.02` | left PI holds ~0.02 m/s: it can neither free-roll nor reverse properly |
 
@@ -217,15 +218,21 @@ drawn at its described size with the nav2 footprint outline and the LiDAR puck.
 3. **Lift test.** Wheels off the floor, command a pivot. Full speed in the air
    → the left side loses to floor load (motor, gearbox). Still weak → its
    driver or wiring.
-4. **Tape measurements, then a URDF.** Geometry lives in four places that
+4. **Tape measurements, then a URDF** — planned in full in
+   [ROVER_BUILD_PLAN.md](ROVER_BUILD_PLAN.md), with CAD, power (voltage
+   telemetry, sag) and weight distribution. Geometry lives in four places that
    disagree: the firmware's `WHEEL_BASE_M` is 0.34 m, the RViz model's wheel
    centres are 0.385 m apart, and the camera (x 0.17) and LiDAR (x 0.135)
    positions are from a description. Measure from the midpoint of the four
    wheels: track, wheelbase, and the camera's and LiDAR's x and height. Then
    one URDF feeds the TFs, the RViz model and nav2's footprint.
-5. **Grade the brain's turns.** The Pi 5's `move_robot` turns are **timed**, at
-   5.0 rad/s, on a 2026-08-22 finding that 5.0 pivots cleanly. This work tested
-   only up to 3.0. `PIVOT_WZ=5.0 ./rover pivot 90 -90` answers it.
+5. ~~**Grade the brain's turns.**~~ **Done 2026-09-24:** `PIVOT_WZ=5.0 ./rover
+   pivot`, six turns. The 2026-08-22 "5.0 pivots cleanly" does not hold: slides
+   of **31–68 cm** per turn, pivot points spread **36 cm** (the first two sat on
+   the *right* tyres, 0.4 cm apart; the next four went anywhere), pose error
+   0.8–8.9 cm, and **one turn stalled at 67° of 90°**, which a timed turn would
+   report as done. Heading stayed good (≤0.8°). The brain's turns should move
+   to held-left, closed-loop on the gyro, or to `./rover drive`.
 6. **nav2 and the brain in `map`.** The correction is used by `./rover drive`
    but not yet by nav2 or the brain. That is a driven change across both repos
    (phase2/config/SLAM.md) and should wait for 1–2.

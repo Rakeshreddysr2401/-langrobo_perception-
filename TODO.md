@@ -2570,3 +2570,16 @@ driver via `lidar/patches/0001-scan-time-offset.patch` and
 **Any drive or slam number from before this fix that involved turning is
 suspect**, the 0.3 cm +90 result included. Re-run: `./rover drive 0 0 90
 --rel`, then the taped return-to-mark test.
+
+### 43, continued — the brain's 5.0 rad/s turns, graded (2026-09-24)
+
+`PIVOT_WZ=5.0 ./rover pivot 90 -90`, then `90 -90 45 -45`. The first two turns
+looked ideal — 30.8 / 30.9 cm, pivot on the RIGHT tyres (1.8, −21.8) cm, spread
+0.4 cm, pose error ~1 cm — and did not repeat: the next four slid 42–68 cm,
+pivot spread 36 cm, pose error up to 8.9 cm, and the first stalled at **+67.2 of
++90°**. Heading ≤0.8° throughout. So 5.0 is not a clean pivot and is not
+predictable; timed turns at 5.0 (the Pi 5's `move_robot`) can stall and still
+report done. Held-left remains the only predictable mode. Which side stalls
+evidently depends on how hard both are driven, so "the left side is weak" is
+too simple — [ROVER_BUILD_PLAN.md](ROVER_BUILD_PLAN.md) §5 (corner weights) and
+the lift test separate weight from motor/driver.

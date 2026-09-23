@@ -121,6 +121,7 @@ right now — the Pi 5 has neither a microphone nor a speaker attached (§28).
 | **[PHASE2.md](PHASE2.md)** | mapping — nvblox, the map, and seeing it |
 | **[PHASE3.md](PHASE3.md)** | navigation — nav2, and everything shaped by the pivot fault |
 | **[LOCALIZATION.md](LOCALIZATION.md)** | **holding x, y, θ through turns** — the LiDAR, the turn fault and why it slides, held-left turns, `./rover drive`, and what is still open |
+| **[ROVER_BUILD_PLAN.md](ROVER_BUILD_PLAN.md)** | **the hardware plan** — measure, CAD, URDF, battery voltage and sag, weight distribution, and turning fixes ranked, with targets and the order of work |
 | **[lidar/README.md](lidar/README.md)** | the RPLidar C1 — mount, calibration, timestamp fix, driver patches |
 | **[TODO.md](TODO.md)** | open faults, and the dead theories kept so they are not re-litigated |
 | **[FLEET_STATUS.md](FLEET_STATUS.md)** | every box checked live — Jetson, Pi 5, Mac mini, ESP32, D555 — and what blocks voice |
