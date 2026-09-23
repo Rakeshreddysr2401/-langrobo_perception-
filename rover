@@ -560,7 +560,15 @@ up)
   echo "═══ full bring-up: camera → lidar → pose → fused → slam → map → nav → vlm → wheels → Pi5 → Studio → view ═══"
   for layer in camera lidar pose fused slam map nav vlm; do
     echo
-    "$0" "$layer" || die "'$layer' failed — fix it (see above) before continuing. Re-run: ./rover up"
+    # pose runs with SLAM=false so cuVSLAM does NOT publish map -> odom. Only
+    # one thing may own that transform, and in this sequence slam_toolbox is
+    # the one that does -- it corrects against walls on every scan, where
+    # cuVSLAM only corrects when it recognises a place. Without this, `up`
+    # brings pose up with loop closure on (its default) and the `slam` step
+    # two lines later refuses, so the whole bring-up stops half done.
+    if [ "$layer" = pose ]; then SLAM=false "$0" pose || die "'pose' failed — fix it (see above). Re-run: ./rover up"
+    else "$0" "$layer" || die "'$layer' failed — fix it (see above) before continuing. Re-run: ./rover up"
+    fi
   done
 
   echo
