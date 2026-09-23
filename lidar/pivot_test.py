@@ -40,7 +40,19 @@ from scipy.spatial import cKDTree
 from sensor_msgs.msg import LaserScan
 from tf2_ros import Buffer, TransformListener
 
-WZ = 0.5                 # rad/s commanded
+import os
+# 1.5, not 0.5: TODO 43 measured pivots reaching ~7% of ANY commanded rate --
+# the firmware's PI saturates to full duty and the motors stall against scrub.
+# A low command does not give a gentler pivot, only a slower one.
+WZ = float(os.environ.get("PIVOT_WZ", "1.5"))
+# Deadlines assume the rate the rover ACTUALLY reaches, not the commanded one.
+# The first version budgeted |angle|/WZ and every turn "stalled" at 18 s while
+# still turning. Abort instead on NO PROGRESS for STALL_S.
+MIN_RATE = 0.03          # rad/s, the slowest turn still worth waiting for
+STALL_S = 8.0
+# The spin sweeps a circle of this radius: half the 46 x 42 footprint diagonal
+# plus 5 cm. Anything the lidar sees inside it gets hit.
+SWEEP_R = math.hypot(0.23, 0.21) + 0.05
 RANGE_LO, RANGE_HI = 0.20, 6.0
 SETTLE = 1.5
 
@@ -144,9 +156,10 @@ class Pivot(Node):
         _, y0 = self.pose()
         t = Twist()
         t.angular.z = math.copysign(WZ, target)
-        deadline = time.time() + abs(target) / WZ * 4.0 + 6.0
+        deadline = time.time() + min(abs(target) / MIN_RATE + 10.0, 120.0)
         turned = 0.0
         prev = y0
+        best, best_t = 0.0, time.time()
         while rclpy.ok():
             self.cmd.publish(t)
             self.spin(0.05)
@@ -155,9 +168,12 @@ class Pivot(Node):
             prev = y
             if abs(turned) >= abs(target):
                 break
-            if time.time() > deadline:
+            if abs(turned) > best + math.radians(1.0):
+                best, best_t = abs(turned), time.time()
+            if time.time() - best_t > STALL_S or time.time() > deadline:
                 self.stop()
-                print(f"        stalled at {math.degrees(turned):+.1f} of {deg:+.0f} deg")
+                print(f"        stalled at {math.degrees(turned):+.1f} of {deg:+.0f} deg "
+                      f"(no progress for {STALL_S:.0f} s)")
                 return None
         self.stop()
         self.spin(SETTLE)
@@ -173,6 +189,12 @@ def main():
             return 1
         lx, lyaw = n.mount()
         print(f"      mount: x {lx:.3f} m, yaw {math.degrees(lyaw):+.2f} deg")
+        near = float(np.min(np.linalg.norm(scan_in_base(n.scan, lx, lyaw), axis=1)))
+        print(f"      nearest thing to the centre: {near:.2f} m "
+              f"(the spin sweeps {SWEEP_R:.2f} m)")
+        if near < SWEEP_R:
+            print("      ✗ something is inside the spin circle — not turning. Clear it.")
+            return 1
 
         angles = [float(a) for a in sys.argv[1:]] or [90, -90, 180, -180]
         print(f"      commanding {WZ:.2f} rad/s. Turns: "
