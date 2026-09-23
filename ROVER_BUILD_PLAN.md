@@ -414,13 +414,11 @@ the wheels change.
 
 ### Order
 
-| step | what | needs |
-|---|---|---|
-| 9.1 | **LiDAR odometry**: scan-to-scan ICP (the matcher in `lidar/yaw_calibrate.py` is a start) → `/lidar/odom`, with a "degenerate" flag when there is too little structure | nothing; C1 is up |
-| 9.2 | fusion takes LiDAR odometry for position when it is healthy; wheels demoted to fallback + slip detection; each source's health on `/fusion/status` | 9.1, tape runs to grade it (compare.py) |
-| 9.3 | closed-loop pivot on the fused pose, holding the centre | 9.2 |
-| 9.4 | `./rover calibrate`: small-move and per-side parameters per surface, LiDAR as ground truth | 9.2 |
-| 9.5 | outdoor check: C1 in shade vs sun, VO carrying position in open space | a day outside |
+Superseded by **[SENSOR_FUSION_PLAN.md](SENSOR_FUSION_PLAN.md)** (2026-09-24):
+the wheels are *not* switched off but modelled properly (asymmetric ICR
+kinematics, per-wheel slip evidence, zero-velocity lock) and weighted by
+their own uncertainty; the LiDAR becomes a de-skewed 10 Hz odometry source;
+and every change is graded on recorded runs before it goes live.
 
 Because the geometry now comes from one place (`description/`), a wheel change
 is a `params.yaml` edit plus a `./rover calibrate`, not a code change.
