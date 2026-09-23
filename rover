@@ -492,8 +492,8 @@ slam)
   # between them at the TF publish rate.
   #
   # slam_toolbox is the one we want: it corrects against walls, every scan,
-  # rather than only when cuVSLAM recognises a place (which TODO 16 says it has
-  # never actually done here). So cuVSLAM's must be turned off, not this one.
+  # rather than only when cuVSLAM recognises a place (15-27 closures a session
+  # since TODO 23 -- READINESS.md). So cuVSLAM's must be turned off, not this one.
   if docker exec "$NAME" bash -lc 'pgrep -af "[v]o_node.py" | grep -q "slam:=true"' 2>/dev/null; then
     echo
     echo "  ✗ cuVSLAM is already publishing map -> odom (vo_node has slam:=true)."

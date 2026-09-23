@@ -38,25 +38,51 @@ row is what dead reckoning got wrong; the `lidar-corrected` row should put the
 rover where it really is. Pivots are the case that matters — that is where the
 gyro's bias and cuVSLAM's +11 % used to show — and where the walls do not move.
 
+## One owner of `map -> odom`
+
+cuVSLAM publishes `map -> odom` whenever `vo_node` runs with `slam:=true`,
+which is `./rover pose`'s default. Two publishers of one transform make TF
+non-deterministic, and these two disagree by construction. slam_toolbox owns
+it: `./rover up` starts pose with `SLAM=false`, and `./rover slam` refuses to
+start while cuVSLAM holds the frame, printing the hand-over:
+
+```
+SLAM=false ./rover pose && ./rover fused && ./rover slam
+```
+
+(`SLAM=false` silently did nothing until 2026-09-22 — it was expanded inside the
+container, where it was never set. Fixed.)
+
+## Timestamps
+
+slam_toolbox takes the pose at each scan's stamp, so the stamp must be when
+the scan was measured. The C1 driver's stamps were ~82 ms early; on turns that
+gave slam an 8° heading error over two same-direction +90° turns. Fixed with a
+driver patch and `LIDAR_TIME_OFFSET=0.082`; `./rover lidar --lag` re-measures
+it. See [lidar/README.md](../../lidar/README.md).
+
 ## What is NOT done yet — the map frame
 
 nav2 still plans in `odom`; the Pi 5 brain still sends goals in `odom`
-(`LANGROBO_NAV_FRAME`). So today the correction is *visible* (RViz, `--check`)
-but nav2 does not *use* it. Moving nav2's global frame and the brain's
+(`LANGROBO_NAV_FRAME`). The correction is *used* by one consumer so far —
+`./rover drive` steers on `map -> base_link` (LOCALIZATION.md §4) — but not by
+nav2 or the brain. Moving nav2's global frame and the brain's
 `NAV_FRAME` to `map` is the step that makes "go to this point" accurate — and
 it touches two repos and the "everything is odom, never map" rule in the Pi 5's
 CLAUDE.md, which exists because a `map` frame nobody published broke
 `navigate_to_pose` silently for months. Do it as a driven change, with a tape
 measure, not as an edit.
 
-After that: `--save` the finished room, and start `slam_toolbox` in
-`localization` mode against it (`mapper_params_localization.yaml` in the
-package) — same node, second mode, the "exact physical map" the owner asked for.
+After that, *if* a room is ever to be kept: `--save` it and start
+`slam_toolbox` in `localization` mode against it
+(`mapper_params_localization.yaml` in the package). **The owner has said not to
+keep maps across power-off** — each power-on maps fresh and the origin is
+wherever the rover starts — so this is recorded, not planned.
 
 ## Orientation
 
-`LIDAR_YAW` in `./rover` must be right before any of the above is trusted: a
-scan rotated 90° from the body fights odometry on every move. The box test
-(`./rover lidar`, box in front of the nose, "front" must drop) sets it. The
-depth camera could not referee it — the IR emitter is off for cuVSLAM, and
-passive stereo returned almost no depth in this room.
+`LIDAR_YAW` must be right before any of the above is trusted: a scan rotated
+from the body fights odometry on every move, and slam turns any residual into a
+correction that rotates with every heading change. It is **measured, +88.60°**
+(`./rover lidar --calibrate`, by driving — see lidar/README.md). The box test in
+`./rover lidar` is a quadrant check only; two values set by eye were both wrong.

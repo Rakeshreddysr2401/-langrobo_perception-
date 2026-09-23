@@ -61,20 +61,34 @@ this cannot happen; see [LAPTOP_FILES.md](LAPTOP_FILES.md).
 
 ### What it shows
 
+Updated 2026-09-22 — see [LOCALIZATION.md](../LOCALIZATION.md) for why each
+changed.
+
 | display | topic | |
 |---|---|---|
-| **ROOM (nvblox)** | `static_occupancy_grid` | the map, built as you drive |
-| **Track driven** | `/fusion/path` | green line — where it has been |
+| **Rover** | `/rover/model` | the rover at its described size: 36 × 28 cm chassis, wheels at their axles, the **46 × 42 cm nav2 footprint** as a flat outline, the LiDAR puck on top, cyan nose + heading ray |
+| **Lidar ring (live)** | `/scan` | orange points, all 360°. BEST_EFFORT, or it shows nothing |
+| **Room (lidar)** | `/map` | slam_toolbox's room, opaque, drawn under everything. Black = a wall the LiDAR has seen, light grey = confirmed floor, mid grey = not looked at yet |
+| **Track — lidar corrected** | `/fusion/path_map` | **green** — where it has been, corrected against the walls |
+| **Track — raw odometry** | `/fusion/path` | **red** — the same drive as dead reckoning. **The gap between green and red is the drift**; measure it with the Measure tool |
 | **nav2 plan** | `/plan` | amber line — the route nav2 computed |
-| **Fused pose** | `/odom` | teal arrow, with its covariance ellipse |
-| **Footprint** | `published_footprint` | the rover's real outline, 35 × 38 cm |
-| Costmap global / local | | **off** — turn on to see obstacle inflation |
-| Raw cuVSLAM | `/vo/odom` | **off** — turn on to watch it teleport |
-| TF, IR left | | **off** |
+| Room (nvblox depth) | `static_occupancy_grid` | **off** — built from depth, so it sees what the LiDAR plane cannot (below/above 21 cm). Two grids stacked are unreadable |
+| nav2 costmap | `/global_costmap/costmap` | **off** — turn on to see obstacle inflation |
+| TF | | **off** |
+| Grid 50cm | | on |
 
-**Fixed Frame is `odom`.** Not `map` — there is no map frame until something
-localizes against a saved map, which is Phase 2c. Setting it to `map` gives an
-empty screen and a confusing hunt.
+**Fixed Frame is `map`** (since 2026-09-22). In `odom` the *room* slides under a
+still rover every time slam corrects the pose; in `map` the room holds still and
+the rover moves through it. The top-down view's target is the fixed frame for
+the same reason; the saved **Orbit** view follows the rover.
+
+**It needs `./rover slam` up.** No map frame means an empty window with an
+error that reads like a dead publisher. `./rover view` checks for `map → odom`
+and says so; to look at the stack with slam deliberately down, set Fixed Frame
+to `odom` in the Displays panel.
+
+**RViz reads the config only at startup.** After changing `rover_live.rviz`,
+`./rover view --restart` — "config synced" prints either way.
 
 ### Driving to a goal
 

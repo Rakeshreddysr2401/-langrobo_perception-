@@ -32,9 +32,10 @@ Severity follows `TODO.md`: 🔴 blocks a gate · 🟠 real, worked around ·
 |---|---|---|
 | D555 camera | 🟠 | Streams clean. Drops out in three ways, each needing a human. |
 | cuVSLAM | 🔴 | Diverges; rotation is where its translation goes wrong. |
-| Encoders / ESP32 | 🟡 | Calibrated and steady at 20 Hz. No power telemetry at all. |
+| Encoders / ESP32 | 🟠 | Calibrated and steady at 20 Hz. No power telemetry at all. **Cannot pivot about its centre** — the left side cannot reverse against scrub, turns slide ~30 cm / 90° (2026-09-23, LOCALIZATION.md) |
+| LiDAR (RPLidar C1) | 🟢 | Added 2026-09-22. 10 Hz, 95 % valid, yaw measured by driving, timestamps fixed (were 82 ms early). Feeds slam only — not nav2 |
 | Fusion | 🟠 | Working well. CPU-bound, and publishes no uncertainty. |
-| Loop closure | 🟡 | Now usable after §23. Nothing renders the corrected frame. |
+| Loop closure | 🟡 | cuVSLAM's is now OFF: slam_toolbox owns `map → odom` and corrects from the LiDAR every scan. RViz renders the corrected frame (since 2026-09-22) |
 | nvblox | 🟡 | Maps well. Loop closure never corrects what it already wrote. |
 | nav2 | 🟠 | Drives goals reliably. One session only — no persistent map. |
 
@@ -185,15 +186,23 @@ The REP-105 split: `odom` continuous, `map` corrected. See
 | rejected, after §23 | 0 |
 | `MAX_CORRECTION_M` | 5.0 m, **planar** |
 
+> **2026-09-22 — superseded in two ways.** `map → odom` now comes from
+> **slam_toolbox** (LiDAR scan matching, every scan), and cuVSLAM's loop closure
+> is switched off so the two do not fight. And the corrected frame IS rendered:
+> RViz's Fixed Frame is `map`, with `/fusion/path_map` (green) over
+> `/fusion/path` (red). The table and notes below describe cuVSLAM's closure and
+> are kept as its record. Current state: [LOCALIZATION.md](LOCALIZATION.md).
+
 **🟠 Nothing renders the corrected frame.** `/fusion/path` is stamped
 `frame_id: odom` and the RViz Fixed Frame is `odom`, so closure corrections are
 invisible on screen *by construction*. A `map`-framed twin of the path is the
 missing piece — and it is the reason the operator's "it draws a line beside
 itself" was so hard to attribute.
 
-**🔴 No relocalization against a saved map.** Nothing survives a power cycle;
-every session starts a new origin. This is Phase 2c, and it is what "knows where
-it is" actually requires.
+**⚪ No relocalization against a saved map.** Nothing survives a power cycle;
+every session starts a new origin. This is Phase 2c. *Accepted by choice: the
+owner does not want maps kept across power-off — each power-on maps fresh and
+the origin is where the rover starts.*
 
 **🟠 A pose reset discards the map (§16)**, because the map was built in the old
 frame.

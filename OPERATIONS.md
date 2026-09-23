@@ -18,8 +18,10 @@ own layer instead of hiding in a wall of log.
 
 ```bash
 ./rover camera      # the D555 alone
-./rover pose        # + cuVSLAM and the gyro
+./rover lidar       # the RPLidar C1 -> /scan, and base_link -> laser
+SLAM=false ./rover pose   # + cuVSLAM and the gyro, loop closure OFF
 ./rover fused       # + the fused pose -> /odom and TF
+./rover slam        # + slam_toolbox: map -> odom, the LiDAR correction
 ./rover map         # + nvblox: build the room as it drives
 ./rover nav         # + nav2: plan a route and drive it
 ./rover vlm         # + the VLM bridge: a picked pixel -> a nav2 goal (phase 4)
@@ -28,8 +30,10 @@ own layer instead of hiding in a wall of log.
 | command | what it proves |
 |---|---|
 | `./rover camera` | streaming ≥15 Hz **and** the IR emitter verified OFF by read-back |
+| `./rover lidar` | `/scan` ≥8 Hz **and** `base_link → laser` resolves (a scan nothing can transform fails the gate) |
 | `./rover pose` | cuVSLAM ≥10 Hz, gyro ≥50 Hz, re-framed into `base_link` |
 | `./rover fused` | `/odom` ≥15 Hz, TF `odom → base_link` owned by exactly one node |
+| `./rover slam` | `/map` ≥0.3 Hz, and **refuses** if cuVSLAM already owns `map → odom` |
 | `./rover map` | the occupancy grid publishing, and how much is mapped |
 | `./rover nav` | both costmaps carrying obstacle data, all servers activated |
 | `./rover vlm` | compressed colour ≥2 Hz, and `pixel_to_goal` subscribed to `/vision/pixel_query` |
@@ -44,9 +48,26 @@ Then, at any time:
 ./rover status      # every layer's rate, one screen
 ./rover values      # one-shot readout of every sensor
 ./rover wheels      # the ESP32 link specifically
-./rover logs vo     # tail a layer's log: camera | vo | gyro | fused
+./rover wheels --nudge   # MOVES ~7 cm: proves the motors are POWERED, not just linked
+./rover slam --check     # odom alone vs LiDAR-corrected, and the correction
+./rover logs vo     # tail a layer's log: camera | vo | gyro | fused | lidar | slam
 ./rover stop        # tear the container down
 ```
+
+### Exact moves and grading turns — see [LOCALIZATION.md](LOCALIZATION.md)
+
+```bash
+./rover drive 0 0 90 --rel     # turn 90 deg left without the centre moving
+./rover drive X Y [DEG]        # go to a pose in the map frame
+./rover drive --mark NAME      # remember this pose;  --to NAME  goes back
+./rover pivot [deg ...]        # grade turns against the walls
+./rover lidar --calibrate      # measure LIDAR_YAW by driving
+./rover lidar --lag            # measure the scan timestamp error
+```
+
+All of these move the rover except `--mark`, need teleop in AUTO, and check the
+LiDAR for clearance first. A plain turn "in place" slides the centre ~30 cm per
+90° on this chassis; `./rover drive` plans around it.
 
 ### Before you trust anything
 
@@ -163,6 +184,10 @@ docker exec -it rover bash -lc 'source /opt/ros/jazzy/setup.bash; export ROS_DOM
 | **how much is mapped** | `python3 -u /logs/map_stats.py` | nothing — it just reads |
 | **the map, as text** | `python3 -u /logs/map_view.py` | nothing; `--once` for a single frame |
 | **why won't it pivot?** | `python3 -u /logs/turn_diag.py 40` | hold LEFT then RIGHT during the window |
+| **LiDAR mount angle** | `./rover lidar --calibrate` | nothing — it drives three 0.20 m out-and-back pairs itself |
+| **LiDAR timestamp error** | `./rover lidar --lag` | nothing — it turns briefly each way itself |
+| **how far turns really slide** | `./rover pivot 45 -45 90 -90` | clear ~0.6 m round it; graded against the walls |
+| **the held-left pivot point** | `PIVOT_ANCHOR=hold ./rover pivot 45 -45 45 -45` | the fitted pivot feeds `./rover drive` (`PIVOT_X`/`PIVOT_Y`) |
 
 ### Calibration rules learned the hard way
 
@@ -171,6 +196,12 @@ docker exec -it rover bash -lc 'source /opt/ros/jazzy/setup.bash; export ROS_DOM
 - **Forward only.** Reversing lets a counting error cancel itself and hide.
 - **A 360° beats a 90°.** Four times the signal, and returning to the same floor
   line is far easier to judge than eyeballing a right angle.
+- **Never set an angle from a description of a picture.** Two `LIDAR_YAW` values
+  set that way were both wrong, sign inverted. Measure by driving
+  (`--calibrate`), where two sensors must agree on the same move.
+- **Point samples of `/wheel_state` lie.** The encoder reads 0 between its own
+  updates, so sampling every 0.5 s during a pivot made a working left side look
+  dead. Average over the command window.
 - **Never compare cumulative counts (arc length) against `straight`
   (displacement).** On a path that curves or doubles back they are different
   quantities. This produced a confident "the encoders are 2× out" that was
@@ -218,6 +249,15 @@ iw dev wlP1p1s0 link | grep -iE 'signal|bitrate'
 
 −36 dBm is good; −47 dBm and rising jitter means the rover has moved away from
 the access point.
+
+**Link healthy, nothing moves.** `./rover wheels --nudge`. If the firmware
+echoes the command (`/wheel_state.z` = the vx it received) and both sides read
+exactly zero, the motor supply is off — a switch or the BTS7960 feed. The rate
+gate cannot see this (2026-09-23).
+
+**It turns, but slides ~30 cm per 90°.** Expected on this chassis — the left
+side cannot reverse against the tyres' scrub. `./rover pivot` measures it;
+`./rover drive` plans around it. See [LOCALIZATION.md](LOCALIZATION.md).
 
 ### The pose
 
@@ -279,7 +319,9 @@ for an active graphical session and uses mutter's waiting auth cookie.
 | symptom | cause |
 |---|---|
 | blank, `/rviz` in the graph, **0 subscribers** on `/odom` | started without `-d` |
-| blank, displays listed, Global Status red | Fixed Frame is `map`; set it to `odom` |
+| blank, displays listed, Global Status red | Fixed Frame is `map` (the default since 2026-09-22) and **`./rover slam` is not up** — start it, or set Fixed Frame to `odom` |
+| everything but the LiDAR ring draws | `base_link → laser` missing — re-run `./rover lidar` (its gate now catches this) |
+| a config change "did nothing" | RViz reads the config only at startup: `./rover view --restart` |
 | one display blank, others fine | **QoS.** nvblox is Volatile, nav2 costmaps are Transient Local |
 | `GLSL link result: active samplers...` | a driver quirk in RViz's Map shader; usually still draws |
 

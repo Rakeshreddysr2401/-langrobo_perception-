@@ -20,13 +20,14 @@ For the full runbook including calibration and troubleshooting see
 | D555 depth camera | 192.168.11.55 | **only** a live publisher on `infra1`. Ping proves nothing |
 | ESP32 wheel link | via micro-ROS | `/wheel_state` at ~20 Hz |
 | Pi 5 (teleop + brain) | 192.168.1.16 | `:8091/mode` answers, `agent_node` running |
-| Mac mini (LLM/VLM) | 192.168.1.6 | `:8080/v1/models` answers |
+| Mac mini (LLM/VLM) | **DHCP — moves** (was .6, came back as .10 on 2026-09-23) | from the Pi 5: `curl http://singireddys-mac-mini.local:8080/health`. The brain calls it by name, so a moved IP does not affect it — only a check by IP looks like a dead server |
+| RPLidar C1 | USB on the Jetson, `/dev/ttyUSB0` (CP210x) | `/scan` at ~10 Hz and `base_link -> laser` resolving — `./rover lidar` checks both |
 | Laptop (RViz) | **DHCP — moves** | `./rover view` finds it |
 
 **Single command:** `./rover up` runs every step below in order — camera,
-pose, fused, map, nav, vlm, the ESP32 check, the Pi 5 check, Studio, and the
-laptop view — and prints the Studio tunnel link and the LangSmith project at
-the end. Add `--voice` to also bring up Pi 5 STT/TTS and reconnect the boAt
+lidar, pose (with `SLAM=false`), fused, slam, map, nav, vlm, the ESP32 check,
+the Pi 5 check, Studio, and the laptop view — and prints the Studio tunnel link
+and the LangSmith project at the end. Add `--voice` to also bring up Pi 5 STT/TTS and reconnect the boAt
 Stone 650. It restarts the container, so it's for a cold power-on — don't run
 it against a stack that's already up and healthy, it throws the running state
 away for nothing. The layer-by-layer steps below are what it runs, and what to
@@ -83,14 +84,33 @@ fails.**
 
 ```bash
 ./rover camera      # the D555 alone       — IR >=15 Hz, depth >=10 Hz
-./rover pose        # + cuVSLAM and gyro   — VO >=10 Hz, gyro >=50 Hz
+./rover lidar       # the RPLidar C1       — /scan >=8 Hz AND base_link -> laser exists
+SLAM=false ./rover pose   # + cuVSLAM, gyro — VO >=10 Hz, gyro >=50 Hz
 ./rover fused       # + fusion -> /odom    — /odom >=15 Hz, AND the honesty check
+./rover slam        # + slam_toolbox       — /map >=0.3 Hz, map -> odom
 ./rover map         # + nvblox             — occupancy grid >=1 Hz
 ./rover nav         # + nav2               — both costmaps
 ./rover vlm         # + VLM pixel -> goal  — colour >=2 Hz, 1 listener
 ./rover detect      # + YOLO -> odom objects — publishing, target hunt listening
 ./rover view        # RViz on the laptop
 ```
+
+**`SLAM=false` on pose, and only one owner of `map -> odom`.** cuVSLAM
+publishes `map -> odom` whenever its loop closure is on, which is `./rover
+pose`'s default. slam_toolbox is the owner now — it corrects against the walls
+on every scan — so pose must run with `SLAM=false`, and `./rover slam` refuses
+to start if cuVSLAM already owns the frame. `./rover up` does this for you.
+
+**Order matters less than it did, but the LiDAR still needs a live frame.**
+Until 2026-09-22, `./rover pose` killed every static transform in the
+container, including the LiDAR's, so a LiDAR started before it vanished
+silently. That is fixed; `./rover lidar` now fails its gate if
+`base_link -> laser` does not resolve.
+
+**If you carry the rover by hand after bring-up**, cuVSLAM can diverge and slam
+will apply a large correction trying to make sense of it. Put it down and run
+`SLAM=false ./rover pose`, `./rover fused`, `./rover slam` — the pose and the
+map restart at the new spot, which becomes the new origin.
 
 **`detect` depends on which brain the Pi 5 is running.** It feeds
 `approach_object`, `where_is`, `list_known_objects` and the `world_model`
@@ -210,6 +230,19 @@ docker exec rover bash -lc 'unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES
 ```
 
 Want **~20 Hz** and `/cmd_vel` **Subscription count: 1**.
+
+**20 Hz does not mean the motors have power.** On 2026-09-23 every gate passed
+— 20 Hz, subs 1, "Wheels are live" — and the wheels could not turn: the
+ESP32's logic was powered and the motor supply was not. The rate proves the
+board is talking. Before anything drives:
+
+```bash
+./rover wheels --nudge      # MOVES ~7 cm: command arrived? did both sides drive?
+```
+
+It names which of three things is wrong: the command never arrived, it arrived
+and nothing moved (motor power — a switch or the BTS7960 supply), or only one
+side moved (that side's driver or wiring).
 
 If it is 0 Hz or subs 0, the ESP32 did not reconnect its micro-ROS session —
 **power-cycle the rover** (the board, not the Jetson). Old firmware does not
@@ -537,3 +570,11 @@ left. The difference is deliberate in some places and a known gap in others.
   `/agent_node` and both can command the wheels. To explore the graph *without*
   that, start Studio in a shell where ROS is not sourced: it falls back to
   `StubBridge` and logs tool calls instead of publishing.
+- **Teleop must be in AUTO for `./rover drive`, `pivot` and `lidar --calibrate`.**
+  In MANUAL it streams zeros over every command. `./rover drive` checks and
+  refuses; driving the rover to a new spot with the phone leaves it in MANUAL.
+- **`./rover wheels --nudge` first** after any power cycle (§4): a healthy link
+  rate says nothing about motor power.
+- **Turns slide.** A plain turn "in place" moves the centre ~30 cm per 90°
+  ([LOCALIZATION.md](LOCALIZATION.md)). Give turns room, and use
+  `./rover drive` when the position after a turn matters.

@@ -16,6 +16,8 @@ see [OPERATIONS.md](OPERATIONS.md); for open faults see [TODO.md](TODO.md).
 | heading | the D555's own **gyro**, complementary-filtered | measured −0.2% to −0.9% error over four 360° turns — better than the wheels can do through scrub |
 | distance | **wheel encoders**, calibrated against a tape | excellent in a straight line, useless mid-turn (§13) |
 | fusion | **hand-written complementary filter**, `phase1/nodes/fusion.py` | *not* an EKF — see §5 for why a 3-sensor planar problem did not need one |
+| LiDAR | **RPLidar C1** — 360°, 10 Hz, USB, driver `sllidar_ros2` pinned + one patch (`lidar/`) | the walls are the one reference that does not drift. Added 2026-09-22 for the pose, not for nav2 |
+| drift correction | **slam_toolbox**, online async mapping, owns `map → odom` | scan-matches every scan against the walls it has seen, so the correction is continuous, where cuVSLAM's loop closure only fires on a recognised place (15–27 closures a session after §23, READINESS.md) — and the two cannot both own the frame, so cuVSLAM's is switched off (`SLAM=false`). No map is kept across power-off, by choice |
 | mapping | **nvblox** — TSDF → ESDF → 2D slice, GPU | the Orin has the GPU for it, and the ESDF slice is what nav2's costmap layer consumes directly |
 | planning | **nav2** — NavFn planner, Regulated Pure Pursuit controller | RPP steers by *arcs*, which is what a skid-steer rover can execute. DWB samples rotations it cannot |
 | wheels | **ESP32 + micro-ROS** over WiFi UDP, BTS7960 drivers, PID per side | the board sits on the rover; the link to it must be the thing that fails visibly |
@@ -110,6 +112,10 @@ occurrence is a glance rather than an investigation.
 | **`/odom`** | `Odometry` | 20 Hz | **`fusion_node` — what nav2 consumes** |
 | `/fusion/path` | `Path` | 2 Hz | `fusion_node` — the track driven, **latched** |
 | `/fusion/status` | `String` | 1 Hz | `fusion_node` — who is covering for whom |
+| `/fusion/path_map` | `Path` | 2 Hz | `fusion_node` — the same track through `map → odom` **as it was when recorded**; its gap from `/fusion/path` is the drift slam corrected |
+| `/scan` | `LaserScan` | 10 Hz | `sllidar_node` — 720 beams, BEST_EFFORT, stamps shifted +82 ms to the measurement (LOCALIZATION.md §2.3) |
+| `/map` | `OccupancyGrid` | ~0.5 Hz | `slam_toolbox` — the LiDAR's room, 5 cm cells, TRANSIENT_LOCAL |
+| `/rover/model` | `MarkerArray` | 1 Hz | `rover_marker` — the rover drawn at 36 × 28 body / 46 × 42 envelope, in `base_link` |
 
 ### Mapping and navigation
 
@@ -132,13 +138,20 @@ identically to a dead publisher.
 ## 3. Frames
 
 ```
-  odom ──(fusion_node, 20 Hz)──► base_link ──(static)──► camera0_link
+  map ──(slam_toolbox)──► odom ──(fusion_node, 20 Hz)──► base_link ─┬─(static)──► camera0_link
+                                                                    └─(static)──► laser
 ```
 
 | transform | owner | why |
 |---|---|---|
+| `map → odom` | **`slam_toolbox`** (since 2026-09-22) | the LiDAR correction. cuVSLAM also publishes it when `slam:=true`, so `./rover pose` runs with `SLAM=false` and `./rover slam` refuses a second owner |
 | `odom → base_link` | **`fusion_node`** | the guarded estimate, not the raw one |
 | `base_link → camera0_link` | static publisher | measured: x 0.170, z 0.163, yaw 2.06° |
+| `base_link → laser` | static publisher, `./rover lidar` | x 0.135, z 0.21 from a description; **yaw +88.60° measured by driving** (`./rover lidar --calibrate`) |
+
+`map → base_link` is the corrected pose; `./rover drive` steers on it. nav2
+and the Pi 5 brain still plan in `odom` — moving them is a separate, driven
+change (phase2/config/SLAM.md).
 
 **`vo_node` runs with `publish_tf:=false`.** Only one thing may publish a
 transform. The raw cuVSLAM pose is the one that teleports — 12 in a single

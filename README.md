@@ -11,6 +11,7 @@ Four phases, each standing on the one before it:
 | **2a — see it** | RViz, the pose, the track it draws | ✅ **complete** |
 | **2b — build it** | map the room as it drives | ✅ **complete** — nvblox |
 | 2c — keep it | a map that survives a power cycle | deferred by choice |
+| **2e — correct it** | LiDAR scan-matching fixes drift, live, every scan | ✅ **running** — slam_toolbox owns `map -> odom`, see [LOCALIZATION.md](LOCALIZATION.md) |
 | 2d — localize | recognise a room mapped before | deferred by choice |
 | **3/4 — navigate** | give it a goal, it plans and drives there | ✅ **driving goals** — see below |
 
@@ -19,6 +20,32 @@ Phases 2–4 must also work in unfamiliar places; that is the point of the goal.
 > **Just powered everything back on?** Follow **[STARTUP.md](STARTUP.md)** — the
 > five boxes, the layer order, what to do physically when one fails, and the
 > LangGraph Studio link. It is the one document to follow after a power cycle.
+
+## Latest: the LiDAR, and why turns shifted x,y (2026-09-22 → 09-24)
+
+**Full analysis: [LOCALIZATION.md](LOCALIZATION.md).** The owner's goal: go from
+x, y to x + x1, y + y1 and back to exactly x, y, θ. It was right driving
+straight and wrong on turns. In short:
+
+- **An RPLidar C1 is in** (`./rover lidar`, 360° at 21 cm), its mount angle
+  measured by driving (+88.60°), and **slam_toolbox corrects the pose against
+  the walls** (`./rover slam`). RViz now shows the room still and the rover
+  moving through it, with raw and corrected track lines.
+- **Turns slid the centre ~30 cm per 90°**, because the left side cannot
+  reverse against the tyres' scrub and the rover swings about the left tyres —
+  usually, and about its centre the rest of the time. Battery, floor and
+  firmware are ruled out. **Held-left turns** make it predictable (pivot spread
+  1.5 cm), and **`./rover drive`** plans every move around the slide:
+  a +90° turn in place ends within **1.4 cm / +0.4°** (slam), 1.9 cm / −2.2°
+  (walls).
+- **The LiDAR stamped scans ~82 ms early**, which skewed slam's heading on
+  turns; fixed in the driver, now −2 ms.
+- Six silent faults fixed, each with every gate green — see
+  LOCALIZATION.md §2.5.
+
+**Not done:** the tile test for heading truth, the taped go-and-return test,
+the lift test, and tape measurements for a URDF. nav2 and the Pi 5 brain still
+plan in `odom`. The section below is the state as of 2026-08-23.
 
 ## Where it actually stands (2026-08-23)
 
@@ -44,13 +71,16 @@ the route crosses a blocked cell, or if anything else owns `/cmd_vel`.
 |---|---|
 | 🔴 **cuVSLAM diverges, silently** (§21) | three times so far. The pose drops to dead reckoning and every gate stays green. Check `vo_z` after every bring-up |
 | 🔴 **obstacle avoidance untested** | no goal has yet been driven with something deliberately in the way. The costmap stops it *in theory* |
-| 🟠 **loop closure never fires** (§16) | drift is never corrected, so range is limited to what raw odometry carries — about a room |
+| 🟠 **loop closure never fires** (§16) | drift is never corrected, so range is limited to what raw odometry carries — about a room. *Superseded 2026-09-22: slam_toolbox now corrects drift from the LiDAR on every scan; cuVSLAM's loop closure is turned off so the two do not fight* |
 | 🟡 **the estimate has one measurement** (§15) | one tape reading. A −22° heading error from a loop test is still unexplained |
 | 🟡 **the drift gate has never been run** (§2) | it was blocked on wheel telemetry, working again as of 2026-09-06 (§24) |
 
 **Blind spots that no amount of tuning fixes.** The rover sees nothing below
 10 cm, nothing above 24 cm, nothing outside 87°, and **nothing downward at all** —
 there is no drop-off detection. Autonomous runs need a human watching.
+*2026-09-22: the LiDAR sees 360°, but in one plane at 21 cm, and only slam and
+`./rover drive`'s clearance checks use it. nav2's costmaps are still built
+from the depth camera alone, so for nav2 the 87° limit above still holds.*
 
 **2026-09-06 — color camera on, for a VLM object-locator.** The D555 now also
 streams RGB (`enable_color:=true`, 424x240x15) so the Pi 5 can hand a frame to
@@ -90,6 +120,8 @@ right now — the Pi 5 has neither a microphone nor a speaker attached (§28).
 | **[PHASE1.md](PHASE1.md)** | perception — every number, technique and fault found |
 | **[PHASE2.md](PHASE2.md)** | mapping — nvblox, the map, and seeing it |
 | **[PHASE3.md](PHASE3.md)** | navigation — nav2, and everything shaped by the pivot fault |
+| **[LOCALIZATION.md](LOCALIZATION.md)** | **holding x, y, θ through turns** — the LiDAR, the turn fault and why it slides, held-left turns, `./rover drive`, and what is still open |
+| **[lidar/README.md](lidar/README.md)** | the RPLidar C1 — mount, calibration, timestamp fix, driver patches |
 | **[TODO.md](TODO.md)** | open faults, and the dead theories kept so they are not re-litigated |
 | **[FLEET_STATUS.md](FLEET_STATUS.md)** | every box checked live — Jetson, Pi 5, Mac mini, ESP32, D555 — and what blocks voice |
 | **[READINESS.md](READINESS.md)** | the cross-cutting view — every subsystem's measured values against what is missing, and **what actually blocks unattended operation** |
@@ -106,9 +138,13 @@ right now — the Pi 5 has neither a microphone nor a speaker attached (§28).
 ## Quick start
 
 ```bash
+./rover up          # everything below, in order, after a power cycle
+
 ./rover camera      # the D555 alone; verifies the IR emitter is OFF
-./rover pose        # + cuVSLAM and the gyro
+./rover lidar       # the RPLidar C1 -> /scan, and base_link -> laser
+SLAM=false ./rover pose   # + cuVSLAM and the gyro (loop closure off: slam owns map -> odom)
 ./rover fused       # + the fused pose -> /odom and TF odom -> base_link
+./rover slam        # + slam_toolbox: the LiDAR correction, map -> odom
 ./rover map         # + nvblox: build the room as it drives
 ./rover nav         # + nav2: plan a route and drive it
 ./rover status      # what is alive right now
@@ -118,6 +154,16 @@ Then drive it from a phone at **`http://192.168.1.16:8091`** — and **flip it t
 MANUAL**, it defaults to AUTO and the buttons do nothing until you do.
 
 Watch it from a laptop with RViz — see **[phase2/LAPTOP.md](phase2/LAPTOP.md)**.
+
+Exact short moves, and grading turns against the walls
+(see [LOCALIZATION.md](LOCALIZATION.md)):
+
+```bash
+./rover drive --mark home        # remember this pose
+./rover drive 0 0 90 --rel       # turn 90 deg left without the centre moving
+./rover drive --to home          # come back to it
+./rover pivot 90 -90             # how far turns really slide, by the walls
+```
 
 To measure rather than just watch:
 
@@ -163,6 +209,7 @@ estimate ended **4.9 cm**. Beating both of its own inputs is the whole point.
 | Pi 5 | micro-ROS agent, teleop web |
 | ESP32 | 50 Hz PID, 4× encoders, 2× BTS7960 |
 | RealSense D555 | stereo IR + depth + IMU, over **Ethernet**, not USB |
+| RPLidar C1 | 360°, 10 Hz, 720 beams, 0.05–16 m; USB (CP2102N) on the Jetson; on top, 21 cm up |
 
 **The container has no build recipe.** `orin-nav:1.1` was made by `docker
 commit`, not from a Dockerfile. Never install into it; never delete it. `phase1/`
