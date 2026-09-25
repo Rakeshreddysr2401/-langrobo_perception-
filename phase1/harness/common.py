@@ -49,7 +49,7 @@ def relative(T0, T1):
 @dataclass
 class Bag:
     path: str
-    scans: list = field(default_factory=list)        # (t, ranges ndarray, angle_min, inc)
+    scans: list = field(default_factory=list)        # (t, ranges ndarray, angle_min, inc, scan_time)
     gyro: np.ndarray = None                           # t, wz
     ticks: np.ndarray = None                          # t, lf, lr, rf, rr
     odom: dict = field(default_factory=dict)          # topic -> ndarray t, x, y, yaw
@@ -87,7 +87,7 @@ def read_bag(path):
         m = deserialize_message(data, cls[topic])
         if topic == '/scan':
             b.scans.append((stamp(m, t_ns), np.asarray(m.ranges, dtype=np.float64),
-                            m.angle_min, m.angle_increment))
+                            m.angle_min, m.angle_increment, m.scan_time))
         elif topic == '/gyro/base':
             gyro.append((stamp(m, t_ns), m.angular_velocity.z))
         elif topic == '/wheel_ticks':

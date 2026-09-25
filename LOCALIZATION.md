@@ -414,3 +414,40 @@ no stall cutoff; its only gates are the agent connection (up throughout) and a
 Nothing measures the pack or the motor current yet (INA226, build plan §4),
 and nothing reports "watchdog fired" (an M4 firmware item). Pivot tests
 stopped here to spare the motors.
+
+## 10. M2: LiDAR odometry, offline on the recorded runs (2026-09-26)
+
+`phase1/nodes/lidar_odom.py`, with no ROS inside it. Every scan is de-skewed
+with the gyro, then matched point-to-line (Huber) against a submap of the last
+10 keyframes (keyframe every 10 cm or 10°, 3 cm voxels). Each fit carries a
+residual, an inlier count and a degeneracy eigenvalue; a failed fit falls back
+to the prediction and is flagged. Graded as the `lidar` row in
+`./rover grade`.
+
+**De-skew, decided by grading** (13 turning runs, 43 checkpoints; position
+mean / max, heading mean / max):
+
+| de-skew | position | heading |
+|---|---|---|
+| off | 0.61 / 1.57 cm | 1.32 / 5.31° |
+| beams forward in time | 0.87-1.04 / 2.3-2.8 cm | 2.7-3.2 / 12-14° |
+| **beams backward in time** (the C1 spins clockwise) | **0.27 / 0.88 cm** | **0.17 / 0.39°** |
+
+**Over all 17 runs** (`logs/bags/SUMMARY.md`), LiDAR odometry's worst
+checkpoint is **0.9 cm and 0.39°**. On the same runs fused reaches 19 cm /
+13° and VO 17 cm / 8°. It does not use the camera, so the pre-calibration
+runs are as good as the rest (2026-09-24 `pivot90`: lidar 0.4 cm, fused
+19.3 cm). No fit failed. It takes 5.9 ms per scan (p95 11 ms) on the Orin
+with the full stack running, against a 100 ms budget.
+
+**What this does and does not prove.** The truth also comes from the LiDAR,
+so a shared LiDAR error (its mount yaw, a range scale) would cancel out of
+both. The spin and square runs are a real test: by the checkpoint the
+odometry had chained dozens of keyframes and dropped the early ones. `small`
+and short `straight` runs are close to self-comparison, because the submap
+still holds the reference scan. **The independent check is the owner's
+tape-marked `return` run**, and a long `zigzag`, both still to record.
+
+**Next in M2:** run it live as a node (`/lidar/odom` with covariance),
+record it, and compare live against offline; add a `zigzag` scenario; then
+the owner's `return` test with tape marks. After that, M3 fuses it.
