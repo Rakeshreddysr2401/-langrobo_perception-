@@ -524,3 +524,26 @@ looked reasonable:
 / lifted flags on a run built to trigger them. Next: run fusion2 live beside
 fusion.py (`/fused2/odom`, no TF), record, compare live against offline; then
 decide with the owner when it takes over `odom → base_link`.
+
+### Live: the owner's second `return` test, fusion2 running (2026-09-26)
+
+`20260926-013329_return`. Moved by hand and turned. The owner reported the
+wheels skidding under the hand at times. Put back on the tape marks within
+0.1-0.2 cm / 0.04° (LiDAR truth).
+
+| | final (worst during the run) |
+|---|---|
+| **fusion2, live** | **0.1 cm / 0.32°** (0.2 cm / 0.38°) |
+| fusion2, offline on the same bag | 0.2 cm / 0.29° |
+| LiDAR odometry, live | 0.1 cm / 0.30° |
+| fused.py | 1.8 cm / 0.74° (**9.7 cm**) |
+| VO | 4.5 cm / 0.15° |
+| wheels+gyro | 24.5 cm / 5.17° (31.6 cm) |
+
+Live matches offline. The skid showed up in fusion2's slip score (max 0.74),
+so the wheels were down-weighted and the fused pose held 0.1 cm while the
+wheels were 24 cm off. Over the run: LiDAR 4900 accepted / 0 rejected; VO
+2105 / 4, the 4 being VO jumps; wheels 9390 / 0, at slip-scaled weight.
+**M3's acceptance holds offline over 19 runs and live on an independent
+return test.** Not yet exercised: a LiDAR-degenerate corridor, and the
+stuck / lifted flags.
