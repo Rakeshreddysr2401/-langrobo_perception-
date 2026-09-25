@@ -241,6 +241,11 @@ def main():
     while (n.scan is None or n.ticks is None) and time.time() < end:
         n.spin(0.2)
     n.spin(1.0)               # and a moment for the slower ones (gyro, odom)
+    # a turning scenario cannot run without the gyro, and it can be a few
+    # seconds late to discover (two runs aborted that way, 2026-09-26)
+    end = time.time() + 8.0
+    while not n.gz and any(s[0] == 'turn' for s in steps) and time.time() < end:
+        n.spin(0.2)
     missing = [t for t, v in (('/scan', n.scan), ('/wheel_ticks', n.ticks)) if v is None]
     if missing:
         sys.exit(f'  no {", ".join(missing)} -- the grader needs both. ./rover lidar, ./rover wheels')

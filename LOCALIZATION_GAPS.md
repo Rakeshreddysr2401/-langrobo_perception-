@@ -34,7 +34,7 @@ Today none of the three is fully true.
 | **G2** | **The LiDAR is not an odometry input.** It only corrects through SLAM, coarsely and late. | fusion.py takes VO, gyro, wheels; no scan input | The best indoor sensor does not hold the pose between SLAM updates |
 | **G3** | **Camera and LiDAR disagree on the camera's yaw.** The URDF says 0°, VO applies 2.06° (measured in August, older mount), and the LiDAR says **+1.09°**. | Depth at 22-28 cm matched to the scan: dx +1.4, dy −1.5 cm, **dyaw +1.09°**, residual 1.2 cm | 1.1° puts an object at 3 m **~6 cm** sideways. Two different yaws for one camera means VO and depth disagree with each other too. |
 | **G4** | **Scans are not de-skewed.** A C1 scan takes 0.1 s, so turning at ω smears it by ω·0.1 rad. | 5.7° across one scan at 1 rad/s | Scan matching is weakest exactly during turns |
-| **G5** | **The gyro under-reads by ~2%.** | Four "90°" turns: gyro 363°, LiDAR truth 369.7° | Heading drifts ~7° per full turn until something corrects it; gyro-stopped turns overshoot |
+| ~~G5~~ | ~~The gyro under-reads by ~2%.~~ **Withdrawn 2026-09-26.** Measured over 21 turns against LiDAR truth, the gyro scale is **1.0010** (per turn ±0.7%, 1.1° rms). The "2%" was one turn's disagreement plus a mid-motion trace read. | M1 gyro-scale runs, `pivot360` × 3 each way | None. Turns do overshoot 1-3°, but from the runner integrating on arrival time and the rover coasting after the stop: an M4 motion-control item |
 | **G6** | **Wheel ticks carry no timestamp.** They are stamped on arrival, after the ESP32 → agent → network path. | `/wheel_ticks` is a bare `Quaternion`; 20 Hz, with 326 ms worst gap seen | Unknown delay and jitter on every wheel velocity; worst during starts and stops |
 | **G7** | **VO drops about 1 frame in 5.** | IR in at 26 Hz, `/vo/odom` out at 21.5 Hz | Less VO in fast turns, where it is already weakest |
 | **G8** | **Depth time offset: unmeasured.** Depth arrives 35 ms after its stamp (p95 55 ms). Whether the stamp is the exposure time is not known. | stamp-age probe | If the stamp is late by Δt, turning at ω misplaces objects by ω·Δt: 30 ms at 1 rad/s is 1.7°, **9 cm at 3 m** |
@@ -52,7 +52,7 @@ mean error, LOCALIZATION.md §8); the floor tilt is in the TF.
 
 | job | today | should be |
 |---|---|---|
-| heading, fast | gyro (−2% scale) | gyro, **scale-calibrated by the LiDAR** |
+| heading, fast | gyro (scale checked against the LiDAR: 1.001, 2026-09-26) | gyro, bias re-measured at every stop |
 | heading, absolute | VO when not turning; SLAM, coarsely | **LiDAR scan-to-map, every scan** |
 | position | VO direction × wheel scale; SLAM, coarsely | **LiDAR scan-to-map, every scan**; VO where the LiDAR is degenerate; wheels as fallback and slip detector |
 | where depth puts objects | TF with the camera yaw at 0°, stored in drifting `odom` | a **LiDAR-calibrated** camera extrinsic, stored in a frame that does not drift |

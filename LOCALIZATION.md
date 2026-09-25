@@ -340,9 +340,13 @@ improves: held-out max 16.8 → 6.8, 16.5 → 3.7, 13.6 → 1.3, 19.6 → 4.8 cm
 
 ### Also measured
 
-- **The gyro under-reads by about 2%.** Four "90°" turns summed to 363° on the
-  gyro, and the truth said 369.7°. Turns that stop on the gyro overshoot. This
-  is the scale calibration in SENSOR_FUSION_PLAN.md §3.3.
+- ~~The gyro under-reads by about 2%.~~ **Withdrawn 2026-09-26:** over 21 turns
+  graded against LiDAR truth (3 × `pivot360` each way plus every earlier turn
+  over 45°), the gyro scale is **1.0010**, per turn ±0.7%, 1.1° rms. The "2%"
+  came from one turn (2.6% off; the run's other turns agreed within 0.3%)
+  and a trace read mid-motion. Turns do overshoot 1-3°, but because the
+  runner integrates the gyro on arrival time and the rover coasts after the
+  stop. That belongs to motion control (M4), not the gyro.
 - **The pivot slide depends on the battery and varies.** On the charged pack
   it was about 6 cm per 90° in `pivot90`, but 22 cm for the first turn of the
   square, against 33 cm on 2026-09-24's weak pack. The weak-pack pivot ran at

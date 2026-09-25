@@ -205,7 +205,7 @@ one below.
 
 | join | what it gives |
 |---|---|
-| gyro + LiDAR | de-skewed scans while turning; the gyro's 2% scale calibrated against the walls; heading that is fast (gyro) *and* absolute (LiDAR) |
+| gyro + LiDAR | de-skewed scans while turning; the gyro's scale checked against the walls (1.001 over 21 turns: fine); heading that is fast (gyro) *and* absolute (LiDAR) |
 | LiDAR + wheels | slip and stuck detection (wheels say moving, LiDAR says not); the asymmetric ICR skid-steer model fitted per surface; distance along a corridor where the LiDAR is blind to it |
 | LiDAR + camera | one extrinsic for the camera, measured (G3); depth time offset measured against the scan (G8); VO carries position where the LiDAR is degenerate; the costmaps take the union of both |
 | wheels + IMU | zero-velocity lock: certain stillness, and gyro bias re-measured every stop |
