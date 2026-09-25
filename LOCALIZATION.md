@@ -451,3 +451,25 @@ tape-marked `return` run**, and a long `zigzag`, both still to record.
 **Next in M2:** run it live as a node (`/lidar/odom` with covariance),
 record it, and compare live against offline; add a `zigzag` scenario; then
 the owner's `return` test with tape marks. After that, M3 fuses it.
+
+### The owner's `return` test: the independent check (2026-09-26)
+
+`20260926-004818_return`. The owner put tape marks at three corners, moved the
+rover by hand (about 120-145 s into the run), and set it back on the marks.
+
+| | error at the end |
+|---|---|
+| LiDAR truth: where it really ended vs its start | **0.9 cm, 0.1°**, consistent with it sitting back on the tape |
+| **LiDAR odometry, live** | **0.3 cm / 0.24°** from the truth, so within ~1 cm / 0.3° of the marks |
+| LiDAR odometry, offline | 0.0 cm / 0.14° |
+| fused | 20.5 cm / 0.68°, 3 pose jumps |
+| VO | 8.9 cm / 6.0°, 2 jumps |
+| wheels+gyro | 24.9 cm / 6.9° |
+| wheels | 41.7 cm / 4.9° |
+
+The tape and the LiDAR truth agree, which checks the truth method from outside.
+Being moved by hand is the "picked up and carried" case: the wheels saw
+motion they did not cause, VO and the fusion jumped, and the LiDAR odometry
+tracked it through. **M2's acceptance (≤ 2 cm, ≤ 0.5°) holds on every recorded
+run and on the independent return test.** Still open in M2: a motor-driven
+`zigzag`, which waits for the power work (build plan §4.5).
