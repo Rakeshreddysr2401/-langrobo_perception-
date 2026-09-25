@@ -192,3 +192,42 @@ without it every later "improvement" is an opinion.
   10 Hz input; `/odom` carries covariance.
 - **Stays until beaten:** `fusion.py` runs as the baseline until the
   replacement wins on the recorded suite.
+
+---
+
+## 8. Movement roadmap: what joins with what, in order (2026-09-25)
+
+Movement first, the arm later. Updated with the baseline (LOCALIZATION.md §8)
+and the measured gaps (LOCALIZATION_GAPS.md). Four layers, each built on the
+one below.
+
+### The joins: each pairing gives something neither sensor has alone
+
+| join | what it gives |
+|---|---|
+| gyro + LiDAR | de-skewed scans while turning; the gyro's 2% scale calibrated against the walls; heading that is fast (gyro) *and* absolute (LiDAR) |
+| LiDAR + wheels | slip and stuck detection (wheels say moving, LiDAR says not); the asymmetric ICR skid-steer model fitted per surface; distance along a corridor where the LiDAR is blind to it |
+| LiDAR + camera | one extrinsic for the camera, measured (G3); depth time offset measured against the scan (G8); VO carries position where the LiDAR is degenerate; the costmaps take the union of both |
+| wheels + IMU | zero-velocity lock: certain stillness, and gyro bias re-measured every stop |
+| battery voltage + motors (INA226) | pivot torque margin known before a turn; speed scheduled to the pack |
+| everything + the harness | every change graded against LiDAR truth before it goes live |
+
+### The layers, in build order
+
+| phase | what | acceptance (graded by the harness) |
+|---|---|---|
+| **M1 Calibrate** | camera ↔ LiDAR from 4-6 poses (one camera yaw everywhere); gyro scale from 3 × `pivot360` each way; the item on the rover resolved | depth-to-LiDAR residual ≤ 1 cm and ≤ 0.3°; gyro ≤ 0.3° per 360° |
+| **M2 LiDAR odometry** | scan-to-submap PL-ICP at 10 Hz, gyro de-skew, Huber kernel, degeneracy → covariance; offline on the bags first, then live | ≤ 2 cm and ≤ 0.5° on every scenario, including a new random `zigzag`; no drift while parked |
+| **M3 Fusion** | gyro predicts; LiDAR, VO (covariance from landmarks) and wheels (ICR model, slip score, zero-velocity lock) correct, weighted by covariance; robot_localization EKF vs fusion.py decided by the harness; `/odom` with covariance; health flags (degenerate, slip, stuck, kidnap). With odom no longer drifting, nvblox's objects stay where they were seen | never worse than LiDAR-only; corridor, lift and slip runs flagged correctly |
+| **M4 Motion control** | primitives closed on the fused pose instead of timed: centre-holding pivot, straight with heading hold, exact short moves. Firmware: anti-windup on the per-side PI (the right side ran backwards under a forward command), stamped ticks, INA226 current and voltage | pivot centre ±2 cm over 360°; 1 m straight ±1 cm; 5 cm / 5° moves ±5 mm / ±0.5° |
+| **M5 Safe navigation** | nav2 on M3's pose: rotation shim for in-place turns, **collision monitor** on the raw LiDAR and depth as a last line independent of the planner, speed scaled by pose confidence, reversing only into space already seen; downward ToF cliff sensors and a bumper | the critical-path suite: doorways, tight corners, clutter, people |
+
+### Kept cheap now so the arm fits later
+
+- **Keep the laser plane clear.** Anything on the rover above 22 cm blinds the
+  LiDAR: the arm stows below it, or the LiDAR moves above the arm.
+- **The arm goes into `description/`**, so its links are in TF and can be masked
+  from the scan and the depth.
+- **M4's centre-holding pivot and exact short moves are the base's half of a pick.**
+  The base gets within ±2 cm; a wrist camera and the arm's reach do the last centimetre.
+- **Stop-and-grasp** relies on M3's zero-velocity lock: a base that is certainly still.
