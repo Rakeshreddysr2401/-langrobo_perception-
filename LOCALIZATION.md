@@ -365,3 +365,52 @@ improves: held-out max 16.8 → 6.8, 16.5 → 3.7, 13.6 → 1.3, 19.6 → 4.8 cm
   pivot_goto and pivot_test got a self-filter. It also shadows part of the
   LiDAR's view behind and to the right. Identify it, and add it to
   `params.yaml` as a component.
+
+## 9. Calibrated baseline, 2026-09-26 (after M1)
+
+All with the M1 calibration live: lever arm, camera roll and yaw. Errors are
+cm / degrees at the last checkpoint.
+
+| run | fused | vo | wheels | wheels+gyro |
+|---|---|---|---|---|
+| `straight` 1.0 m out (the return leg was refused: the start was 17 cm from a wall) | **0.5 / 0.02** | 0.6 / 0.01 | 3.9 / 0.80 | 4.4 / 0.30 |
+| `pivot360` × 3 (+360, −360) | **1.6 / 0.08**, 3.1 / 0.82, 0.5 / 0.53 | 1.2 / 0.63, 2.4 / 0.16, 0.2 / 0.27 | 1.8-7.0 / 34-37 | 1.2-4.3 / 0.4-3.5 |
+| `small` (±10°, ±5°, ±5 cm) | **0.4 / 0.71** | 0.4 / 0.33 | 0.5 / 1.35 | 0.5 / 0.28 |
+| `turn` +90 | 3.2 / 0.01 | 3.0 / 0.12 | 7.1 / 18.5 | 6.9 / 0.58 |
+| `square` 4 × 0.4 m | 2.4 (3.9) / 2.48 | **0.9** (3.6) / 0.06 | 37.3 / 70.4 | 1.6 (8.3) / 1.39 |
+| `pivot90` (8 turns) | 6.0 / **12.96** | 7.3 / 8.23 | 30.3 / 54.4 | 15.2 / 1.95 |
+
+Against §8 (before M1), full turns went from 3.8 cm / 1.6° to 0.5-3 cm / under 1°.
+
+### Two findings from `pivot90`
+
+- **The fusion took on a VO heading glitch.** Mid-run, VO's landmarks
+  dropped to 36 during the spins and its heading jumped 7.6° between two
+  stops. fusion.py trusts VO's heading whenever the rover is still, so it
+  absorbed the jump and ended **13° off**, while the raw gyro with the wheels
+  stayed within **2°**. This is exactly the hard-switch weakness M3 replaces:
+  weight VO by its confidence, and gate a sudden jump.
+- **The harness runner lost count of rotation.** It integrated the gyro from an
+  index into a buffer it trims every ~20 s. After a trim, ~10 s of rotation
+  went uncounted while the motors ran, and one "+90" really went ~112°. Fixed:
+  it now integrates in the callback on the IMU's own stamps. Truth was never
+  affected: every graded number above is still valid.
+
+### The drive froze again after long near-stall pivots
+
+In a re-run of `pivot90`, turn 3 crawled for ~12 s (one rear wheel nearly
+stopped), then turn 4 froze completely: all four encoders were still for 8 s
+under a full +1.5 command, while telemetry kept arriving. A nudge right
+afterwards drove normally. Same pattern as 2026-09-25 turn 7. The firmware has
+no stall cutoff; its only gates are the agent connection (up throughout) and a
+500 ms /cmd_vel watchdog. So it is one of:
+
+- **the command link stuttering over Wi-Fi**: the watchdog zeroes the motors
+  while telemetry flows fine the other way. That would also produce the
+  crawling; or
+- **the BTS7960s cutting out** on over-current after long near-stall, made
+  likelier by a pack drained by the session's pivots.
+
+Nothing measures the pack or the motor current yet (INA226, build plan §4),
+and nothing reports "watchdog fired" (an M4 firmware item). Pivot tests
+stopped here to spare the motors.

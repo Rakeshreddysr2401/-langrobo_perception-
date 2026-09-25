@@ -83,7 +83,14 @@ class Driver(Node):
     def __init__(self):
         super().__init__('harness_run')
         self.scan = self.ticks = self.odom = None
-        self.gz = []                                   # (t, wz)
+        self.gz = []                                   # (t, wz), recent, for the bias
+        # Heading integrated IN THE CALLBACK on the IMU's own stamps. turn()
+        # reads differences of this. It used to integrate from an index into
+        # self.gz, which is trimmed every ~20 s: after a trim the index pointed
+        # past the end and ~10 s of rotation went uncounted while the motors
+        # ran (2026-09-26: a "+90" turn really went ~112). Never index a
+        # buffer that gets trimmed.
+        self.yaw_acc, self.gyro_last = 0.0, None
         self.create_subscription(LaserScan, '/scan', self._scan, qos_profile_sensor_data)
         self.create_subscription(Imu, '/gyro/base', self._gyro, qos_profile_sensor_data)
         self.create_subscription(Quaternion, '/wheel_ticks', self._ticks, qos_profile_sensor_data)
@@ -96,7 +103,12 @@ class Driver(Node):
     def _odom(self, m): self.odom = m
 
     def _gyro(self, m):
-        self.gz.append((time.time(), m.angular_velocity.z))
+        t = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
+        w = m.angular_velocity.z
+        if self.gyro_last is not None and 0.0 < t - self.gyro_last < 0.1:
+            self.yaw_acc += (w - self.bias) * (t - self.gyro_last)
+        self.gyro_last = t
+        self.gz.append((time.time(), w))
         if len(self.gz) > 4000:
             del self.gz[:2000]
 
@@ -159,16 +171,12 @@ class Driver(Node):
                                    f'(+{m * 100:.0f} cm margin) -- clear it')
         target = math.radians(deg)
         tw = Twist(); tw.angular.z = math.copysign(wz, target)
-        turned, last_t = 0.0, time.time()
+        start = self.yaw_acc
         best, best_t = 0.0, time.time()
-        k = len(self.gz)
         while rclpy.ok():
             self.cmd.publish(tw)
             self.spin(0.02)
-            for t, w in self.gz[k:]:
-                turned += (w - self.bias) * (t - last_t)
-                last_t = t
-            k = len(self.gz)
+            turned = self.yaw_acc - start
             if abs(turned) >= abs(target):
                 break
             if abs(turned) > best + math.radians(1):
