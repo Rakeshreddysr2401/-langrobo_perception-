@@ -68,6 +68,21 @@ camera:
   # older mount. The fitted height agrees with the tape's lens_z to 3 mm.
   pitch:       {value: 0.0,     status: calibrated, source: "floor plane from depth, ./rover camera --floor", date: 2026-09-25}
   roll:        {value: -0.0245, status: calibrated, source: "floor plane from depth, ./rover camera --floor", date: 2026-09-25}
+  # Yaw against the LiDAR (./rover camera --lidar): depth at 20-30 cm fitted
+  # to the scan from 6 hand-placed poses facing corners. Per pose: +1.59,
+  # -0.29, +0.71, +1.13, +0.98, +0.94 deg; median +0.96. The three with saved
+  # points agree to 0.08 deg, and a depth scale of 1.00 fits best (+-3% moves
+  # the residual <0.1 cm), so this is a mount angle, not a depth stretch. The
+  # same fits put camera0_link at x 0.162, y +0.046: within 4 mm of the VO
+  # lever-arm fit below, an independent confirmation of it.
+  # Checked after applying it, at one unmoved spot: +0.80 / +0.50 / +0.95 deg
+  # remaining, while other spots sat near 0. So the camera-vs-LiDAR angle
+  # varies by SCENE (per-spot totals +1.59 -0.29 +0.71 +1.13 +0.98 +1.57), and
+  # one mount angle cannot remove that: ~1.0 +- 0.3 deg is the method's limit.
+  # Probably depth distortion across the image. A calibration board would
+  # tighten it; what remains is ~2-3 cm at 3 m depending on where in the image
+  # an object sits (it was ~6 cm).
+  yaw:         {value: 0.0168, status: calibrated, source: "camera vs LiDAR, 6 poses, median, ./rover camera --lidar", date: 2026-09-25}
   # camera0_link is the driver's root frame = the LEFT IR imager (infra1), not
   # the case centre: with the case centred, it sits half a baseline LEFT
   # (+y). -1 = infra2 (the right imager) is on the -y side.

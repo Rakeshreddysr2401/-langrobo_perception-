@@ -98,7 +98,14 @@ Z_BAD_GRACE_S = 3.0
 MAX_CORRECTION_Z = 0.30
 MAX_CORRECTION_M = 5.0
 
-CAM_YAW_DEG_DEFAULT = 2.06
+# The camera's yaw now lives in the TF (description/params.yaml camera.yaw,
+# +0.96 deg, measured against the LiDAR from 6 poses on 2026-09-25, spread
+# 0.08 deg). The 2.06 below it came from the August pushes on an OLDER mount
+# and, re-tested against LiDAR truth, fit worse than 0.96 (mean 2.03 vs
+# 1.75 cm). This constant is used only when the TF is unavailable, and
+# cam_yaw_deg is now an EXTRA correction on top of the TF (default 0).
+CAM_YAW_DEG_DEFAULT = 0.96
+AUG_PUSH_YAW_DEG = 2.06   # the 2026-08-15 measurement, kept for the self-test only
 
 
 def base_from_optical(cam_x, cam_y, cam_z, cam_yaw_deg=0.0, R_mount=None):
@@ -178,7 +185,7 @@ def self_test():
 
     # 6. The mount-yaw correction, checked against the two real pushes that
     #    measured it. Uncorrected, a straight 2 m push reported ~7 cm sideways.
-    a = math.radians(CAM_YAW_DEG_DEFAULT)
+    a = math.radians(AUG_PUSH_YAW_DEG)
     Rz = np.array([[math.cos(a), -math.sin(a), 0.0],
                    [math.sin(a), math.cos(a), 0.0],
                    [0.0, 0.0, 1.0]])
@@ -249,7 +256,7 @@ def main():
             self.declare_parameter('cam_x', CAM_X_DEFAULT)
             self.declare_parameter('cam_y', CAM_Y_DEFAULT)
             self.declare_parameter('cam_z', CAM_Z_DEFAULT)
-            self.declare_parameter('cam_yaw_deg', CAM_YAW_DEG_DEFAULT)
+            self.declare_parameter('cam_yaw_deg', 0.0)   # EXTRA yaw on top of the TF's
             # true: the mount comes from TF, i.e. from description/params.yaml via
             # robot_state_publisher, and cam_x/y/z are only the fallback.
             self.declare_parameter('cam_from_tf', True)
@@ -262,7 +269,10 @@ def main():
             cam, R_mount = (g('cam_x'), g('cam_y'), g('cam_z')), None
             if g('cam_from_tf'):
                 cam, R_mount = self._camera_from_tf(g('camera_frame'), cam)
-            self.B = base_from_optical(*cam, g('cam_yaw_deg'), R_mount)
+            yaw_extra = g('cam_yaw_deg')
+            if R_mount is None and yaw_extra == 0.0:
+                yaw_extra = CAM_YAW_DEG_DEFAULT   # no TF: the fallback carries the mount yaw
+            self.B = base_from_optical(*cam, yaw_extra, R_mount)
             self.Binv = np.linalg.inv(self.B)
 
             self.bridge = CvBridge()
@@ -339,8 +349,9 @@ def main():
             The constants at the top of this file are only the fallback, and
             using them is an ERROR, not a quiet default: they are a copy, and a
             copy is what drifted before (0.170 / 0 / 0.163 for weeks).
-            cam_yaw_deg stays a parameter -- it is a VO mount correction
-            measured by pushing, not part of the rover's geometry.
+            The mount's roll, pitch AND yaw come from here too (the yaw was
+            measured against the LiDAR); cam_yaw_deg is only an extra
+            correction on top, 0 by default.
             """
             from rclpy.time import Time
             from tf2_ros import Buffer, TransformListener
@@ -368,8 +379,9 @@ def main():
             cam = (tf.translation.x, tf.translation.y, tf.translation.z)
             roll = math.atan2(R[2, 1], R[2, 2])
             pitch = -math.asin(max(-1.0, min(1.0, R[2, 0])))
-            self.get_logger().info('camera mount from TF: x %.4f y %+.4f z %.4f, roll %+.2f pitch %+.2f deg'
-                                   % (*cam, math.degrees(roll), math.degrees(pitch)))
+            yaw = math.atan2(R[1, 0], R[0, 0])
+            self.get_logger().info('camera mount from TF: x %.4f y %+.4f z %.4f, roll %+.2f pitch %+.2f yaw %+.2f deg'
+                                   % (*cam, math.degrees(roll), math.degrees(pitch), math.degrees(yaw)))
             return cam, R
         def _left_info(self, m):
             self.left_info = m

@@ -44,6 +44,11 @@ OUT = Path('/logs/calib/cam_lidar.jsonl')
 NS = '/camera/camera0/depth'
 BAND = (0.20, 0.30)          # m above the floor: straddles the 25 cm laser plane
 ZMAX = 3.0                   # m along the optical axis: past this depth is too noisy
+# a well-framed view (a corner) scored ~1000 on 2026-09-25; a single flat wall 34
+MIN_EIG = 200
+# Frames averaged per capture. 15 depth / 20 scans repeated only to +-0.5 deg
+# at one unmoved spot (0.94, 1.88, 1.49 deg); more frames beat that noise down.
+N_DEPTH, N_SCAN = 45, 60
 
 
 def quat_R(q):
@@ -69,25 +74,25 @@ class Grab(Node):
         self.tfl = TransformListener(self.buf, self)
 
     def _d(self, m):
-        if len(self.depth) < 15:
+        if len(self.depth) < N_DEPTH:
             self.frame = m.header.frame_id
             self.depth.append(np.frombuffer(m.data, np.uint16).reshape(m.height, m.step // 2)[:, :m.width]
                               .astype(np.float32) * 0.001)
 
     def _s(self, m):
-        if len(self.scans) < 20:
+        if len(self.scans) < N_SCAN:
             self.scans.append(m)
 
 
 def capture():
     rclpy.init()
     n = Grab()
-    end = time.time() + 25
-    while time.time() < end and not (len(n.depth) >= 15 and len(n.scans) >= 20 and n.info is not None
+    end = time.time() + 40
+    while time.time() < end and not (len(n.depth) >= N_DEPTH and len(n.scans) >= N_SCAN and n.info is not None
                                      and n.buf.can_transform('base_link', n.frame or 'x', Time())
                                      and n.buf.can_transform('base_link', 'laser', Time())):
         rclpy.spin_once(n, timeout_sec=0.05)
-    if len(n.depth) < 15 or len(n.scans) < 20:
+    if len(n.depth) < N_DEPTH or len(n.scans) < N_SCAN:
         sys.exit(f'  not enough data ({len(n.depth)} depth, {len(n.scans)} scans): camera and lidar layers up?')
     tc = n.buf.lookup_transform('base_link', n.frame, Time()).transform
     tl = n.buf.lookup_transform('base_link', 'laser', Time()).transform
@@ -126,10 +131,19 @@ def capture():
     print(f'  depth at {BAND[0] * 100:.0f}-{BAND[1] * 100:.0f} cm: {len(band)} points; lidar: {len(L)} points')
     print(f'  correction: dx {f.x * 100:+.1f} cm  dy {f.y * 100:+.1f} cm  dyaw {math.degrees(f.th):+.2f} deg   '
           f'(residual {f.residual * 100:.1f} cm, {f.inliers} pts, min eig {f.eig[0]:.0f})')
+    if f.ok and f.eig[0] < MIN_EIG:
+        f.ok, f.why = False, (f'the view is too plain (min eig {f.eig[0]:.0f} < {MIN_EIG}): one flat surface '
+                              'pins nothing along it')
     if not f.ok:
-        print(f'  ✗ not usable: {f.why}. Face a corner or furniture 0.6-2.5 m away and capture again.')
+        print(f'  ✗ not usable: {f.why}. Face a CORNER or furniture with edges 0.6-2.5 m away, capture again.')
         return
     OUT.parent.mkdir(parents=True, exist_ok=True)
+    # the raw points too, so --solve can fit the camera jointly over every
+    # pose (yaw, x, y and a depth scale), not just average per-pose answers
+    stamp = time.strftime('%Y%m%d-%H%M%S')
+    cam_o = np.array([tc.translation.x, tc.translation.y])
+    np.savez(OUT.parent / f'cam_lidar_{stamp}.npz', band=band, lidar=L, cam_origin=cam_o)
+    rec['points'] = f'cam_lidar_{stamp}.npz'
     with OUT.open('a') as fh:
         fh.write(json.dumps(rec) + '\n')
     k = sum(1 for _ in OUT.open())
@@ -153,8 +167,10 @@ def solve():
         ys.append(s * cx + c * cy + r['dy'])
         yaws.append(cyaw + r['dth'])
         w.append(1.0 / max(r['residual'], 0.003) ** 2)
-    w = np.array(w) / sum(w)
-    yaw, x, y = (float(np.dot(w, v)) for v in (yaws, xs, ys))
+    # MEDIAN, not a residual-weighted mean: the first version weighted by
+    # 1/residual^2, so two very tight poses outvoted four good ones and one
+    # outlier (-0.29 deg) dragged the answer to +0.45 against a median of +0.96.
+    yaw, x, y = (float(np.median(v)) for v in (yaws, xs, ys))
     print(f'  {len(recs)} poses:')
     for r, yy, xx, y2 in zip(recs, yaws, xs, ys):
         print(f'    {r["t"]}  yaw {math.degrees(yy):+.2f} deg  x {xx:.4f}  y {y2:+.4f}  (res {r["residual"] * 100:.1f} cm)')

@@ -95,6 +95,7 @@ def derive(p):
                 v['camera.lens_z'])
     g['cam_pitch'] = v['camera.pitch']
     g['cam_roll'] = v['camera.roll']
+    g['cam_yaw'] = v['camera.yaw']
 
     lx = g['nose_x'] - v['lidar.front_gap'] - v['lidar.case_size'] / 2
     g['lidar_case'] = (lx, v['lidar.y'], g['frame_top'] + v['lidar.case_height'] / 2)
@@ -171,7 +172,7 @@ def urdf(p, g):
                     colour=GREY))
     out.append(joint('camera_case_joint', 'camera_case', g['cam_case']))
     out.append(link('camera0_link'))
-    out.append(joint('camera_joint', 'camera0_link', g['cam'], (g['cam_roll'], g['cam_pitch'], 0)))
+    out.append(joint('camera_joint', 'camera0_link', g['cam'], (g['cam_roll'], g['cam_pitch'], g['cam_yaw'])))
 
     out.append('\n  <!-- the RPLidar C1 case, square to the body, and `laser`, the frame /scan is\n'
                '       stamped in: at the laser plane, yawed to where the zero beam points. -->\n')
