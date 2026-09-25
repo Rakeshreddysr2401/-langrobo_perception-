@@ -33,3 +33,4 @@ lidar/ws/
 # Recorded test runs (./rover record). Tens of MB each, re-recordable; the
 # graded numbers that matter are copied into docs with the run's name.
 logs/bags/
+logs/calib/
