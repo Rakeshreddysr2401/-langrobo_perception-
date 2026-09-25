@@ -145,8 +145,8 @@ identically to a dead publisher.
 | transform | owner | why |
 |---|---|---|
 | `map → odom` | **`slam_toolbox`** (since 2026-09-22) | the LiDAR correction. cuVSLAM also publishes it when `slam:=true`, so `./rover pose` runs with `SLAM=false` and `./rover slam` refuses a second owner |
-| `odom → base_link` | **`fusion_node`** | the guarded estimate, not the raw one |
-| `base_link → camera0_link` | robot_state_publisher (`description/`) | measured 2026-09-24: x 0.173, y −0.0475 (left imager), z 0.175 — `description/params.yaml`; vo_node adds yaw 2.06° |
+| `odom → base_link` | **`fusion2_node`** (since 2026-09-26; `FUSION=1 ./rover fused` reverts) | fusion2: gyro + LiDAR odometry + VO + wheels, each weighted by its own reliability (LOCALIZATION.md §11). `fusion_node` runs beside it on `/odom_legacy`, no TF, as the fallback |
+| `base_link → camera0_link` | robot_state_publisher (`description/`) | x 0.1623, y +0.0419 (the LEFT imager; fitted against LiDAR truth), z 0.175, roll −1.40°, yaw +0.96° (camera vs LiDAR). All calibrated 2026-09-25/26 — `description/params.yaml`; vo_node reads the whole mount from TF |
 | `base_link → laser` | robot_state_publisher (`description/`) | x 0.1342, z 0.2498 measured 2026-09-24; **yaw +88.60° measured by driving** (`./rover lidar --calibrate`) |
 
 `map → base_link` is the corrected pose; `./rover drive` steers on it. nav2

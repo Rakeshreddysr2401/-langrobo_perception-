@@ -455,15 +455,26 @@ fused)
   echo "[fused] PoseFusion -> /odom, and TF odom -> base_link"
   echo "        vo_node runs with publish_tf:=false; only one thing may own a"
   echo "        transform, and the raw cuvslam pose is the one that teleports."
-  dexec "python3 $SRC/nodes/fusion_node.py > /tmp/fused.log 2>&1"
+  # WHO OWNS odom -> base_link. FUSION=2 (default since 2026-09-26, the
+  # owner's switch after fusion2 passed the live return test): fusion2 on
+  # /odom with the TF; fusion.py beside it on /odom_legacy, no TF, as the
+  # fallback. FUSION=1 swaps them back. Exactly one of them ever sends the TF.
+  FUSION=${FUSION:-2}
+  if [ "$FUSION" = 1 ]; then
+    F1="" ; F2="-p publish_tf:=false -p odom_topic:=/fused2/odom -p frame_id:=odom2"
+  else
+    F1="--ros-args -p publish_tf:=false -p odom_topic:=/odom_legacy"
+    F2="-p publish_tf:=true -p odom_topic:=/odom -p frame_id:=odom"
+  fi
+  echo "[fused] FUSION=$FUSION: $([ "$FUSION" = 1 ] && echo 'fusion.py owns /odom + TF' || echo 'fusion2 owns /odom + TF; fusion.py -> /odom_legacy')"
+  dexec "python3 $SRC/nodes/fusion_node.py $F1 > /tmp/fused.log 2>&1"
   # LiDAR odometry (SENSOR_FUSION_PLAN.md M2): /lidar/odom, no TF. Runs beside
   # the fusion so it can be recorded and graded live; M3 decides how they combine.
   echo "[fused] LiDAR odometry -> /lidar/odom (no TF; graded, not yet fused)"
   dexec "python3 $SRC/nodes/lidar_odom_node.py > /tmp/lidarodom.log 2>&1"
   # fusion2 (M3) beside fusion.py: /fused2/odom, no TF, recorded and graded
   # live before it takes over odom -> base_link.
-  echo "[fused] fusion2 -> /fused2/odom (no TF; graded beside fusion.py)"
-  dexec "python3 $SRC/nodes/fusion2_node.py > /tmp/fusion2.log 2>&1"
+  dexec "python3 $SRC/nodes/fusion2_node.py --ros-args $F2 > /tmp/fusion2.log 2>&1"
   # The rover's body is no longer drawn here: RViz shows the URDF that
   # robot_state_publisher serves (description/), and the footprint nav2 keeps
   # clear as nav2's own /local_costmap/published_footprint. rover_marker.py,
@@ -473,7 +484,8 @@ fused)
   echo "  GATE fused:"
   assert_rate /odom 15 "fused odom" || true
   assert_rate /lidar/odom 8 "lidar odom" || true
-  assert_rate /fused2/odom 15 "fusion2" || true
+  [ "$FUSION" = 1 ] && { assert_rate /fused2/odom 15 "fusion2 (beside)" || true; } \
+                    || { assert_rate /odom_legacy 15 "fusion.py (fallback)" || true; }
   # The honesty check belongs HERE, not in a doc telling you to run it by hand
   # after every bring-up -- which is what it was, and so it got skipped. This
   # is the layer that starts publishing /odom, so this is the layer that has to

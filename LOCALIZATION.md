@@ -547,3 +547,25 @@ wheels were 24 cm off. Over the run: LiDAR 4900 accepted / 0 rejected; VO
 **M3's acceptance holds offline over 19 runs and live on an independent
 return test.** Not yet exercised: a LiDAR-degenerate corridor, and the
 stuck / lifted flags.
+
+### The switch (2026-09-26): fusion2 owns odom → base_link
+
+At the owner's call after the live return test, `./rover fused` now runs
+fusion2 on `/odom` with the TF (FUSION=2, the default). `fusion.py` runs
+beside it on `/odom_legacy` without TF as the fallback; `FUSION=1 ./rover
+fused` swaps them back. SLAM, nvblox and nav2 were restarted on the new odom.
+Checked live: one process of each, `odom → base_link` on `/tf`, `/odom` at
+20 Hz. fusion2 takes 10.1 LiDAR fixes/s, 3.9 VO/s (64 VO glitches rejected),
+the wheels and the still-lock; its own sd is 0.56 cm / 0.1°.
+
+The first switch attempt started a fusion2 process that never joined the ROS
+graph: no `/odom`, no TF, no status, though the process ran. It was reverted
+to FUSION=1 at once, and the retry came up cleanly. The cause is not known.
+**The fused layer's gate must be read after the node is up**: it checks
+`/odom` at 15 Hz, which that failure would have failed. Watch for it on
+future starts. The ROS CLI tools also dropped `/fusion2` from `node list` and
+missed TF frames in short samples; use a 6 s+ sample or a Python probe before
+concluding anything is missing.
+
+nav2 has not yet driven on fusion2: the first drive is short and watched, on
+a charged pack (build plan §4.5).

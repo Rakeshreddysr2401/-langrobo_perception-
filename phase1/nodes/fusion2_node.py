@@ -8,8 +8,11 @@
 The estimator is phase1/nodes/fusion2.py, the class graded offline, so what
 was measured on the recordings is what runs here.
 
-It publishes NO TF. fusion.py still owns odom -> base_link; which one drives
-nav2 is decided with the owner after this has been recorded live and graded.
+SINCE 2026-09-26 (the owner's switch, after the live return test) this is
+what the rover uses: ./rover fused runs it with publish_tf:=true on /odom,
+frame odom, owning odom -> base_link. fusion.py keeps running beside it as a
+fallback on /odom_legacy without TF; FUSION=1 ./rover fused swaps them back.
+Defaults below are the side-by-side mode, so running it bare cannot steal TF.
 
 A /lidar/odom fix is stamped with its SCAN time and arrives ~0.13 s later.
 fusion2 carries it forward by its own motion since then (motion only), so
@@ -22,12 +25,13 @@ import sys
 from pathlib import Path
 
 import rclpy
-from geometry_msgs.msg import Quaternion, Twist
+from geometry_msgs.msg import Quaternion, TransformStamped, Twist
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Imu
 from std_msgs.msg import String
+from tf2_ros import TransformBroadcaster
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fusion2 import Fusion2  # noqa: E402
@@ -46,7 +50,12 @@ class Fusion2Node(Node):
         super().__init__('fusion2')
         self.f = Fusion2()
         self.landmarks, self.vo_healthy = 100.0, True
-        self.pub = self.create_publisher(Odometry, '/fused2/odom', 10)
+        self.declare_parameter('publish_tf', False)
+        self.declare_parameter('odom_topic', '/fused2/odom')
+        self.declare_parameter('frame_id', 'odom2')
+        self.frame = self.get_parameter('frame_id').value
+        self.tf = TransformBroadcaster(self) if self.get_parameter('publish_tf').value else None
+        self.pub = self.create_publisher(Odometry, self.get_parameter('odom_topic').value, 10)
         self.pub_status = self.create_publisher(String, '/fused2/status', 10)
         self.create_subscription(Imu, '/gyro/base', self._gyro, qos_profile_sensor_data)
         self.create_subscription(Quaternion, '/wheel_ticks', self._ticks, qos_profile_sensor_data)
@@ -56,7 +65,9 @@ class Fusion2Node(Node):
         self.create_subscription(Odometry, '/lidar/odom', self._lidar, 10)
         self.create_timer(0.05, self._publish)       # 20 Hz, like /odom
         self.create_timer(1.0, self._status)
-        self.get_logger().info(f'fusion2 up: VO mode {self.f.VO_MODE}; publishing /fused2/odom (no TF)')
+        self.get_logger().info(f'fusion2 up: VO mode {self.f.VO_MODE}; publishing '
+                               f'{self.get_parameter("odom_topic").value} in {self.frame}, '
+                               f'TF {"odom -> base_link" if self.tf else "none"}')
 
     def _now(self):
         return self.get_clock().now().nanoseconds * 1e-9
@@ -95,8 +106,9 @@ class Fusion2Node(Node):
             return
         x, y, th = self.f.pose
         o = Odometry()
-        o.header.stamp = self.get_clock().now().to_msg()
-        o.header.frame_id = 'odom2'
+        now = self.get_clock().now().to_msg()
+        o.header.stamp = now
+        o.header.frame_id = self.frame
         o.child_frame_id = 'base_link'
         o.pose.pose.position.x, o.pose.pose.position.y = x, y
         o.pose.pose.orientation.z, o.pose.pose.orientation.w = math.sin(th / 2), math.cos(th / 2)
@@ -110,6 +122,14 @@ class Fusion2Node(Node):
         o.twist.twist.linear.x, o.twist.twist.linear.y = float(self.f.X[3]), float(self.f.X[4])
         o.twist.twist.angular.z = float(self.f.gz_last - self.f.X[5])
         self.pub.publish(o)
+        if self.tf is not None:
+            tf = TransformStamped()
+            tf.header.stamp = now
+            tf.header.frame_id = self.frame
+            tf.child_frame_id = 'base_link'
+            tf.transform.translation.x, tf.transform.translation.y = x, y
+            tf.transform.rotation.z, tf.transform.rotation.w = math.sin(th / 2), math.cos(th / 2)
+            self.tf.sendTransform(tf)
 
     def _status(self):
         if self.f.t is None:

@@ -54,7 +54,7 @@ BAGS = Path(os.environ.get('HARNESS_BAGS', '/logs/bags'))
 TOPICS = ['/scan', '/gyro/base', '/wheel_ticks', '/wheel_state', '/wheel_odom',
           '/vo/odom', '/vo/status', '/odom', '/fusion/status', '/cmd_vel',
           '/tf', '/tf_static', '/rover_diag', '/lidar/odom', '/lidar/odom_status',
-          '/fused2/odom', '/fused2/status']
+          '/fused2/odom', '/fused2/status', '/odom_legacy']
 IMAGES = ['/camera/camera0/infra1/image_rect_raw', '/camera/camera0/infra2/image_rect_raw',
           '/camera/camera0/infra1/camera_info', '/camera/camera0/infra2/camera_info']
 

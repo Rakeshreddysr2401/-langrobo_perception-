@@ -166,6 +166,8 @@ def estimators(b):
         e['lidar_live'] = from_odom(b.odom['/lidar/odom'])
     if '/fused2/odom' in b.odom:
         e['fused2_live'] = from_odom(b.odom['/fused2/odom'])
+    if '/odom_legacy' in b.odom:          # fusion.py, as the fallback since the switch
+        e['fusion1'] = from_odom(b.odom['/odom_legacy'])
     ds, dth = wheel_steps(b)
     e['wheels'] = integrate(b.ticks[:, 0], ds, dth)
     if b.gyro is not None and len(b.gyro) > 50:
