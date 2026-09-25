@@ -257,6 +257,44 @@ USB bank) already gives that for the ESP32. Keep it.
 
 ---
 
+### 4.5 Power system redesign — OPEN, to be discussed with the owner (noted 2026-09-26)
+
+**The owner's decision:** the power system needs a proper design so the rover
+behaves consistently. Which batteries, and how everything is connected, will be
+discussed before anything is bought or rewired. This section collects the
+evidence and the questions for that discussion. Nothing here is decided.
+
+**Evidence that power is limiting the rover now:**
+
+| when | what happened | source |
+|---|---|---|
+| 2026-09-24, pack not recently charged | pivots at ~3°/s (vs 3-4 s per 90° charged), 33 cm slide per 90°, right side barely drove and then ran backwards, third turn stalled | LOCALIZATION.md §7 |
+| 2026-09-25, after charging | fast, clean pivots, ~6 cm slide; turn 7 then froze: all encoders still for 8 s under full command | LOCALIZATION.md §8 |
+| 2026-09-25, after a power-cycle | motor feed off entirely: commands arrived, no wheel moved (a switch or connector) | `./rover wheels --nudge` |
+| 2026-09-26, after many pivots | a turn crawled near stall for ~12 s, then the next froze for 8 s; a nudge worked right after | LOCALIZATION.md §9 |
+| always | no voltage or current telemetry anywhere; the ESP32 runs on a separate USB bank; what powers the Jetson, Pi 5 and PoE injector is unrecorded (§1 row 14) | this plan |
+
+Physics (§0): stall torque scales with voltage. The pivot's margin is ~15% on a
+full pack, ~7% at 11.1 V nominal, and **gone near 10.5 V**. So as the pack
+drains, the rover goes from turning well, to crawling, to stalling, which is what
+the table shows. The freezes may be the BTS7960s cutting out on over-current,
+or the 500 ms command watchdog on a stuttering Wi-Fi link (§9). Without current
+and voltage sensing they cannot be told apart.
+
+**Questions for the discussion:**
+
+1. **The pack:** chemistry, capacity (mAh), C rating, connector, age; how it is charged (§1 row 13).
+2. **Who is powered by what:** motors, ESP32, Jetson, Pi 5, the D555's PoE injector, the LiDAR, a future arm. One pack with regulated rails, or separate packs for motors and compute?
+3. **Headroom for the motors:** the 12 V GB37s pivot near stall even when full. Options to weigh include a higher-voltage pack with duty limiting, lower-ratio motors, or reducing the scrub (§6).
+4. **Measurement:** an INA226 (or one per rail) for voltage and current, published to ROS, so every test logs the pack state (§4.1).
+5. **Safety and wiring:** main switch or e-stop, fuse per rail, wire gauge for stall current, connectors that do not work loose (the motor feed was found off), common ground between the ESP32 and the drivers.
+6. **Behaviour on a low battery:** warn; limit pivots and speed below a threshold; stop before brown-out; later, return to a dock.
+7. **The arm:** its peak current on the same bus, and what that does to the motors' voltage during a pick.
+
+**Until it is designed:** charge the pack before any motion test, and treat stalls
+or freezes after long pivot sessions as suspected low power, not as software
+bugs. Every test report should say when the pack was last charged.
+
 ## 5. Weight distribution
 
 **Measure** (§1 row 12): the four corner loads, and from them the CG.
