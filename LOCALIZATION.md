@@ -569,3 +569,57 @@ concluding anything is missing.
 
 nav2 has not yet driven on fusion2: the first drive is short and watched, on
 a charged pack (build plan §4.5).
+
+## 12. M4: the goal executor, proven in simulation (2026-09-26)
+
+`phase3/nodes/goal_exec.py` (no ROS), `goal_exec_node.py` (live), `./rover goto
+X Y [DEG]`, and the VLM brain can send the same goals on `/goal_exec/goal`.
+
+**How it moves: approach along the goal line.** The goal (x, y, θ) defines a
+line. The rover goes to a pre-goal 25 cm behind the goal on that line (turn →
+straight → turn, both turns' slides pre-compensated), then drives straight
+along the line to the goal, holding θ and steering out cross-track error. If it
+ends off the line, it backs up along the line and approaches again, with no
+turn in place. The last motion is always a straight drive, so no final turn can
+slide it off.
+
+**The slide is learned, not assumed.** Every turn measures where the rover
+really pivoted: P = (I − R(a))⁻¹ d, per direction, smoothed. P is saved to
+`/logs/goal_exec_pivot.json` after every goal, so a session starts with what the
+last one learned.
+
+**Safety before and during every primitive:**
+- a turn: the outline + 5 cm swept about the learned P, against the scan
+- a straight: the outline + 5 cm swept along the leg
+- no progress for 6 s: stop
+- pose unsure (LiDAR unhealthy, sd > 3 cm, fusion status silent): pause, and
+  give up after 5 s
+
+**Simulator** (`phase3/tools/sim_goal_exec.py`). The rover's quirks all at once:
+turns about an off-centre pivot, turns at 30-45% of the command with a lag and
+a scrub deadband, the firmware's 0.01 m/s side cutoff, fusion2-level pose noise,
+and a room scanned by 720 beams. 5 seeds × 3 chassis conditions × 12 random
+goals:
+
+| chassis | reached | mean error | worst |
+|---|---|---|---|
+| charged (P near centre) | 60/60 | 1.1-1.2 cm / 0.3-0.4° | 1.7 cm / 0.89° |
+| weak pack (P at the left tyres, ~30-50 cm slide per turn) | 59/60 + 1 correct refusal (5 cm margin to a wall) | 1.1-1.2 cm / 0.3-0.5° | 1.7 cm / 1.06° |
+| asymmetric L ≠ R | 58/60; 2 near-misses at 1.9-2.0 cm | 1.0-1.3 cm / 0.3-0.6° | 2.0 cm / 1.33° |
+
+It refuses a turn with a box 3 cm beside the rover, and a leg with a box in the
+path. Learned P matches the true pivot to ~1 cm.
+
+**What the simulator caught in the first designs:**
+1. Turn → drive → turn toward each correction made two ~180° turns, each
+   sliding ~6 cm, to fix 5 cm. It never converged; replaced by the line
+   approach.
+2. The forward/reverse choice flip-flopped inside the aim iteration.
+3. The cross-track correction was sign-flipped when reversing, twice.
+4. The approach was too fast for the drive's lag and coasted past.
+5. Unlearned on a weak pack, the first goals ran out of tries; fixed with more
+   tries and the saved prior.
+
+**Live, so far** (no motion): a goal at the current pose reports `reached 0.0 cm`;
+a 2.5 m goal is refused as nav2's job. **Next: short live goals, watched, on a
+charged pack.**

@@ -9,6 +9,7 @@
 #                      --yaw    measure LIDAR_YAW off a target at the nose
 #                      --watch  live: hold a box at the nose and read it
 #                      --calibrate  DRIVES 0.20 m and measures the yaw itself
+#   ./rover goto X Y [DEG]  DRIVES: an exact (x, y, θ) move, learned slide, LiDAR-checked (M4)
 #   ./rover drive      DRIVES: exact short moves that plan around the pivot fault
 #   ./rover wheels     check the ESP32 link (diagnose only; cannot fix from here)
 #                      --nudge  MOVES ~7 cm: proves the motors are powered, not just the link
@@ -931,6 +932,28 @@ view)
          timeout 6 ros2 topic info $t 2>/dev/null | grep -oP 'Subscription count: \K[0-9]+'" 2>/dev/null)
     printf "      %-42s %s\n" "$t" "${c:-0}"
   done
+  ;;
+
+# ── goto ────────────────────────────────────────────────────────────────────
+# Exact (x, y, θ) moves (SENSOR_FUSION_PLAN.md M4): goal_exec closes on
+# fusion2's pose, approaches along the goal line, learns this rover's turn
+# slide as it goes, and refuses a move whose swept outline (+5 cm) or corridor
+# the LiDAR says is not clear. The VLM brain can send the same goals on
+# /goal_exec/goal.   ./rover goto X Y [DEG] [--odom|--map]
+goto)
+  need_container
+  shift
+  assert_rate /odom 15 "fused odom" || die "no pose — ./rover fused first"
+  assert_rate /scan 8 "laser scan"  || die "no /scan — ./rover lidar first"
+  mode=$(timeout 5 curl -s http://192.168.1.16:8091/mode 2>/dev/null)
+  case "$mode" in *'"manual": true'*) die "teleop is in MANUAL — it streams zeros over every command. Tap AUTO." ;; esac
+  if ! docker exec "$NAME" pgrep -f '[g]oal_exec_node.py' >/dev/null 2>&1; then
+    echo "[goto] starting goal_exec (learned pivot: /logs/goal_exec_pivot.json)"
+    dexec "python3 $SRC3/nodes/goal_exec_node.py > /tmp/goal_exec.log 2>&1"
+    sleep 3
+  fi
+  ttyflag=""; [ -t 0 ] && ttyflag="-it"   # Ctrl-C must reach the client: it cancels the goal
+  docker exec $ttyflag "$NAME" bash -lc "$ENVSET python3 $SRC3/tools/goto.py $(printf '%q ' "$@")"
   ;;
 
 # ── record / grade ──────────────────────────────────────────────────────────
