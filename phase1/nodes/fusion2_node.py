@@ -63,8 +63,14 @@ class Fusion2Node(Node):
         self.create_subscription(Odometry, '/vo/odom', self._vo, qos_profile_sensor_data)
         self.create_subscription(String, '/vo/status', self._vo_status, 10)
         self.create_subscription(Odometry, '/lidar/odom', self._lidar, 10)
-        self.create_timer(0.05, self._publish)       # 20 Hz, like /odom
-        self.create_timer(1.0, self._status)
+        # NO TIMERS. Output is driven from the gyro callback: every 10th sample
+        # (20 Hz) publishes /odom + TF, every 200th the status. On 2026-09-26
+        # rclpy's single-threaded executor starved this node's timers while the
+        # subscriptions kept flowing -- both timers ~0.5-0.8 s overdue and never
+        # called, the estimate current, /odom and odom -> base_link silent. Tied
+        # to the gyro, the pose is published exactly when it advances, and if
+        # the gyro stops, the pose honestly stops with it.
+        self.n_gyro = 0
         self.get_logger().info(f'fusion2 up: VO mode {self.f.VO_MODE}; publishing '
                                f'{self.get_parameter("odom_topic").value} in {self.frame}, '
                                f'TF {"odom -> base_link" if self.tf else "none"}')
@@ -74,6 +80,11 @@ class Fusion2Node(Node):
 
     def _gyro(self, m):
         self.f.on_gyro(stamp_s(m.header), m.angular_velocity.z)
+        self.n_gyro += 1
+        if self.n_gyro % 10 == 0:
+            self._publish(m.header.stamp)
+        if self.n_gyro % 200 == 0:
+            self._status()
 
     def _ticks(self, m):
         self.f.on_ticks(self._now(), (m.x, m.y, m.z, m.w))   # no header: stamped on arrival
@@ -101,12 +112,12 @@ class Fusion2Node(Node):
         self.f.on_lidar(stamp_s(m.header), (p.position.x, p.position.y, yaw_of(p.orientation)),
                         ok, max(c[0], 0.005 ** 2), c[35])
 
-    def _publish(self):
+    def _publish(self, stamp):
         if self.f.t is None:
             return
         x, y, th = self.f.pose
         o = Odometry()
-        now = self.get_clock().now().to_msg()
+        now = stamp                           # the gyro sample's own time: the state's time
         o.header.stamp = now
         o.header.frame_id = self.frame
         o.child_frame_id = 'base_link'

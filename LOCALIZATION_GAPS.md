@@ -42,6 +42,8 @@ Today none of the three is fully true.
 | **G10** | **No uncertainty on `/odom`.** | message covariance is unset | nav2 and the brain cannot tell a sure pose from a guess |
 | **G11** | **Something on the rover blocks a LiDAR sector** (front-right now, rear-right earlier), at base_link (+0.19, −0.12). | stays fixed in base_link when the rover moves | A blind wedge, and a constant point pulling every scan match toward "no motion" |
 
+| **G12** | **The gyro lives inside the camera.** `/gyro/base` is the D555's IMU, delivered over the same PoE/DDS link as depth and IR. The D555 goes "half-alive" (colour streams, depth and IR stop, `timeout waiting for reply`), seen again 2026-09-26. | fusion2 publishes the pose from the gyro callback, so if the IMU stream stops, **the pose stops**, and today the LiDAR odometry's de-skew also needs the gyro | One fragile link carries three of the four motion sensors (IR for VO, depth, gyro). An independent IMU on the ESP32 (or the Jetson) removes the single point of failure; until then, fusion2 must keep publishing on LiDAR + wheels if the gyro goes silent |
+
 Measured and fine: `/scan` arrives 19 ms after its (corrected) stamp; depth,
 gyro and `/odom` rates are nominal; the camera lever arm is fixed (8.0 → 2.0 cm
 mean error, LOCALIZATION.md §8); the floor tilt is in the TF.
