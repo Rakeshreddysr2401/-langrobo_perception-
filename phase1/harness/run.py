@@ -12,6 +12,9 @@
     small      the edge moves: +10, -10, +5, -5 deg, forward and back 5 cm
     turn       one in-place turn of --deg (default +90): also repositions the
                rover between runs when the room is tight
+    return     THE OWNER'S TEST: drive it anywhere by hand/phone for --secs
+               (default 180), bring it back onto the start mark, stop. Every
+               estimate should read ~0; the LiDAR says how close you got
 
 Every scenario starts and ends with the rover still for 4 s, and stops for
 3 s between moves: the grader takes its truth only while the rover is still
@@ -72,6 +75,7 @@ def plan(a):
         'small': [('turn', 10), ('turn', -10), ('turn', 5), ('turn', -5),
                   ('move', 0.05), ('move', -0.05)],
         'turn': [('turn', a.deg)],
+        'return': [('manual', a.secs)],
     }[a.scenario]
 
 
@@ -215,7 +219,7 @@ def teleop_auto():
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('scenario', choices=['still', 'manual', 'straight', 'pivot90', 'pivot360', 'square', 'small', 'turn'])
+    ap.add_argument('scenario', choices=['still', 'manual', 'straight', 'pivot90', 'pivot360', 'square', 'small', 'turn', 'return'])
     ap.add_argument('--deg', type=float, default=90.0, help='turn: how far')
     ap.add_argument('--dist', type=float, default=None)
     ap.add_argument('--wz', type=float, default=float(os.environ.get('PIVOT_WZ', '1.5')))
@@ -224,6 +228,8 @@ def main():
     ap.add_argument('--images', action='store_true', help='also record stereo IR (~25 MB/s)')
     ap.add_argument('--note', default='')
     a = ap.parse_args()
+    if a.scenario == 'return' and a.secs == 60.0:
+        a.secs = 180.0
     if a.dist is None:
         a.dist = 0.5 if a.scenario == 'square' else 1.0
     steps = plan(a)
@@ -290,6 +296,10 @@ def main():
             if kind == 'hold':
                 print(f'  [{i}/{len(steps)}] still for {val:.0f} s -- walk past it, do not touch it')
                 n.hold(val); got = None
+            elif kind == 'manual' and a.scenario == 'return':
+                print(f'  [{i}/{len(steps)}] {val:.0f} s: MARK THE START. Drive it anywhere (phone MANUAL is fine),'
+                      ' then put it back on the mark, same heading, and leave it still')
+                n.spin(val); got = None
             elif kind == 'manual':
                 print(f'  [{i}/{len(steps)}] {val:.0f} s: drive or push it now; stop >= 2 s between moves')
                 n.spin(val); got = None

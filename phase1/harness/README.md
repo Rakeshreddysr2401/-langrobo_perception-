@@ -49,6 +49,7 @@ graded.
 | `small` | ±10°, ±5°, ±5 cm | the edge moves: deadband, start/stop |
 | `still` | nothing for `--secs` | drift while parked; walk past it for the people case |
 | `manual` | you drive or push it for `--secs` | rug edge, threshold, lift-and-place, spinning wheels |
+| `return` | **the owner's test**: drive it anywhere for `--secs` (180), bring it back onto the start mark | every estimate should read ≈ 0 at the end; the truth row says how close it really got back |
 
 `--images` also records stereo IR (~25 MB/s). Use it only for runs meant to
 re-run cuVSLAM variants (stage D).
