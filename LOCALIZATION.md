@@ -290,3 +290,74 @@ separate question for the firmware's PI loop, or for the wiring on that side.
 
 **Still to record, after a charge:** the rest of `pivot90`, `pivot360`,
 `square`, `small`.
+
+## 8. Stage A baseline, 2026-09-25: complete, and what it found
+
+Charged pack, motors powered, new geometry. `logs/bags/SUMMARY.md` has every
+run; all checkpoints passed the truth gates (26 usable of 26). Errors are
+cm / degrees at the last checkpoint, with the worst in brackets.
+
+| run | fused (today's fusion.py) | vo | wheels | wheels+gyro |
+|---|---|---|---|---|
+| `pivot90`, 6 of 8 turns | 13.5 (16.2) / 2.53 | 13.4 (16.5) / 0.43 | 17.7 / 86.4 | 14.6 / 1.73 |
+| `pivot360`, +360 then −360 | 3.8 / 1.61 | 3.7 / 1.18 | 4.6 / 51.7 | 2.4 / 2.39 |
+| `turn`, one +90 | 13.3 / 0.17 | 13.6 / 0.28 | 6.0 / 18.5 | 5.8 / 0.16 |
+| `square`, 4 × (0.4 m, +90) | 5.0 (19.4) / 0.16 | 4.8 (19.6) / 4.28 | 65.5 / 85.5 | 16.8 / 3.98 |
+
+`small` was not recorded: by then the rover was boxed in (3 cm clear ahead,
+1 cm to the right).
+
+### The finding: the camera's lever arm had the wrong sign
+
+After every turn, fused and VO were ~13 cm off even when the rover had barely
+moved: in `turn`, the truth moved 6 cm and fused was off by 13.3 cm, while
+wheels+gyro was off by only 5.8. That is a lever-arm error. The recorded VO
+was re-projected with candidate camera offsets and fitted to the LiDAR truth,
+26 checkpoints over 7 runs:
+
+| camera0_link (x, y) | mean | max |
+|---|---|---|
+| as run, (0.173, −0.0475) | 8.0 cm | 19.6 cm |
+| the old (0.173, 0) | 4.4 cm | 10.1 cm |
+| flipped, (0.173, +0.0475) | 2.1 cm | 8.1 cm |
+| **fit (0.1623, +0.0419) ± 3 mm** | **2.0 cm** | **5.7 cm** |
+
+Leave-one-run-out, fitting on the other six each time, every turning run
+improves: held-out max 16.8 → 6.8, 16.5 → 3.7, 13.6 → 1.3, 19.6 → 4.8 cm.
+
+- **The left imager is on the rover's LEFT.** The D555 driver's TF puts infra2
+  at +0.095 y from infra1, which read as "infra1 on the right". That sign is
+  wrong for this rig, and 2026-09-24 trusted it.
+- **This also explains TODO 43's "pose misses ~7 cm per turn".** The old y = 0
+  is 4.75 cm off, and 0.0475 × √2 = 6.7 cm per 90°. It was never the fusion;
+  it was the camera's lever arm.
+- The optical centre sits 1.1 cm behind the front glass.
+- The fit is now in `description/params.yaml` (`vo_lever_x/y`, `infra2_side
+  −1`) and live: vo_node reads it from TF.
+- **The fused rows above were recorded with the wrong lever arm.** They are the
+  bar for "the old system", not for fusion.py itself; re-record the turning
+  runs to see fusion.py with the right geometry.
+
+### Also measured
+
+- **The gyro under-reads by about 2%.** Four "90°" turns summed to 363° on the
+  gyro, and the truth said 369.7°. Turns that stop on the gyro overshoot. This
+  is the scale calibration in SENSOR_FUSION_PLAN.md §3.3.
+- **The pivot slide depends on the battery and varies.** On the charged pack
+  it was about 6 cm per 90° in `pivot90`, but 22 cm for the first turn of the
+  square, against 33 cm on 2026-09-24's weak pack. The weak-pack pivot ran at
+  3°/s; charged, 3-4 s per 90°.
+- **One turn froze.** The seventh pivot got a −1.5 command, but the encoders did
+  not change at all for 8 s. The link and firmware were healthy (loop 507 Hz,
+  agent connected), and the motors answered a nudge right after. This fits
+  the BTS7960s' over-current or thermal protection tripping after six hard
+  pivots near stall. Unproven without current sensing (the INA226, build
+  plan §4).
+- **Wheel distance is ±1-3% with no fixed sign:** 50.3 true for 51.0 read on
+  2026-09-24, and 42.1 true for 41.0 read in the square. That is slip and
+  start/stop, not only the 83 vs 85 mm question.
+- **Something on the rover's rear-right corner now reaches the laser plane**,
+  at base_link (−0.176, −0.14). It blocked every turn until the harness,
+  pivot_goto and pivot_test got a self-filter. It also shadows part of the
+  LiDAR's view behind and to the right. Identify it, and add it to
+  `params.yaml` as a component.

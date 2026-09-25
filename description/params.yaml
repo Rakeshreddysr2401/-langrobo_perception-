@@ -69,11 +69,29 @@ camera:
   pitch:       {value: 0.0,     status: calibrated, source: "floor plane from depth, ./rover camera --floor", date: 2026-09-25}
   roll:        {value: -0.0245, status: calibrated, source: "floor plane from depth, ./rover camera --floor", date: 2026-09-25}
   # camera0_link is the driver's root frame = the LEFT IR imager (infra1), not
-  # the case centre. The driver puts infra2 at +0.095 y from it, so with the
-  # case centred, infra1 sits half a baseline to -y: camera0_link y = -0.0475.
-  # The optical origin is some mm behind the front glass; the datasheet does
-  # not give it, so x is taken at the glass.
-  infra2_side: {value: 1.0, status: measured, source: "sign of y in live tf camera0_link->camera0_infra2_frame (+0.095)", date: 2026-09-24}
+  # the case centre: with the case centred, it sits half a baseline LEFT
+  # (+y). -1 = infra2 (the right imager) is on the -y side.
+  #
+  # CORRECTED 2026-09-25. On 2026-09-24 this was +1, read off the driver's
+  # own TF (camera0_link -> camera0_infra2_frame at +0.095 y), which put the
+  # imager 4.75 cm RIGHT. The recorded runs disagreed: after every turn VO
+  # and fusion were off by exactly the lever-arm error that implies (13.3 cm
+  # measured for a 93.5 deg turn; 0.095 x 2 sin(46.7 deg) = 13.8 cm). The
+  # old y = 0 explains TODO 43's "pose misses ~7 cm per turn" the same way
+  # (0.0475 x sqrt 2 = 6.7 cm). Do not trust that TF's sign.
+  infra2_side: {value: -1.0, status: calibrated, source: "VO lever-arm fit against LiDAR truth (see vo_lever_*)", date: 2026-09-25}
+  # The lever arm itself, FITTED: the recorded VO re-projected with candidate
+  # offsets, against LiDAR truth at 26 checkpoints over 7 runs
+  # (straight, pivot90 x2, pivot360, square, turn, still):
+  #   as run (0.173, -0.0475)  mean 8.0 cm, max 19.6 cm
+  #   y = 0                    mean 4.4 cm, max 10.1 cm
+  #   flipped (0.173, +0.0475) mean 2.1 cm, max  8.1 cm
+  #   fit (0.1623, +0.0419)    mean 2.0 cm, max  5.7 cm   (+- 3 mm each)
+  # x sits 1.1 cm behind the front glass (the optical centre; not in the
+  # datasheet). y is 5.6 mm short of half the baseline: the case is ~5 mm
+  # off-centre, or the fit's noise; the fit wins because it is what VO sees.
+  vo_lever_x:  {value: 0.1623, status: calibrated, source: "VO vs LiDAR truth, 26 checkpoints, phase1/harness", date: 2026-09-25}
+  vo_lever_y:  {value: 0.0419, status: calibrated, source: "VO vs LiDAR truth, 26 checkpoints, phase1/harness", date: 2026-09-25}
 
 # The RPLidar C1. Base 55.6 x 55.6, 41.3 tall, laser plane 29.8 above its base.
 lidar:

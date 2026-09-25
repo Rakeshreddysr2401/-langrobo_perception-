@@ -266,7 +266,14 @@ class Driver(Node):
         a = m.angle_min + np.arange(r.size) * m.angle_increment
         ok = np.isfinite(r) & (r > 0.15) & (r < 8.0)
         q = np.stack([r[ok] * np.cos(a[ok]), r[ok] * np.sin(a[ok])], axis=1)
-        return q @ R(yaw_of(t.rotation)).T + np.array([t.translation.x, t.translation.y])
+        q = q @ R(yaw_of(t.rotation)).T + np.array([t.translation.x, t.translation.y])
+        # Self-filter: returns inside the rover's own outline (+2 cm) are the
+        # rover. Since 2026-09-25 something at the frame's rear-right corner
+        # reaches the laser plane; unfiltered, it sat "2 cm from the swing" of
+        # every turn, and pinned every scan registration to zero motion.
+        own = (q[:, 0] < CORNERS[:, 0].max() + 0.02) & (q[:, 0] > CORNERS[:, 0].min() - 0.02) \
+            & (np.abs(q[:, 1]) < CORNERS[:, 1].max() + 0.02)
+        return q[~own]
 
     # ── safety ──────────────────────────────────────────────────────────────
     def clear_to_rotate(self, th):

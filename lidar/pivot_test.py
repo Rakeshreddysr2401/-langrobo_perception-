@@ -116,7 +116,12 @@ def scan_in_base(scan, lx, lz_yaw):
     q = np.stack([r[ok] * np.cos(a[ok]), r[ok] * np.sin(a[ok])], axis=1)
     c, s = math.cos(lz_yaw), math.sin(lz_yaw)
     R = np.array([[c, -s], [s, c]])
-    return q @ R.T + np.array([lx, 0.0])
+    q = q @ R.T + np.array([lx, 0.0])
+    # Self-filter: returns inside the rover's own outline (+2 cm) are the rover
+    # (since 2026-09-25, something at the rear-right corner of the frame).
+    own = (q[:, 0] < CORNERS[:, 0].max() + 0.02) & (q[:, 0] > CORNERS[:, 0].min() - 0.02) \
+        & (np.abs(q[:, 1]) < CORNERS[:, 1].max() + 0.02)
+    return q[~own]
 
 
 def icp(src, dst, theta0, iters=60):

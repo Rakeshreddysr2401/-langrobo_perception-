@@ -86,8 +86,12 @@ def derive(p):
 
     glass = g['nose_x'] - v['camera.glass_inset']
     g['cam_case'] = (glass - v['camera.case_depth'] / 2, v['camera.case_y'], v['camera.lens_z'])
-    # camera0_link = the left IR imager, half a baseline away from infra2
-    g['cam'] = (glass, v['camera.case_y'] - v['camera.infra2_side'] * v['camera.baseline'] / 2,
+    # camera0_link = the left IR imager, half a baseline away from infra2. The
+    # geometry gives it from the tape and the datasheet; the VO lever-arm fit
+    # measures it directly, and wins when present (params.yaml explains).
+    g['cam_geom'] = (glass, v['camera.case_y'] - v['camera.infra2_side'] * v['camera.baseline'] / 2)
+    g['cam'] = (v.get('camera.vo_lever_x') or g['cam_geom'][0],
+                v.get('camera.vo_lever_y') if v.get('camera.vo_lever_y') is not None else g['cam_geom'][1],
                 v['camera.lens_z'])
     g['cam_pitch'] = v['camera.pitch']
     g['cam_roll'] = v['camera.roll']
@@ -277,7 +281,8 @@ def summary(g):
     v = g['v']
     print(f'  base_link: nose {g["nose_x"]:+.4f}  tail {g["tail_x"]:+.4f}  wheelbase {g["wheelbase"]:.3f}')
     print(f'  wheels:    x ±{g["wheel_x"]:.4f}  y ±{g["wheel_y"]:.3f}  z {g["wheel_z"]:.3f}')
-    print('  camera0_link: x {:+.4f} y {:+.4f} z {:.4f}'.format(*g['cam']))
+    print('  camera0_link: x {:+.4f} y {:+.4f} z {:.4f}'.format(*g['cam'])
+          + '   (tape+datasheet: x {:+.4f} y {:+.4f})'.format(*g['cam_geom']))
     print('  laser:        x {:+.4f} y {:+.4f} z {:.4f}  yaw {:.4f}'.format(*g['lidar'], g['lidar_yaw']))
     print(f'  envelope:  front {g["env_front"]:.3f}  rear {g["env_rear"]:.3f}  side {g["env_side"]:.3f}'
           f'  = {(g["env_front"] + g["env_rear"]) * 100:.1f} x {g["env_side"] * 200:.1f} cm')

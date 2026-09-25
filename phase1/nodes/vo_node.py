@@ -61,13 +61,16 @@ import numpy as np
 # 2026-09-24 -- change it there. base_link's origin is on the GROUND midway
 # between the axles, which sit 6.3 and 30.1 cm behind the nose, so the nose is
 # at +0.182. The frame is camera0_link = the LEFT IR imager:
-#     x  front glass, 0.9 cm inside the nose               = 0.173
-#     y  case centred, imager half the 95 mm baseline right = -0.0475
+#     x  optical centre, 1.1 cm behind the front glass      = 0.1623
+#     y  the LEFT imager, left of centre                    = +0.0419
 #     z  lens centre off the floor                          = 0.175
-# The 2026-08-15 values (0.170, 0, 0.163) used a 25 cm wheelbase and the case
-# centre. y matters on turns: the imager swings on a lever arm about base_link.
-CAM_X_DEFAULT = 0.173    # metres forward of base_link origin  -- MEASURED
-CAM_Y_DEFAULT = -0.0475  # metres left                         -- MEASURED + datasheet
+# x and y are FITTED: recorded VO re-projected against LiDAR truth, 26
+# checkpoints (2026-09-25). y matters on turns: the imager swings on a lever
+# arm about base_link, and each metre of error in it is a sqrt(2) m error per
+# 90 deg. 2026-09-24's -0.0475 (the driver TF's sign) made 13 cm per turn;
+# the older 0 made TODO 43's 7 cm. These constants are only the fallback.
+CAM_X_DEFAULT = 0.1623   # metres forward of base_link origin  -- CALIBRATED
+CAM_Y_DEFAULT = 0.0419   # metres left                         -- CALIBRATED
 CAM_Z_DEFAULT = 0.175    # metres above the ground             -- MEASURED
 
 # The camera is not quite square on its bracket. Two straight 2 m hand pushes,

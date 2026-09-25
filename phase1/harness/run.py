@@ -10,6 +10,8 @@
     pivot360   +360, stop, -360
     square     four times: forward --dist (default 0.5 m), stop, +90, stop
     small      the edge moves: +10, -10, +5, -5 deg, forward and back 5 cm
+    turn       one in-place turn of --deg (default +90): also repositions the
+               rover between runs when the room is tight
 
 Every scenario starts and ends with the rover still for 4 s, and stops for
 3 s between moves: the grader takes its truth only while the rover is still
@@ -54,8 +56,7 @@ IMAGES = ['/camera/camera0/infra1/image_rect_raw', '/camera/camera0/infra2/image
 
 HOLD_S, PAUSE_S = 4.0, 3.0
 STALL_S = 8.0                    # no progress this long -> stop, abort
-# the measured envelope's furthest corner + 5 cm (nav2.yaml footprint)
-SWEEP_R = math.hypot(0.182, 0.19) + 0.05
+MARGIN = 0.05                    # the owner's 5 cm, as in nav2's footprint_padding
 HALF_W = 0.19 + 0.05             # corridor half-width kept clear going straight
 
 
@@ -70,6 +71,7 @@ def plan(a):
         'square': [('move', d), ('turn', 90)] * 4,
         'small': [('turn', 10), ('turn', -10), ('turn', 5), ('turn', -5),
                   ('move', 0.05), ('move', -0.05)],
+        'turn': [('turn', a.deg)],
     }[a.scenario]
 
 
@@ -127,13 +129,30 @@ class Driver(Node):
         x, y, yaw = self.mount
         p = np.stack([r[ok] * np.cos(a[ok]), r[ok] * np.sin(a[ok])], axis=1)
         c, si = math.cos(yaw), math.sin(yaw)
-        return p @ np.array([[c, -si], [si, c]]).T + np.array([x, y])
+        p = p @ np.array([[c, -si], [si, c]]).T + np.array([x, y])
+        # Self-filter: anything inside the rover's own outline (+2 cm) is the
+        # rover. Seen 2026-09-25: a return at the rear-right corner of the
+        # frame (-0.176, -0.14) in every scan -- something on the rover that
+        # reaches the laser plane -- refused every turn as "inside the swing".
+        own = (p[:, 0] < 0.182 + 0.02) & (p[:, 0] > -0.178 - 0.02) & (np.abs(p[:, 1]) < 0.19 + 0.02)
+        return p[~own]
 
     def turn(self, deg, wz):
+        # The area THIS turn sweeps, not a full circle: the outline plus the
+        # owner's 5 cm margin, swung about base_link in 2 deg steps. A 10 deg
+        # turn barely moves the corners; a full 360 needs the whole circle.
+        # It assumes an ideal pivot -- the measured slide is ~6 cm per 90 deg
+        # on a charged pack, which the margin roughly covers.
         p = self.points()
-        near = float(np.min(np.hypot(p[:, 0], p[:, 1]))) if len(p) else 9.0
-        if near < SWEEP_R:
-            raise RuntimeError(f'something {near:.2f} m away, inside the {SWEEP_R:.2f} m swing -- clear it')
+        m = MARGIN
+        for th in np.radians(np.linspace(0.0, deg, max(2, int(abs(deg) / 2) + 1))):
+            c, s = math.cos(-th), math.sin(-th)
+            q = p @ np.array([[c, -s], [s, c]]).T
+            hit = (q[:, 0] < 0.182 + m) & (q[:, 0] > -0.178 - m) & (np.abs(q[:, 1]) < 0.19 + m)
+            if hit.any():
+                d = float(np.min(np.hypot(p[hit, 0], p[hit, 1])))
+                raise RuntimeError(f'something {d:.2f} m away is in the {deg:+.0f} deg swing '
+                                   f'(+{m * 100:.0f} cm margin) -- clear it')
         target = math.radians(deg)
         tw = Twist(); tw.angular.z = math.copysign(wz, target)
         turned, last_t = 0.0, time.time()
@@ -196,7 +215,8 @@ def teleop_auto():
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('scenario', choices=['still', 'manual', 'straight', 'pivot90', 'pivot360', 'square', 'small'])
+    ap.add_argument('scenario', choices=['still', 'manual', 'straight', 'pivot90', 'pivot360', 'square', 'small', 'turn'])
+    ap.add_argument('--deg', type=float, default=90.0, help='turn: how far')
     ap.add_argument('--dist', type=float, default=None)
     ap.add_argument('--wz', type=float, default=float(os.environ.get('PIVOT_WZ', '1.5')))
     ap.add_argument('--v', type=float, default=0.15)
