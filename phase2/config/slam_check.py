@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """slam_check.py — is the lidar correction alive, and how big is it right now?
 
-Prints the pose from odometry alone (odom -> base_link, fusion_node) next to
+Prints the pose from odometry alone (odom -> base_link, fusion2) next to
 the lidar-corrected pose (map -> base_link, slam_toolbox), and the difference.
 Both start coincident; the difference is exactly what dead reckoning got wrong
 since bring-up. If it is 0.00 forever, the correction is not running.

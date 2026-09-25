@@ -1,8 +1,8 @@
 # Architecture — the system as built
 
 What runs where, what talks to what, and **why each decision went the way it
-did**. For the measured numbers see [PHASE1.md](PHASE1.md); for how to run it
-see [OPERATIONS.md](OPERATIONS.md); for open faults see [TODO.md](TODO.md).
+did**. For the measured numbers see [docs/archive/PHASE1.md](docs/archive/PHASE1.md); for how to run it
+see [OPERATIONS.md](OPERATIONS.md); for open faults see [docs/archive/TODO.md](docs/archive/TODO.md).
 
 ---
 
@@ -17,7 +17,7 @@ see [OPERATIONS.md](OPERATIONS.md); for open faults see [TODO.md](TODO.md).
 | distance | **wheel encoders**, calibrated against a tape | excellent in a straight line, useless mid-turn (§13) |
 | fusion | **hand-written complementary filter**, `phase1/nodes/fusion.py` | *not* an EKF — see §5 for why a 3-sensor planar problem did not need one |
 | LiDAR | **RPLidar C1** — 360°, 10 Hz, USB, driver `sllidar_ros2` pinned + one patch (`lidar/`) | the walls are the one reference that does not drift. Added 2026-09-22 for the pose, not for nav2 |
-| drift correction | **slam_toolbox**, online async mapping, owns `map → odom` | scan-matches every scan against the walls it has seen, so the correction is continuous, where cuVSLAM's loop closure only fires on a recognised place (15–27 closures a session after §23, READINESS.md) — and the two cannot both own the frame, so cuVSLAM's is switched off (`SLAM=false`). No map is kept across power-off, by choice |
+| drift correction | **slam_toolbox**, online async mapping, owns `map → odom` | scan-matches every scan against the walls it has seen, so the correction is continuous, where cuVSLAM's loop closure only fires on a recognised place (15–27 closures a session after §23, docs/archive/READINESS.md) — and the two cannot both own the frame, so cuVSLAM's is switched off (`SLAM=false`). No map is kept across power-off, by choice |
 | mapping | **nvblox** — TSDF → ESDF → 2D slice, GPU | the Orin has the GPU for it, and the ESDF slice is what nav2's costmap layer consumes directly |
 | planning | **nav2** — NavFn planner, Regulated Pure Pursuit controller | RPP steers by *arcs*, which is what a skid-steer rover can execute. DWB samples rotations it cannot |
 | wheels | **ESP32 + micro-ROS** over WiFi UDP, BTS7960 drivers, PID per side | the board sits on the rover; the link to it must be the thing that fails visibly |
@@ -43,8 +43,9 @@ appear as a wall of log with no owner.
    │  everything in orin-nav:1.1                                 │
    │    vo_node      stereo IR → cuVSLAM → /vo/odom              │
    │    gyro_node    IMU → base_link → /gyro/base                │
-   │    fusion_node  → /odom + TF odom→base_link                 │
-   │    compare.py   the measurement instrument                  │
+   │    lidar_odom   /scan + gyro → /lidar/odom (every scan)     │
+   │    fusion2      gyro·LiDAR·VO·wheels → /odom + TF           │
+   │    harness      ./rover record / grade vs LiDAR truth       │
    └───────────────▲─────────────────────────────────────────────┘
                    │  DDS over WiFi
    ┌───────────────┴─────────────────────────────────────────────┐
@@ -109,10 +110,10 @@ occurrence is a glance rather than an investigation.
 | `/vo/odom` | `Odometry` | 30 Hz | `vo_node` — **raw**, teleports |
 | `/vo/status` | `String` | 1 Hz | `vo_node` — landmarks, health |
 | `/gyro/base` | `Imu` | 200 Hz | `gyro_node` — re-framed into `base_link` |
-| **`/odom`** | `Odometry` | 20 Hz | **`fusion_node` — what nav2 consumes** |
-| `/fusion/path` | `Path` | 2 Hz | `fusion_node` — the track driven, **latched** |
-| `/fusion/status` | `String` | 1 Hz | `fusion_node` — who is covering for whom |
-| `/fusion/path_map` | `Path` | 2 Hz | `fusion_node` — the same track through `map → odom` **as it was when recorded**; its gap from `/fusion/path` is the drift slam corrected |
+| `/lidar/odom` | `Odometry` | 10 Hz | `lidar_odom_node` — the LiDAR's pose, de-skewed scan-to-submap, covariance from each fit |
+| **`/odom`** | `Odometry` | 20 Hz | **`fusion2_node` — what nav2 consumes**, with covariance |
+| `/fusion/path` | `Path` | 1 Hz | `fusion2_node` — the track driven, **latched** |
+| `/fusion/status` | `String` | 1 Hz | `fusion2_node` — `origin_epoch` (the Pi 5 brain uses it), per-source alive / accepted / rejected, LiDAR and cuVSLAM health, slip / stuck, sd |
 | `/scan` | `LaserScan` | 10 Hz | `sllidar_node` — 720 beams, BEST_EFFORT, stamps shifted +82 ms to the measurement (LOCALIZATION.md §2.3) |
 | `/map` | `OccupancyGrid` | ~0.5 Hz | `slam_toolbox` — the LiDAR's room, 5 cm cells, TRANSIENT_LOCAL |
 | `/robot_description` | `String` | latched | `robot_state_publisher` — the URDF from `description/params.yaml`; RViz draws it (replaced `rover_marker`, 2026-09-24) |
@@ -138,14 +139,14 @@ identically to a dead publisher.
 ## 3. Frames
 
 ```
-  map ──(slam_toolbox)──► odom ──(fusion_node, 20 Hz)──► base_link ─┬─(static)──► camera0_link
+  map ──(slam_toolbox)──► odom ──(fusion2, 20 Hz)──► base_link ─┬─(static)──► camera0_link
                                                                     └─(static)──► laser
 ```
 
 | transform | owner | why |
 |---|---|---|
 | `map → odom` | **`slam_toolbox`** (since 2026-09-22) | the LiDAR correction. cuVSLAM also publishes it when `slam:=true`, so `./rover pose` runs with `SLAM=false` and `./rover slam` refuses a second owner |
-| `odom → base_link` | **`fusion2_node`** (since 2026-09-26; `FUSION=1 ./rover fused` reverts) | fusion2: gyro + LiDAR odometry + VO + wheels, each weighted by its own reliability (LOCALIZATION.md §11). `fusion_node` runs beside it on `/odom_legacy`, no TF, as the fallback |
+| `odom → base_link` | **`fusion2_node`** (since 2026-09-26) | fusion2: gyro + LiDAR odometry + VO + wheels, each weighted by its own reliability (LOCALIZATION.md §11). The Phase 1 `fusion_node` it replaced was retired the same day (git history) |
 | `base_link → camera0_link` | robot_state_publisher (`description/`) | x 0.1623, y +0.0419 (the LEFT imager; fitted against LiDAR truth), z 0.175, roll −1.40°, yaw +0.96° (camera vs LiDAR). All calibrated 2026-09-25/26 — `description/params.yaml`; vo_node reads the whole mount from TF |
 | `base_link → laser` | robot_state_publisher (`description/`) | x 0.1342, z 0.2498 measured 2026-09-24; **yaw +88.60° measured by driving** (`./rover lidar --calibrate`) |
 
@@ -183,9 +184,14 @@ a point 17 cm in front of itself.
 |---|---|
 | `phase1/nodes/vo_node.py` | stereo IR → cuVSLAM → `/vo/odom`, `/vo/status`. Owns the frame conjugation |
 | `phase1/nodes/gyro_node.py` | D555 IMU → re-framed into `base_link` → `/gyro/base` |
-| **`phase1/nodes/fusion.py`** | **the estimator, with no ROS in it** |
-| `phase1/nodes/fusion_node.py` | wraps `fusion.py` → `/odom`, TF, `/fusion/status` |
-| `phase1/nodes/compare.py` | the measurement instrument: side-by-side rows, gates, CSV |
+| **`phase1/nodes/lidar_odom.py`** | **LiDAR odometry, no ROS in it** (graded offline and run live) |
+| `phase1/nodes/lidar_odom_node.py` | wraps it → `/lidar/odom` |
+| **`phase1/nodes/fusion2.py`** | **the estimator (EKF), no ROS in it** |
+| `phase1/nodes/fusion2_node.py` | wraps it → `/odom`, TF, `/fusion/status`, `/fusion/path` |
+| `phase1/nodes/health.py` | the pose / cuvslam / wheels honesty rows, from `/fusion/status` |
+| `phase1/nodes/floor_calib.py`, `cam_lidar_calib.py` | camera tilt off the floor; camera vs LiDAR (`./rover camera --floor` / `--lidar`) |
+| `phase1/harness/` | `./rover record` / `./rover grade`: every estimate against LiDAR truth |
+| `description/` | the rover's shape: `params.yaml` → URDF, CAD, drift check |
 | `phase2/launch/nvblox.launch.py` | nvblox: depth + `/odom` → TSDF, mesh, 2D grid |
 | `phase2/rviz/rover_live.rviz` | the RViz view, standard message types only |
 | `phase2/rviz/rover_live.sh` | launches RViz on the laptop with the `-d` that is load-bearing |
@@ -196,70 +202,34 @@ a point 17 cm in front of itself.
 | `phase1/firmware/HARDWARE.md` | the drivetrain itself — wiring, motor/encoder specs, direction flags, bench results |
 | `phase1/firmware/FLASHING.md` | how to flash it, and why the last flash was needed |
 
-### Why `fusion.py` is separate from `fusion_node.py`
+### Why the estimators have no ROS inside
 
-The estimator was validated over two days of tape-measured runs **inside
-`compare.py`**. If the shipping node re-implemented it, that validation would
-apply to nothing.
-
-So the algorithm lives in one plain module with no ROS imports. `compare.py`
-grades it; `fusion_node.py` publishes it. They cannot drift into two
-implementations where only one was ever measured.
-
-It was extracted **programmatically** — the method bodies are the same source
-text, not retyped — and then verified by running both at once and driving:
-0.6 cm and 0.47° apart.
+`lidar_odom.py` and `fusion2.py` are plain Python classes. The harness runs
+them offline over recorded bags and grades them; the nodes run the SAME class
+live. What was measured is what ships (the rule the Phase 1 fusion.py set, and
+kept).
 
 ---
 
 ## 5. The estimator
 
-Fusion here is **assignment plus fallback**, not averaging. No sensor is good at
-everything, and one that is bad at a job does not get that job.
+**fusion2** (SENSOR_FUSION_PLAN.md M3; results LOCALIZATION.md §10-11): one EKF
+over [x, y, θ, vx, vy, gyro bias]. The gyro predicts at 200 Hz; every other
+source corrects **by its own evidence**, through a statistical gate:
 
-| job | primary | measured justification |
+| source | enters as | weight comes from |
 |---|---|---|
-| **heading** | gyro | −0.2% to −0.9% across five turns; cuVSLAM was +11% on one |
-| **distance** | encoder ticks | texture- and direction-independent |
-| **direction** | cuVSLAM | does not drift; re-measured against the world each frame |
-| **tilt** | accelerometer (gravity) | absolute, never drifts |
+| **LiDAR odometry** | absolute pose (re-anchored offset); late fixes carried forward by motion only | each scan fit's residual and degeneracy; a healthy fit that fails the gate widens OUR uncertainty instead of being dropped |
+| **cuVSLAM** | velocity while the LiDAR is healthy, absolute pose when it is not | landmark count; jumps fail the gate |
+| **wheels** | forward speed, no sideways speed | turn rate (scrub) and slip evidence (front vs rear, wheels vs gyro) |
+| **stillness** | zero velocity; re-measures the gyro bias | all encoders unchanged and nothing commanded |
 
-### Every sensor is covered
-
-| when this fails | this carries it |
-|---|---|
-| **cuVSLAM diverges** (implausible `z`) | wheels + gyro |
-| cuVSLAM blind (<30 landmarks) | wheels + gyro |
-| cuVSLAM teleports | wheels + gyro |
-| cuVSLAM silent | wheels + gyro, via the independent 20 Hz pulse |
-| wheels slip in a turn | gyro heading |
-| wheels stale | cuVSLAM distance, last good scale |
-| gyro stale | cuVSLAM heading |
-| gyro drifts long-term | cuVSLAM, straight-line only |
-
-**FUSED has its own heartbeat.** Until that was added, both the fusion and its
-fallback ran from cuVSLAM's callback — so cuVSLAM was still the heartbeat, and
-if it went silent the pose froze while the other two sensors were healthy.
-
-### Two rules that cost the most to learn
-
-**Refusing bad messages is not enough — you must refuse a bad sensor.**
-Rejecting individual teleports left cuVSLAM publishing at a confident 30 Hz
-between them with an equally corrupted *direction*. With 4 landmarks, FUSED took
-its heading from it and finished 42.4 cm from the start while the wheels *alone*
-managed 17.4 cm. Fusion did worse than its own worst input.
-
-**A sensor's own confidence cannot detect it being confidently wrong.** cuVSLAM
-reported 95 landmarks while claiming the rover was 21.7 m underground. Catching
-that needs an *external* constraint — gravity, which never drifts — not a better
-reading of the sensor's own health. FUSED takes distance from the encoders and
-direction from cuVSLAM, so the failure showed up as 37 m driven inside a 2 m box:
-right step lengths, random directions.
-
-**Do not calibrate during the manoeuvre that breaks your reference.** The
-encoder/cuVSLAM scale ratio freezes while turning, because the wheels scrub 1.60×
-front-to-rear in a pivot and would drag a good calibration off with distance the
-rover never went.
+Over 19 recorded runs: worst 0.8 cm / 0.45° (the Phase 1 fusion: 20.5 cm /
+13°); live on the owner's hand-moved return test with skidding wheels:
+0.1 cm / 0.32°. The Phase 1 estimator's hard-won rules (refuse a bad sensor,
+not just a bad message; a sensor's own confidence cannot catch it being
+confidently wrong; do not calibrate during the manoeuvre that breaks the
+reference) are why fusion2 gates every source and scales the wheels by slip.
 
 ---
 
@@ -306,9 +276,9 @@ compiled for Thor and will not run on this Orin.
   reason once given here: reversing is the measured problem (cuVSLAM under-reads
   it by ~6%, TODO §4), and a pivot on this chassis burns roughly two-thirds of
   its torque in scrub (TODO §13)
-- **The D555 drops out** in three distinct ways — see [TODO.md](TODO.md) §7. The
+- **The D555 drops out** in three distinct ways — see [docs/archive/TODO.md](docs/archive/TODO.md) §7. The
   fusion survives it; a robot needing a human to reseat a cable does not
   autonomously
-- **The rover cannot turn in place** ([TODO.md](TODO.md) §14). nav2 assumes
+- **The rover cannot turn in place** ([docs/archive/TODO.md](docs/archive/TODO.md) §14). nav2 assumes
   rotation is free; every workaround is marked `NO-PIVOT` in
   `phase3/config/nav2.yaml` so they can be reverted together once it is fixed

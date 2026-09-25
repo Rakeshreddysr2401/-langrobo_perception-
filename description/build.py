@@ -254,15 +254,14 @@ def drift(g):
         ('nav2 footprint', fp, (F, S, F, -S, -R, -S, -R, S)),
     ]
     corners = r'^CORNERS = np\.array\(\[' + r',\s*'.join([rf'\[{num},\s*{num}\]'] * 4) + r'\]\)'
-    for rel in ('phase3/nodes/pivot_goto.py', 'lidar/pivot_test.py'):
+    for rel in ('phase3/nodes/pivot_goto.py', 'lidar/scan_tools.py'):
         checks.append((f'{Path(rel).name} CORNERS', grab(rel, corners, 8), (F, S, F, -S, -R, -S, -R, S)))
-    for rel in ('phase1/nodes/fusion.py', 'phase1/nodes/compare.py'):
-        name = Path(rel).name
-        checks.append((f'{name} WHEEL_BASE_M', grab(rel, r'^WHEEL_BASE_M = ([\d.]+)'), v['wheels.track']))
-        checks.append((f'{name} WHEEL_BASE_ROT_M', grab(rel, r'^WHEEL_BASE_ROT_M = ([\d.]+)'),
-                       v['odometry.effective_track']))
-        checks.append((f'{name} METRES_PER_COUNT diameter',
-                       grab(rel, r'^METRES_PER_COUNT = math\.pi \* ([\d.]+) /'), v['odometry.wheel_diameter']))
+    # the wheel constants the estimator (fusion2) and the harness use
+    rel = 'phase1/nodes/fusion2.py'
+    checks.append(('fusion2.py WHEEL_BASE_ROT_M', grab(rel, r'^WHEEL_BASE_ROT_M = ([\d.]+)'),
+                   v['odometry.effective_track']))
+    checks.append(('fusion2.py METRES_PER_COUNT diameter',
+                   grab(rel, r'^METRES_PER_COUNT = math\.pi \* ([\d.]+) /'), v['odometry.wheel_diameter']))
 
     bad = 0
     for name, got, want in checks:

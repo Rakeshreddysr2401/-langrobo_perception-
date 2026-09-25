@@ -13,7 +13,8 @@ on the same answer (within 1 cm and 0.3 deg), so ICP cannot quietly pick the
 wrong wall.
 
 GRADED, each relative to its own pose at the first still moment:
-    fused         /odom            what the rover uses today (fusion.py)
+    fused         /odom            what the rover uses (fusion2 since 2026-09-26;
+                                   before that, the Phase 1 fusion.py)
     vo            /vo/odom         cuVSLAM alone
     wheels        /wheel_ticks     ticks + the symmetric effective track
     wheels+gyro   ticks + gyro     the classic pairing
@@ -35,7 +36,7 @@ from common import (icp, read_bag, relative, se2, se2_parts, still_windows,  # n
 # wheel model the rover runs (and description/build keeps them honest)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'nodes'))
 try:
-    from fusion import METRES_PER_COUNT, WHEEL_BASE_ROT_M  # noqa: E402
+    from fusion2 import METRES_PER_COUNT, WHEEL_BASE_ROT_M  # noqa: E402
 except Exception:  # noqa: BLE001 -- harness still runs off-rover
     METRES_PER_COUNT, WHEEL_BASE_ROT_M = math.pi * 0.085 / 1560.0, 0.5216
 
@@ -166,7 +167,7 @@ def estimators(b):
         e['lidar_live'] = from_odom(b.odom['/lidar/odom'])
     if '/fused2/odom' in b.odom:
         e['fused2_live'] = from_odom(b.odom['/fused2/odom'])
-    if '/odom_legacy' in b.odom:          # fusion.py, as the fallback since the switch
+    if '/odom_legacy' in b.odom:          # the Phase 1 fusion.py, in runs from its fallback days
         e['fusion1'] = from_odom(b.odom['/odom_legacy'])
     ds, dth = wheel_steps(b)
     e['wheels'] = integrate(b.ticks[:, 0], ds, dth)

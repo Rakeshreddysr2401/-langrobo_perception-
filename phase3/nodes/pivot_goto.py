@@ -70,11 +70,11 @@ from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import LaserScan
 from tf2_ros import Buffer, TransformListener
 
-# The same wall-registration the pivot test grades turns with. Used here as a
+# The same wall-registration the retired pivot test graded turns with (lidar/scan_tools.py). Used here as a
 # second opinion on the END pose that does not go through slam_toolbox.
 sys.path.insert(0, os.environ.get("LIDAR_DIR", "/opt/lidar"))
 try:
-    from pivot_test import icp as _icp
+    from scan_tools import icp as _icp
 except ImportError:
     _icp = None
 

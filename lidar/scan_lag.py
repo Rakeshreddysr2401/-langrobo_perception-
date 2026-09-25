@@ -39,7 +39,7 @@ from sensor_msgs.msg import LaserScan
 from tf2_ros import Buffer, TransformListener
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from pivot_test import icp, scan_in_base, turn_twist, wrap, yaw_of  # noqa: E402
+from scan_tools import icp, scan_in_base, turn_twist, wrap, yaw_of  # noqa: E402
 
 WZ = 1.5
 TURN_S = 3.5

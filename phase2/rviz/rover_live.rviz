@@ -148,53 +148,12 @@ Visualization Manager:
       Use Timestamp: false
       Value: true
 
-    # ── where it has been: TWO lines, and the gap between them is the ───
-    # ── whole point ─────────────────────────────────────────────────────
-    #
-    # GREEN  /fusion/path_map   the lidar-corrected track. Each point was
-    #                           transformed through map -> odom AT THE MOMENT
-    #                           IT WAS RECORDED, so old points do not move when
-    #                           a new correction lands.
-    # RED    /fusion/path       the same drive as raw dead reckoning, stamped
-    #                           `odom`, which never gets corrected -- by
-    #                           definition, since that is what `odom` means.
-    #
-    # So the two lines leave the origin together and separate exactly where the
-    # estimate was wrong, by exactly how much. That gap IS the drift, in metres,
-    # measurable on screen with the Measure tool. It is the thing to watch on a
-    # pivot: if turning shifts x,y, this is where you see it happen.
-    #
-    # Green sits above red (Z offset) so that where they agree you still see
-    # green rather than a flickering mix of the two.
-
-    - Alpha: 1
-      Buffer Length: 1
-      Class: rviz_default_plugins/Path
-      Color: 0; 255; 128
-      Enabled: true
-      Head Diameter: 0
-      Head Length: 0
-      Length: 0.3
-      Line Style: Billboards
-      Line Width: 0.04
-      Name: Track - lidar corrected
-      Offset:
-        X: 0
-        Y: 0
-        Z: 0.02
-      Pose Color: 255; 85; 255
-      Pose Style: None
-      Radius: 0.03
-      Shaft Diameter: 0.02
-      Shaft Length: 0.05
-      Topic:
-        Depth: 5
-        Durability Policy: Transient Local
-        Filter size: 10
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /fusion/path_map
-      Value: true
+    # ── where it has been: fusion2's track (/fusion/path, odom) ─────────
+    # Since 2026-09-26 odom is LiDAR-anchored (fusion2), so this track no
+    # longer drifts away from the room the way the old dead-reckoned one did,
+    # and the separate "lidar-corrected" line it was compared against is gone.
+    # If the track and the map disagree now, something is wrong: look at
+    # ./rover status (the pose row) before trusting either.
 
     - Alpha: 0.85
       Buffer Length: 1
@@ -206,7 +165,7 @@ Visualization Manager:
       Length: 0.3
       Line Style: Billboards
       Line Width: 0.028
-      Name: Track - raw odometry
+      Name: Track - fusion2
       Offset:
         X: 0
         Y: 0

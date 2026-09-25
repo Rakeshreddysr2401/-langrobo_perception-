@@ -124,7 +124,7 @@ deliberately removed on the **`minimal`** line — `dev-1.3.0-minimal` and
 `dev-1.3.1-minimal` both — along with `world_model` and the `on_detections`
 handler; that cut keeps vision on `look` + the VLM approach path. On a minimal
 brain `/vision/detections_3d` has no subscriber, and running `detect` costs GPU
-for nobody. See [TODO.md](TODO.md) §32.
+for nobody. See [docs/archive/TODO.md](docs/archive/TODO.md) §32.
 
 **Check the brain before adding `detect` to the order, and check it by what it
 subscribes to, not by the branch name.** `dev-1.3.1-minimal` still *mentions*
@@ -154,7 +154,7 @@ reprojection was wrong.
 day, under all six layers, the same stall was measured at **1.4–1.9 s** — past
 cuVSLAM's `max_frame_delta_s` of 1.0 s, which resets tracking. `vo_node` logs
 `frame gap` and the fusion node logs `vo DOWN`, both recovering in ~1 s, so no
-rate gate ever sees it. See [TODO.md](TODO.md) §31.
+rate gate ever sees it. See [docs/archive/TODO.md](docs/archive/TODO.md) §31.
 
 ### When a layer fails
 
@@ -180,7 +180,7 @@ way before anyone noticed.
 - `./rover fused` runs the check in its gate and prints a `cuvslam` line.
 - `./rover map` **refuses** to build on a diverged pose — mapping while diverged
   corrupts the map permanently rather than degrading it.
-- `./rover compare` shows a red banner live and in its verdict.
+- `./rover status` prints the pose / cuvslam / wheels rows from fusion2's health.
 
 ### It catches two different failures, and says which
 
@@ -206,7 +206,7 @@ You may also see this, which is *not* a failure and does not block a gate:
 ! vo dropped out in 1 of 4 samples — frame gaps past max_frame_delta_s (1.0 s)
 ```
 
-That is the load-related stall in [TODO.md](TODO.md) §31 — tracking recovers in
+That is the load-related stall in [docs/archive/TODO.md](docs/archive/TODO.md) §31 — tracking recovers in
 ~1 s. Worth watching before a long autonomous run, not worth stopping for.
 
 What you want to see:
@@ -273,7 +273,7 @@ or like teleop in MANUAL, and it is neither.
 
 Cause is not established — one observation. `/cmd_vel` publishers climbed 2 → 6
 over the same period as nav2, the brain and `/studio_bridge` attached, so DDS
-load is the first thing to test, not the answer. See [TODO.md](TODO.md) §33.
+load is the first thing to test, not the answer. See [docs/archive/TODO.md](docs/archive/TODO.md) §33.
 
 ---
 
@@ -391,7 +391,7 @@ Check the tunnel from your laptop: `curl localhost:2024/ok` → `{"ok":true}`.
 dead server — and `curl` cannot see it, because curl sends no `Origin`. A local
 patch on the Pi 5 fixes it and `pip` silently undoes it; the diagnostic curl and
 the one-line fix are in [OPERATIONS.md](OPERATIONS.md) §7, tracked as
-[TODO.md](TODO.md) §38. A stale tab looks the same, so hard-reload first.
+[docs/archive/TODO.md](docs/archive/TODO.md) §38. A stale tab looks the same, so hard-reload first.
 
 ### When there is no laptop
 

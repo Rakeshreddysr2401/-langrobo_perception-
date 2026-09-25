@@ -3,7 +3,7 @@
 How to bring the rover up, measure it, calibrate it, and diagnose it when it
 misbehaves. For *why* anything is the way it is see
 [ARCHITECTURE.md](ARCHITECTURE.md); for the measured numbers see
-[PHASE1.md](PHASE1.md).
+[docs/archive/PHASE1.md](docs/archive/PHASE1.md).
 
 ---
 
@@ -60,7 +60,6 @@ Then, at any time:
 ./rover drive 0 0 90 --rel     # turn 90 deg left without the centre moving
 ./rover drive X Y [DEG]        # go to a pose in the map frame
 ./rover drive --mark NAME      # remember this pose;  --to NAME  goes back
-./rover pivot [deg ...]        # grade turns against the walls
 ./rover lidar --calibrate      # measure LIDAR_YAW by driving
 ./rover lidar --lag            # measure the scan timestamp error
 ```
@@ -97,71 +96,21 @@ is gated on a `/cmd_vel` newer than 500 ms, so a lost connection stops the rover
 
 ---
 
-## 3. The gates
+## 3. Testing the pose: record, then grade against LiDAR truth
+
+The Phase 1 tape gates (`./rover compare`) are retired. Every pose estimate is
+now graded against where the LiDAR says the rover really was
+([phase1/harness/README.md](phase1/harness/README.md)):
 
 ```bash
-./rover compare --expect 2.00    # push 2.00 m straight  -> want 190–210 cm
-./rover compare --return         # out and back          -> want ≤ 10 cm
-./rover compare --spin 360       # rotate 360°           -> want ≤ 10°
-./rover compare                  # no gate: just watch every sensor live
+./rover record return        # YOU move it anywhere, put it back on the tape marks: all should read ~0
+./rover record straight      # also: pivot90, pivot360, square, small, turn, still, manual (these DRIVE)
+./rover grade                # the newest run: truth vs fused / lidar / vo / wheels, cm and degrees
+./rover grade --summary      # every run -> logs/bags/SUMMARY.md
 ```
 
-**Procedure, every time:**
-
-1. **Keep still for the first 5 seconds** — the gyro bias is being measured. Any
-   nudge poisons it.
-2. Mark where the rover is.
-3. Drive or push.
-4. **Ctrl-C** to grade and write the CSV.
-
-**Keep clutter in view.** A bare wall starves the tracker — landmarks below 30
-and cuVSLAM is dropped from the fusion. Furniture, doorways, chair legs are what
-it needs.
-
-### Reading the output
-
-```
-  source        x cm     y cm    th deg   straight cm   path cm      Hz
-  cuvslam       -0.1      0.0     -0.00          0.1       0.0    30.0
-  wheels         0.0      0.0      0.00          0.0       0.0    20.0
-  gyro             —        —      0.07            —         —   200.9
-  FUSED         -0.1      0.0      0.03          0.1       0.0    29.0
-
-  health: cuvslam OK  wheels OK  gyro OK   |  all three contributing
-```
-
-| column | meaning |
-|---|---|
-| `x`, `y` | displacement from the start, cm |
-| `th` | heading change since the start, degrees |
-| `straight` | straight-line distance from the start — **what a tape measures** |
-| `path` | total distance travelled — larger if it wandered or reversed |
-| `Hz` | publish rate |
-
-`FUSED` is the row to navigate on. The others are how you know it is honest.
-
-Also watch:
-
-- **`landmarks`** — under 30 and cuVSLAM is dropped from the fusion
-- **`health:`** — who is covering for whom, right now
-- **`STILL — retuning bias`** — the gyro bias tracker working
-- **`encoder scale`** — the measured wheels/cuVSLAM ratio, and whether it clamped
-- **`tilt:`** — roll, pitch, and the camera's measured mount pitch
-
-### Logs
-
-Every run writes a timestamped CSV to `logs/`, on the host, surviving container
-teardown:
-
-```bash
-ls -lt logs/compare-*.csv | head
-```
-
-Per-source `x, y, th_deg, straight, path, hz`, plus the raw values: `roll_deg`,
-`pitch_deg`, `landmarks`, `accel_x/y/z`, `gyro_x/y/z`, `velL`, `velR`, and all
-four cumulative tick counts.
-
----
+Acceptance and the latest numbers: [SENSOR_FUSION_PLAN.md](SENSOR_FUSION_PLAN.md)
+§5 and [LOCALIZATION.md](LOCALIZATION.md) §8-11.
 
 ## 4. Calibration
 
@@ -173,21 +122,12 @@ docker exec -it rover bash -lc 'source /opt/ros/jazzy/setup.bash; export ROS_DOM
 
 | what | command | procedure |
 |---|---|---|
-| **encoder m/count** | `python3 -u /logs/calibrate_encoders.py 200` | push straight forward exactly 200 cm, forward only |
-| **skid-steer track width** | `python3 -u /logs/calibrate_rotation.py 360` | align to a floor line, rotate one full turn back to it |
-| **all four encoders alive** | `python3 -u /logs/wheels_selfpaced.py 60` | rover lifted, spin each wheel in any order |
-| **yaw sign (REP-103)** | `python3 -u /logs/check_yaw_sign.py 25` | hold the LEFT button; expects a positive rate |
-| **all rates + board health** | `python3 -u /logs/check_rates.py` | nothing — it just listens |
-| **teleop end to end** | `python3 -u /logs/watch_teleop.py 25` | press FORWARD during the window |
-| **fusion equivalence** | `python3 -u /logs/check_equivalence.py` | run beside `compare.py`, drive, compare endpoints |
-| **does the driven line close?** | `python3 -u /logs/loop_test.py` | drive a loop back to the start, graded on `/odom` |
-| **how much is mapped** | `python3 -u /logs/map_stats.py` | nothing — it just reads |
-| **the map, as text** | `python3 -u /logs/map_view.py` | nothing; `--once` for a single frame |
-| **why won't it pivot?** | `python3 -u /logs/turn_diag.py 40` | hold LEFT then RIGHT during the window |
+| **how much is mapped** | `python3 -u /opt/rover2/tools/map_stats.py` (in the container) | nothing — it just reads |
+| **camera tilt and height, off the floor** | `./rover camera --floor` | nothing: rover still on open floor |
+| **camera vs LiDAR (one camera yaw everywhere)** | `./rover camera --lidar` ×5, then `--solve` | place it by hand facing a corner each time |
+| **gyro scale, turns, straights** | `./rover record pivot360` / `straight`, then `./rover grade` | clear ~0.7 m; charged pack |
 | **LiDAR mount angle** | `./rover lidar --calibrate` | nothing — it drives three 0.20 m out-and-back pairs itself |
 | **LiDAR timestamp error** | `./rover lidar --lag` | nothing — it turns briefly each way itself |
-| **how far turns really slide** | `./rover pivot 45 -45 90 -90` | clear ~0.6 m round it; graded against the walls |
-| **the held-left pivot point** | `PIVOT_ANCHOR=hold ./rover pivot 45 -45 45 -45` | the fitted pivot feeds `./rover drive` (`PIVOT_X`/`PIVOT_Y`) |
 
 ### Calibration rules learned the hard way
 
@@ -256,8 +196,9 @@ exactly zero, the motor supply is off — a switch or the BTS7960 feed. The rate
 gate cannot see this (2026-09-23).
 
 **It turns, but slides ~30 cm per 90°.** Expected on this chassis — the left
-side cannot reverse against the tyres' scrub. `./rover pivot` measures it;
-`./rover drive` plans around it. See [LOCALIZATION.md](LOCALIZATION.md).
+side cannot reverse against the tyres' scrub (and it grows as the pack drains,
+ROVER_BUILD_PLAN.md §4.5). `./rover record pivot90` + `./rover grade` measures
+it; `./rover drive` plans around it. See [LOCALIZATION.md](LOCALIZATION.md).
 
 ### The pose
 
@@ -267,7 +208,7 @@ side cannot reverse against the tyres' scrub. `./rover pivot` measures it;
 | many teleports, `landmarks` low | featureless scene. Drive where there is furniture, not a bare wall |
 | many teleports, `landmarks` healthy | genuinely unexplained. Speed is NOT the answer — 89 cm/s with 0 teleports on 2026-08-22. See TODO §3 |
 | `wheels` row wildly wrong in turns | expected — skid-steer scrub. The gyro owns heading |
-| `FUSED` worse than an input | a real bug. This has happened twice; see PHASE1.md §7 |
+| `FUSED` worse than an input | a real bug. This has happened twice; see docs/archive/PHASE1.md §7 |
 
 ### The map
 
@@ -313,7 +254,7 @@ re-run, or start it on the laptop by hand with the command above.
 
 It does **not** decide that by looking for an `Xwayland` process any more. GNOME
 starts Xwayland on demand, so a freshly logged-in laptop has none and used to be
-reported as a login screen — see [TODO.md](TODO.md) §35. It now asks `loginctl`
+reported as a login screen — see [docs/archive/TODO.md](docs/archive/TODO.md) §35. It now asks `loginctl`
 for an active graphical session and uses mutter's waiting auth cookie.
 
 | symptom | cause |
@@ -468,7 +409,7 @@ The fix is one argument — `allow_private_network=config.ALLOW_PRIVATE_NETWORK`
 on the `CORSMiddleware` in `langgraph_api/server.py` (the flag is already
 computed correctly, just never handed over). That is **a patch to site-packages
 on the Pi 5, not to any repo**: `pip` will overwrite it and the blank page comes
-back. `server.py.orig` sits beside it. See [TODO.md](TODO.md) §38.
+back. `server.py.orig` sits beside it. See [docs/archive/TODO.md](docs/archive/TODO.md) §38.
 
 The graph is `agent`, from `graph_studio.py:graph` via `langgraph.json`.
 

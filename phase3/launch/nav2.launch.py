@@ -2,7 +2,7 @@
 """nav2 — click a goal, the rover plans a route and drives there.
 
 WHAT THIS NEEDS THAT ALREADY EXISTS
-    /odom + TF odom->base_link      fusion_node (Phase 1b)
+    /odom + TF odom->base_link      fusion2 (M3, since 2026-09-26)
     /nvblox_node/static_map_slice   nvblox (Phase 2b)
     /cmd_vel -> wheels              the ESP32, proven end to end
 

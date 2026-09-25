@@ -99,7 +99,6 @@ else:
     print("   NOT PUBLISHING")
 
 print("\n" + "=" * W)
-print("  FUSED is computed in compare.py, not published as a topic:")
-print("     distance from cuVSLAM, heading from the gyro")
-print("     see it live with:  ./rover compare --plain")
+print("  FUSED is fusion2 on /odom (LiDAR-anchored; gyro, VO, wheels weighted):")
+print("     health:  ./rover status   |   grade it:  ./rover record S; ./rover grade")
 print("=" * W)

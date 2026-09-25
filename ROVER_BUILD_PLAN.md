@@ -14,7 +14,7 @@ the hardware and the description of it. Four things are open:
 
 This plan turns each into measurements, a design change or a test, in an order
 where each step feeds the next. Written 2026-09-24 from the owner's request and
-the measurements in LOCALIZATION.md and TODO.md §43.
+the measurements in LOCALIZATION.md and docs/archive/TODO.md §43.
 
 ---
 
@@ -28,7 +28,7 @@ the measurements in LOCALIZATION.md and TODO.md §43.
 | control | per-side PI on encoder speed, 50 Hz, saturates to full duty when a side lags | firmware `pidStep` |
 | motor power | 3S pack → both BTS7960s; ESP32 on a separate 65 W USB bank | owner; HARDWARE.md §1 |
 | track, physical | **0.34 m** wheel centre to wheel centre **(measured 2026-09-24)**; wheelbase **0.238 m**, axles 6.3 / 30.1 cm behind the nose | `description/params.yaml` |
-| track, effective for turns | **0.5216 m** `WHEEL_BASE_ROT_M` — measured over four 360° spins; the wheels over-read turns by ~1.53× | TODO.md §13 |
+| track, effective for turns | **0.5216 m** `WHEEL_BASE_ROT_M` — measured over four 360° spins; the wheels over-read turns by ~1.53× | docs/archive/TODO.md §13 |
 | track, RViz model | ~~0.385 m~~ — now 0.34, from the tape | `rover_marker.py` |
 | body / envelope | frame 36 × 28 × 16 cm, 6 cm off the floor; envelope **36 × 38 cm** with tyres (was a described 46 × 42) **(measured)** | `description/params.yaml` |
 | camera | camera0_link (left IR imager) x 0.173, **y −0.0475**, z 0.175 m **(measured + datasheet)** | `description/params.yaml` |

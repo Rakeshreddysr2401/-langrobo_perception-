@@ -9,16 +9,14 @@
 #                      --yaw    measure LIDAR_YAW off a target at the nose
 #                      --watch  live: hold a box at the nose and read it
 #                      --calibrate  DRIVES 0.20 m and measures the yaw itself
-#   ./rover pivot      SPINS: how far a turn-in-place really slides (TODO 37)
 #   ./rover drive      DRIVES: exact short moves that plan around the pivot fault
 #   ./rover wheels     check the ESP32 link (diagnose only; cannot fix from here)
 #                      --nudge  MOVES ~7 cm: proves the motors are powered, not just the link
-#   ./rover compare    the side-by-side readout — the Phase 1 instrument
 #   ./rover record S   bag one test scenario (SENSOR_FUSION_PLAN.md §5); straight/pivot90/... DRIVE
 #   ./rover grade      score every pose estimate in a run against LiDAR truth (--summary)
 #   ./rover values     every sensor's current reading, in one place
 #   ./rover status     what is alive right now
-#   ./rover fused      the fused pose -> /odom + TF, what nav2 consumes
+#   ./rover fused      LiDAR odometry + fusion2 -> /odom + TF, what nav2 consumes
 #   ./rover slam       + the lidar correction: slam_toolbox -> map -> odom, /map
 #   ./rover map        nvblox — build the room as it drives (Phase 2)
 #   ./rover nav        nav2 — click a goal, it plans and drives there (Phase 3)
@@ -271,7 +269,7 @@ camera)
 # ── pose ────────────────────────────────────────────────────────────────────
 # SLAM (loop closure) is ON by default now that Phase 1 has its drift numbers.
 # It publishes map -> odom; odom -> base_link stays continuous and owned by
-# fusion_node, so a loop closure cannot look like the teleports the fusion
+# fusion2, so a loop closure cannot look like the teleports the fusion
 # rejects. Run with SLAM=false ./rover pose to measure raw drift again.
 pose)
   need_container
@@ -305,9 +303,8 @@ pose)
   assert_rate /gyro/base 50 "gyro"            || true
   echo
   echo "  Now prove it is honest, with a tape measure:"
-  echo "      ./rover compare --expect 2.00     push 2.00 m straight"
-  echo "      ./rover compare --return          out 2.00 m and back to the mark"
-  echo "      ./rover compare --spin 360        rotate 360 deg by hand"
+  echo "      ./rover fused, then ./rover record return  (move it by hand, back to the mark)"
+  echo "      ./rover grade                              every estimate vs LiDAR truth"
   ;;
 
 # ── lidar ───────────────────────────────────────────────────────────────────
@@ -374,20 +371,6 @@ lidar)
   echo "  To MEASURE the yaw instead of guessing it:   ./rover lidar --yaw"
   ;;
 
-# ── pivot ───────────────────────────────────────────────────────────────────
-# Measures TODO 37 -- how far a "turn in place" actually slides -- against the
-# walls, which is the only instrument in this rig that is not itself under
-# suspicion. Needs LIDAR_YAW measured first (./rover lidar --calibrate).
-pivot)
-  need_container
-  assert_rate /scan 8 "laser scan"  || die "no /scan — run ./rover lidar"
-  assert_rate /odom 15 "fused odom" || die "no /odom — run ./rover fused"
-  assert_rate /wheel_state 15 "wheel link" || die "wheel link down — ./rover wheels"
-  echo "  THIS SPINS THE ROVER IN PLACE. Clear around it, and watch."
-  shift
-  rexec "$(pivot_env) python3 $LIDAR/pivot_test.py $*"
-  ;;
-
 # ── drive ───────────────────────────────────────────────────────────────────
 # Exact short moves on a rover that cannot pivot about its centre (TODO 43).
 # Plans rotate / straight / rotate around the measured pivot point near the
@@ -440,73 +423,45 @@ wheels)
   echo "    so a reflash (if it comes to that) needs your own machine. OTA is"
   echo "    compiled in."
   echo
-  echo "    compare still runs without it — the wheels row just stays empty."
   ;;
 
 # ── fused ───────────────────────────────────────────────────────────────────
 fused)
   need_container
   echo "  checking the pose layer is up before building on it..."
-  assert_rate /vo/odom 10 "visual odometry" || die "no pose — run ./rover pose first"
-  kill_match 'fusion_node.py'
+  assert_rate /gyro/base 50 "gyro" || die "no gyro — run ./rover pose first"
+  assert_rate /scan 8 "laser scan" || die "no /scan — run ./rover lidar first"
+  kill_match 'fusion_node.py'      # the Phase 1 estimator, retired 2026-09-26
   kill_match 'lidar_odom_node.py'
   kill_match 'fusion2_node.py'
-  kill_match 'rover_marker.py'   # retired 2026-09-24; stops one left from before
-  echo "[fused] PoseFusion -> /odom, and TF odom -> base_link"
-  echo "        vo_node runs with publish_tf:=false; only one thing may own a"
-  echo "        transform, and the raw cuvslam pose is the one that teleports."
-  # WHO OWNS odom -> base_link. FUSION=2 (default since 2026-09-26, the
-  # owner's switch after fusion2 passed the live return test): fusion2 on
-  # /odom with the TF; fusion.py beside it on /odom_legacy, no TF, as the
-  # fallback. FUSION=1 swaps them back. Exactly one of them ever sends the TF.
-  FUSION=${FUSION:-2}
-  if [ "$FUSION" = 1 ]; then
-    F1="" ; F2="-p publish_tf:=false -p odom_topic:=/fused2/odom -p frame_id:=odom2"
-  else
-    F1="--ros-args -p publish_tf:=false -p odom_topic:=/odom_legacy"
-    F2="-p publish_tf:=true -p odom_topic:=/odom -p frame_id:=odom"
-  fi
-  echo "[fused] FUSION=$FUSION: $([ "$FUSION" = 1 ] && echo 'fusion.py owns /odom + TF' || echo 'fusion2 owns /odom + TF; fusion.py -> /odom_legacy')"
-  dexec "python3 $SRC/nodes/fusion_node.py $F1 > /tmp/fused.log 2>&1"
-  # LiDAR odometry (SENSOR_FUSION_PLAN.md M2): /lidar/odom, no TF. Runs beside
-  # the fusion so it can be recorded and graded live; M3 decides how they combine.
-  echo "[fused] LiDAR odometry -> /lidar/odom (no TF; graded, not yet fused)"
+  # THE POSE (SENSOR_FUSION_PLAN.md M2 + M3). lidar_odom_node matches every
+  # scan against the room (/lidar/odom, no TF); fusion2 combines it with the
+  # gyro, VO and wheels, each weighted by its own evidence, and owns /odom and
+  # odom -> base_link. vo_node runs with publish_tf:=false: one owner per TF.
+  echo "[fused] LiDAR odometry -> /lidar/odom"
   dexec "python3 $SRC/nodes/lidar_odom_node.py > /tmp/lidarodom.log 2>&1"
-  # fusion2 (M3) beside fusion.py: /fused2/odom, no TF, recorded and graded
-  # live before it takes over odom -> base_link.
-  dexec "python3 $SRC/nodes/fusion2_node.py --ros-args $F2 > /tmp/fusion2.log 2>&1"
-  # The rover's body is no longer drawn here: RViz shows the URDF that
-  # robot_state_publisher serves (description/), and the footprint nav2 keeps
-  # clear as nav2's own /local_costmap/published_footprint. rover_marker.py,
-  # which hand-copied both, is retired.
-  sleep 4
+  echo "[fused] fusion2 -> /odom, TF odom -> base_link, /fusion/status, /fusion/path"
+  dexec "python3 $SRC/nodes/fusion2_node.py > /tmp/fusion2.log 2>&1"
+  sleep 5
   echo
   echo "  GATE fused:"
-  assert_rate /odom 15 "fused odom" || true
   assert_rate /lidar/odom 8 "lidar odom" || true
-  [ "$FUSION" = 1 ] && { assert_rate /fused2/odom 15 "fusion2 (beside)" || true; } \
-                    || { assert_rate /odom_legacy 15 "fusion.py (fallback)" || true; }
-  # The honesty check belongs HERE, not in a doc telling you to run it by hand
-  # after every bring-up -- which is what it was, and so it got skipped. This
-  # is the layer that starts publishing /odom, so this is the layer that has to
-  # say whether /odom means anything.
+  assert_rate /odom 15 "fused odom" || true
   echo
   pose_honest || {
     echo
-    echo "  ✗ Do NOT run ./rover map on this pose. nvblox writes depth wherever"
-    echo "    the pose claims the robot is, so mapping while diverged smears the"
-    echo "    map permanently and the only recovery is to discard it and redrive."
+    echo "  ✗ Do NOT run ./rover map or nav on this pose until it reads ok:"
+    echo "    nvblox writes depth wherever the pose claims the robot is."
   }
   echo
-  echo "  Health, live:  ./rover compare"
-  echo "  Raw status:    ros2 topic echo /fusion/status"
+  echo "  Test it against LiDAR truth:  ./rover record <scenario>; ./rover grade"
   ;;
 
 # ── slam ────────────────────────────────────────────────────────────────────
-# The lidar's job in the pose stack. fusion_node is dead reckoning and cannot
+# The lidar's job in the pose stack. fusion2 is LiDAR-anchored odometry but still
 # correct itself; slam_toolbox matches every scan against the walls and
 # publishes what dead reckoning got wrong as map -> odom. Nothing under it
-# changes: odom -> base_link is still fusion_node's, nav2 still plans in odom
+# changes: odom -> base_link is fusion2's, nav2 still plans in odom
 # until it is deliberately moved to map (that is a separate, driven change --
 # see phase2/config/SLAM.md). What this layer gives you today is the corrected pose
 # (map -> base_link), a 2D map of the room on /map, and both in RViz.
@@ -530,7 +485,7 @@ slam)
   # runs with slam:=true, which is ./rover pose's DEFAULT (SLAM:-true) -- so on
   # a normal bring-up the frame already has an owner before slam_toolbox starts.
   #
-  # Two publishers of one transform is the failure fusion_node.py's docstring
+  # Two publishers of one transform is the failure the Phase 1 fusion's docstring
   # already describes for odom -> base_link: TF goes non-deterministic and the
   # rover jitters between two poses with nothing in any log. Here it would be
   # worse than confusing -- the two corrections disagree by construction, one
@@ -601,7 +556,7 @@ map)
   assert_rate "/nvblox_node/back_projected_depth/camera0_depth_optical_frame" 5 "depth integrated" || true
   echo
   echo "  How much is mapped:"
-  rexec "python3 /logs/map_stats.py" 2>/dev/null | sed -n "/grid/,/occupied/p" | sed "s/^/    /"
+  rexec "python3 $SRC2/tools/map_stats.py" 2>/dev/null | sed -n "/grid/,/occupied/p" | sed "s/^/    /"
   echo
   echo "  Drive it and the map grows. In RViz: nvblox mesh, nvblox 2D slice."
   echo "  Log: ./rover logs map"
@@ -970,32 +925,12 @@ view)
 
   # Running is not the same as receiving. A blank RViz still shows as running.
   echo "  subscriptions (0 means it is connected to nothing):"
-  for t in /robot_description /scan /map /fusion/path /fusion/path_map; do
+  for t in /robot_description /scan /map /fusion/path; do
     c=$(timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$ip" \
         "source /opt/ros/jazzy/setup.bash; export ROS_DOMAIN_ID=0; unset ROS_DISCOVERY_SERVER; \
          timeout 6 ros2 topic info $t 2>/dev/null | grep -oP 'Subscription count: \K[0-9]+'" 2>/dev/null)
     printf "      %-42s %s\n" "$t" "${c:-0}"
   done
-  ;;
-
-# ── compare ─────────────────────────────────────────────────────────────────
-compare)
-  need_container
-  shift
-  # -it matters. Without a TTY, `docker exec` does not proxy SIGINT, so Ctrl-C
-  # kills the client while the Python inside the container never runs its
-  # shutdown path — no verdict printed and no CSV written. Every run before
-  # 2026-08-15 20:28 was lost that way.
-  ttyflag=""; [ -t 0 ] && ttyflag="-it"
-
-  # No keepalive here any more. It existed to work around loop() blocking in
-  # rclc_executor_spin_some, and the firmware fix (timeout 0) removed the need:
-  # /wheel_state now runs at 20.3 Hz with nothing publishing to the board. Keep
-  # logs/keepalive.py as a fallback if a future flash regresses, but do not run
-  # it by default — it publishes /cmd_vel continuously, which keeps the 500 ms
-  # motion watchdog permanently fed and would mask a teleop fault.
-  kill_match 'keepalive.py'
-  docker exec $ttyflag "$NAME" bash -lc "$ENVSET python3 $SRC/nodes/compare.py $*"
   ;;
 
 # ── record / grade ──────────────────────────────────────────────────────────

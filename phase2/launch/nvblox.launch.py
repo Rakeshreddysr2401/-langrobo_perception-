@@ -10,7 +10,7 @@ WHAT IT DOES
 WHERE THE POSE COMES FROM
     TF, `global_frame` -> the depth image's frame. The chain is
 
-        odom --(fusion_node, 20 Hz)--> base_link --(static)--> camera0_depth_optical_frame
+        odom --(fusion2, 20 Hz)--> base_link --(static)--> camera0_depth_optical_frame
 
     so the map is built on the FUSED pose, not on raw cuVSLAM. That matters more
     here than anywhere: nvblox writes depth wherever the pose claims the robot

@@ -629,7 +629,7 @@ def main():
             closure look identical to the divergence we spent a day learning to
             reject. So the two are kept apart, the way REP-105 intends:
 
-                odom -> base_link   continuous, drifts     (fusion_node)
+                odom -> base_link   continuous, LiDAR-anchored (fusion2)
                 map  -> odom        the correction, jumps  (here)
                 map  -> base_link   globally consistent    (the two composed)
 

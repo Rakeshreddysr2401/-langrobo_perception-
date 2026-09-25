@@ -48,13 +48,12 @@ from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Imu, LaserScan
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'nodes'))
-from fusion import METRES_PER_COUNT  # noqa: E402
+from fusion2 import METRES_PER_COUNT  # noqa: E402
 
 BAGS = Path(os.environ.get('HARNESS_BAGS', '/logs/bags'))
 TOPICS = ['/scan', '/gyro/base', '/wheel_ticks', '/wheel_state', '/wheel_odom',
           '/vo/odom', '/vo/status', '/odom', '/fusion/status', '/cmd_vel',
-          '/tf', '/tf_static', '/rover_diag', '/lidar/odom', '/lidar/odom_status',
-          '/fused2/odom', '/fused2/status', '/odom_legacy']
+          '/tf', '/tf_static', '/rover_diag', '/lidar/odom', '/lidar/odom_status', '/fusion/path']
 IMAGES = ['/camera/camera0/infra1/image_rect_raw', '/camera/camera0/infra2/image_rect_raw',
           '/camera/camera0/infra1/camera_info', '/camera/camera0/infra2/camera_info']
 

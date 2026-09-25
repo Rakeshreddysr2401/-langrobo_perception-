@@ -8,7 +8,7 @@ with no map saved across a power-off.
 That needs the pose to stay right. It was right driving straight and wrong on
 turns. This document is what was found about why, what was built, and what is
 still open. Work of 2026-09-22 → 09-24; the chronological notes, with every
-number, are TODO.md §42 and §43.
+number, are docs/archive/TODO.md §42 and §43.
 
 ---
 
