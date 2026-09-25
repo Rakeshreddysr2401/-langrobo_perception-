@@ -11,6 +11,7 @@ no odometry at all -- the wheels, gyro, camera and fusion are what it grades.
 Moving scans are never used for truth: a C1 scan takes 0.1 s, so a turning
 rover smears it (SENSOR_FUSION_PLAN.md §1).
 """
+import json
 import math
 import warnings
 from dataclasses import dataclass, field
@@ -55,6 +56,7 @@ class Bag:
     odom: dict = field(default_factory=dict)          # topic -> ndarray t, x, y, yaw
     cmd: np.ndarray = None                            # t, vx, wz
     laser: tuple = None                               # base_link -> laser: x, y, yaw
+    vo_status: np.ndarray = None                      # t, landmarks, healthy (0/1)
 
 
 def read_bag(path):
@@ -69,7 +71,7 @@ def read_bag(path):
     types = {t.name: t.type for t in r.get_all_topics_and_types()}
     cls = {n: get_message(t) for n, t in types.items()}
     b = Bag(path=str(path))
-    gyro, ticks, cmd = [], [], []
+    gyro, ticks, cmd, vos = [], [], [], []
     odom = {}
 
     def stamp(m, t_ns):
@@ -92,6 +94,12 @@ def read_bag(path):
             gyro.append((stamp(m, t_ns), m.angular_velocity.z))
         elif topic == '/wheel_ticks':
             ticks.append((t_ns * 1e-9, m.x, m.y, m.z, m.w))
+        elif topic == '/vo/status':
+            try:
+                j = json.loads(m.data)
+                vos.append((t_ns * 1e-9, float(j.get('landmarks', 0)), 1.0 if j.get('healthy', True) else 0.0))
+            except ValueError:
+                pass
         elif topic == '/cmd_vel':
             cmd.append((t_ns * 1e-9, m.linear.x, m.angular.z))
         elif topic in ('/odom', '/vo/odom', '/lidar/odom'):
@@ -106,6 +114,7 @@ def read_bag(path):
     b.gyro = np.array(sorted(gyro)) if gyro else None
     b.ticks = np.array(sorted(ticks)) if ticks else None
     b.cmd = np.array(sorted(cmd)) if cmd else None
+    b.vo_status = np.array(sorted(vos)) if vos else None
     b.odom = {k: np.array(sorted(v)) for k, v in odom.items()}
     b.scans.sort(key=lambda s: s[0])
     return b

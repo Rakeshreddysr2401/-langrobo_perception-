@@ -473,3 +473,54 @@ motion they did not cause, VO and the fusion jumped, and the LiDAR odometry
 tracked it through. **M2's acceptance (≤ 2 cm, ≤ 0.5°) holds on every recorded
 run and on the independent return test.** Still open in M2: a motor-driven
 `zigzag`, which waits for the power work (build plan §4.5).
+
+## 11. M3: fusion2, offline on 19 recorded runs (2026-09-26)
+
+`phase1/nodes/fusion2.py`, with no ROS inside it. One EKF over [x, y, θ, vx,
+vy, gyro bias]. The gyro predicts at 200 Hz. Corrections, each gated
+(Mahalanobis) and weighted by its own evidence:
+
+- **LiDAR odometry:** an absolute pose through a re-anchored offset. A late
+  fix (it arrives ~0.13 s after its stamp) is carried forward by motion only.
+- **VO, adaptive:** velocity while the LiDAR is healthy, an absolute pose when
+  it is not. Noise scales with landmarks, and jumps fail the gate.
+- **Wheels:** forward speed and "no sideways speed", with noise that grows
+  with the turn rate and with slip evidence (front vs rear; wheels vs gyro).
+- **Certain stillness:** encoders unchanged and nothing commanded pins the
+  velocity and re-measures the gyro bias.
+
+Graded with the LiDAR fixes fed at their live delay (worst checkpoint per
+run: the worst over all runs, and the mean of the per-run worsts):
+
+| | worst | mean of worst |
+|---|---|---|
+| fused (today's fusion.py) | 20.5 cm / 12.96° | 6.4 cm / 1.68° |
+| LiDAR odometry alone | 0.9 cm / 0.39° | 0.3 cm / 0.18° |
+| **fused2** | **0.8 cm / 0.45°** | **0.3 cm / 0.19°** |
+| fused2 without the LiDAR | 19.6 cm / 4.21° | 6.2 cm / 1.43° |
+| VO alone | 19.6 cm / 8.38° | 5.6 cm / 1.76° |
+
+With the LiDAR, fused2 keeps its accuracy. Without it (corridors, outdoors),
+it beats today's fusion everywhere, most in heading: worst 4.2° against 13°.
+The `pivot90` VO glitch is rejected (0.36° against fused's 12.96°).
+
+Three design mistakes the grades caught on the way, recorded because each
+looked reasonable:
+
+1. **Rejecting healthy LiDAR fixes that failed the gate**, and re-anchoring
+   after five in a row, locked drift in: 29.5 cm on `pivot90`. A skid-steer
+   pivot slides faster than the velocity states follow, so the filter, not
+   the LiDAR, was wrong. Now a healthy fix that fails the gate widens our
+   uncertainty and is taken. Only a physically impossible jump (> 30 cm or
+   > 10° in one scan) counts as a LiDAR fault.
+2. **Carrying late fixes forward with the corrected state's history** fed our
+   own corrections back into the next measurement. Parked, it wandered
+   10-20 cm. Now it uses a motion-only dead-reckoned track.
+3. **VO as an absolute pose all the time** fought the healthy LiDAR (1.8 cm
+   worst). As velocity only, it wasted VO's position tracking when the LiDAR
+   was absent. Adaptive takes the better of each.
+
+**Not yet shown:** a corridor where the LiDAR degenerates, and slip / stuck
+/ lifted flags on a run built to trigger them. Next: run fusion2 live beside
+fusion.py (`/fused2/odom`, no TF), record, compare live against offline; then
+decide with the owner when it takes over `odom → base_link`.

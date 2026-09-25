@@ -40,7 +40,7 @@ except Exception:  # noqa: BLE001 -- harness still runs off-rover
     METRES_PER_COUNT, WHEEL_BASE_ROT_M = math.pi * 0.085 / 1560.0, 0.5216
 
 AGREE_M, AGREE_RAD = 0.01, math.radians(0.3)
-COLS = ('fused', 'vo', 'wheels', 'wheels+gyro', 'lidar', 'lidar_live')
+COLS = ('fused', 'vo', 'wheels+gyro', 'lidar', 'fused2', 'fused2_nolidar')
 SPLIT_S = 5.0          # long stills are cut into checkpoints: drift while parked
 
 
@@ -95,6 +95,67 @@ def lidar_odom(b, deskew_dir=None, deskew_ref=None):
     return from_odom(np.array(out)), lo
 
 
+LIDAR_DELAY = 0.13     # s: the live node's de-skew hold + compute
+
+
+def fused2(b, use=('lidar', 'vo', 'wheels', 'still'), lidar_poses=None):
+    """Run fusion2 (phase1/nodes/fusion2.py) over the bag, events in the order
+    they would ARRIVE live: LiDAR poses LIDAR_DELAY after their stamp."""
+    import math as _m
+    from fusion2 import Fusion2
+    f = Fusion2(use)
+    ev = [(t, 0, ('g', w)) for t, w in b.gyro]
+    ev += [(r[0], 1, ('k', r[1:])) for r in b.ticks]
+    if b.cmd is not None:
+        ev += [(r[0], 1, ('c', r[1], r[2])) for r in b.cmd]
+    if '/vo/odom' in b.odom:
+        vs = b.vo_status
+        for t, x, y, th in b.odom['/vo/odom']:
+            lm, ok = 100.0, 1.0
+            if vs is not None and len(vs):
+                k = max(0, np.searchsorted(vs[:, 0], t) - 1)
+                lm, ok = vs[k, 1], vs[k, 2]
+            ev.append((t, 1, ('v', (x, y, th), lm, ok > 0.5)))
+    if 'lidar' in use and lidar_poses is not None:
+        for t, pose, ok, vxy, vth in lidar_poses:
+            ev.append((t + LIDAR_DELAY, 1, ('l', t, pose, ok, vxy, vth)))
+    ev.sort(key=lambda e: (e[0], e[1]))
+    out = []
+    for t, _, e in ev:
+        k = e[0]
+        if k == 'g':
+            f.on_gyro(t, e[1])
+            if f.t is not None and (not out or t - out[-1][0] >= 0.02):
+                out.append((t, *f.pose))
+        elif k == 'k':
+            f.on_ticks(t, e[1])
+        elif k == 'c':
+            f.on_cmd(t, e[1], e[2])
+        elif k == 'v':
+            f.on_vo(t, e[1], e[2], e[3])
+        elif k == 'l':
+            f.on_lidar(e[1], e[2], e[3], e[4], e[5])
+    return from_odom(np.array(out)), f
+
+
+def lidar_poses(b):
+    """The LiDAR odometry's poses with their fit quality, as the node would publish them."""
+    import math as _m
+    from lidar_odom import LidarOdom
+    lo = LidarOdom(b.laser)
+    g, gi, out = b.gyro, 0, []
+    for t, ranges, amin, ainc, st in b.scans:
+        while gi < len(g) and g[gi, 0] <= t + 0.12:
+            lo.on_gyro(g[gi, 0], g[gi, 1])
+            gi += 1
+        fit = lo.on_scan(t, ranges, amin, ainc, st)
+        if fit is None:
+            continue
+        vxy = max(0.005 ** 2, fit.residual ** 2 / max(fit.eig, 1e-6) * 100.0) if fit.ok else 1.0
+        out.append((t, (lo.x, lo.y, lo.th), fit.ok, vxy, _m.radians(0.3) ** 2))
+    return out
+
+
 def estimators(b):
     e = {}
     if '/odom' in b.odom:
@@ -112,6 +173,9 @@ def estimators(b):
         e['wheels+gyro'] = integrate(t, ds, np.concatenate([[0.0], np.diff(head)]))
         if b.laser is not None and len(b.scans) > 10:
             e['lidar'], _ = lidar_odom(b)
+            lp = lidar_poses(b)
+            e['fused2'], _ = fused2(b, lidar_poses=lp)
+        e['fused2_nolidar'], _ = fused2(b, use=('vo', 'wheels', 'still'))
     return e
 
 
