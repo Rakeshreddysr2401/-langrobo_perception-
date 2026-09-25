@@ -3,6 +3,7 @@
 #
 #   ./rover camera     the D555, and nothing else
 #                      --floor  measure its pitch/roll/height off the floor (moves nothing)
+#                      --lidar  measure it against the LiDAR, one pose per run; --solve (moves nothing)
 #   ./rover pose       + visual odometry and the gyro
 #   ./rover lidar      RPLidar C1 -> /scan, and its base_link -> laser TF
 #                      --yaw    measure LIDAR_YAW off a target at the nose
@@ -200,6 +201,12 @@ camera)
   if [ "${2:-}" = "--floor" ]; then
     need_container
     rexec "python3 $SRC/nodes/floor_calib.py"; exit
+  fi
+  # --lidar [--solve|--reset] measures the camera against the LiDAR, one
+  # hand-placed pose per run (phase1/nodes/cam_lidar_calib.py). Moves nothing.
+  if [ "${2:-}" = "--lidar" ]; then
+    need_container
+    rexec "python3 $SRC/nodes/cam_lidar_calib.py ${3:-}"; exit
   fi
   start_container
   echo "[camera] D555 — stereo IR + depth + motion"
