@@ -183,6 +183,7 @@ class LidarOdom:
         n = r.size
         a = amin + np.arange(n) * ainc
         ok = np.isfinite(r) & (r > RANGE_LO) & (r < RANGE_HI)
+        r = np.where(ok, r, 0.0)            # no-return beams (inf): masked below, kept out of the math
         p = np.stack([r * np.cos(a), r * np.sin(a)], axis=1)
         mx, my, myaw = self.mount
         p = p @ rot(myaw).T + np.array([mx, my])           # base_link at each beam's own time

@@ -94,7 +94,7 @@ def read_bag(path):
             ticks.append((t_ns * 1e-9, m.x, m.y, m.z, m.w))
         elif topic == '/cmd_vel':
             cmd.append((t_ns * 1e-9, m.linear.x, m.angular.z))
-        elif topic in ('/odom', '/vo/odom'):
+        elif topic in ('/odom', '/vo/odom', '/lidar/odom'):
             p = m.pose.pose
             odom.setdefault(topic, []).append((stamp(m, t_ns), p.position.x, p.position.y,
                                                yaw_of(p.orientation)))

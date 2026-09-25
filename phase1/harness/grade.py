@@ -40,7 +40,7 @@ except Exception:  # noqa: BLE001 -- harness still runs off-rover
     METRES_PER_COUNT, WHEEL_BASE_ROT_M = math.pi * 0.085 / 1560.0, 0.5216
 
 AGREE_M, AGREE_RAD = 0.01, math.radians(0.3)
-COLS = ('fused', 'vo', 'wheels', 'wheels+gyro', 'lidar')
+COLS = ('fused', 'vo', 'wheels', 'wheels+gyro', 'lidar', 'lidar_live')
 SPLIT_S = 5.0          # long stills are cut into checkpoints: drift while parked
 
 
@@ -101,6 +101,8 @@ def estimators(b):
         e['fused'] = from_odom(b.odom['/odom'])
     if '/vo/odom' in b.odom:
         e['vo'] = from_odom(b.odom['/vo/odom'])
+    if '/lidar/odom' in b.odom:
+        e['lidar_live'] = from_odom(b.odom['/lidar/odom'])
     ds, dth = wheel_steps(b)
     e['wheels'] = integrate(b.ticks[:, 0], ds, dth)
     if b.gyro is not None and len(b.gyro) > 50:
@@ -206,7 +208,7 @@ def grade(bag_dir):
         summary[n] = {'final_pos_cm': float(p[-1]), 'max_pos_cm': float(p.max()),
                       'final_head_deg': float(h[-1]), 'max_head_deg': float(h.max()),
                       'checkpoints': len(v)}
-    j = {n: jumps(b.odom.get(t)) for n, t in (('fused', '/odom'), ('vo', '/vo/odom')) if t in b.odom}
+    j = {n: jumps(b.odom.get(t)) for n, t in (('fused', '/odom'), ('vo', '/vo/odom'), ('lidar_live', '/lidar/odom')) if t in b.odom}
     print('\n  ' + f'{"":14}{"final cm":>9}{"max cm":>8}{"final deg":>10}{"max deg":>9}{"jumps":>7}')
     for n, s in summary.items():
         print(f'  {n:14}{s["final_pos_cm"]:9.1f}{s["max_pos_cm"]:8.1f}'
