@@ -59,7 +59,15 @@ camera:
   glass_inset: {value: 0.009, status: measured,  source: "front glass sits 0.8-1.0 cm inside the nose", date: 2026-09-24}
   lens_z:      {value: 0.175, status: measured,  source: "floor to lens centre (11.5 above the base frame)", date: 2026-09-24}
   case_y:      {value: 0.0,   status: measured,  source: "centred left-right on the frame", date: 2026-09-24}
-  pitch:       {value: 0.0,   status: described, source: "level; never measured"}
+  # Tilt of camera0_link against the FLOOR, from its own depth: RANSAC plane
+  # over ~40k floor points, 3.5 mm rms, two runs (./rover camera --floor):
+  #   pitch +0.10 / -0.09 deg, roll -1.43 / -1.39 deg, height 0.173 / 0.171 m
+  # Level in pitch; right side ~1.4 deg low (the mount, or the chassis leaning:
+  # either way this is what makes the depth floor flat in base_link). The
+  # Phase 1 "-1.3 deg pitch" came from gravity with the camera at 16.3 cm, an
+  # older mount. The fitted height agrees with the tape's lens_z to 3 mm.
+  pitch:       {value: 0.0,     status: calibrated, source: "floor plane from depth, ./rover camera --floor", date: 2026-09-25}
+  roll:        {value: -0.0245, status: calibrated, source: "floor plane from depth, ./rover camera --floor", date: 2026-09-25}
   # camera0_link is the driver's root frame = the LEFT IR imager (infra1), not
   # the case centre. The driver puts infra2 at +0.095 y from it, so with the
   # case centred, infra1 sits half a baseline to -y: camera0_link y = -0.0475.

@@ -63,8 +63,11 @@ it. This is the single largest blocker on the vehicle.
 **🟡 Mount pitch never measured (§6).** x, z and yaw are all measured. Nose
 up/down is not, and it moves the ground plane in mapping.
 
-**🔴 Blind below 10 cm, above 24 cm, outside 87°, and downward.** There is no
-drop-off detection of any kind. This is why a human watches every run.
+**🔴 Blind below 5 cm, and to anything low that the camera has not looked at; blind downward.**
+Since 2026-09-25 the LiDAR (360°, one plane at 25 cm) is in both costmaps, and
+nvblox's band runs 5–27 cm with the camera's measured tilt in the TF. Still
+blind: flat things under 5 cm, anything low beside or behind the rover that the
+camera never faced, and any drop-off. This is why a human watches every run.
 
 **🟡 Emitter off weakens depth on untextured surfaces** — the same condition
 that starves cuVSLAM of landmarks.
@@ -217,7 +220,7 @@ Depth plus the **fused** pose → TSDF, mesh, and a 2D ESDF slice.
 |---|---|
 | voxel size | 0.05 m |
 | ESDF mode / rate | `2d` · 5 Hz |
-| slice band | 0.10 – 0.24 m |
+| slice band | 0.05 – 0.27 m (was 0.10 – 0.24 until 2026-09-25) |
 | slice height | 0.16 m |
 | integration distance | 3.0 m |
 | grid published | 4.9 Hz |
@@ -233,7 +236,7 @@ obstacle blobs scattered through open floor. Smeared by the §22 origin resets.
 It had to be **wiped, not repaired**.
 
 **🟡 The band is the blind spot.** 3.0 m integration caps the planning horizon;
-0.10–0.24 m cannot see overhangs, or anything lower than 10 cm.
+0.05–0.27 m cannot see overhangs, or anything flatter than 5 cm.
 
 **🟡 Dynamic obstacles untested** — published on a separate layer, never
 exercised.

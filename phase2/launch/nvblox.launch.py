@@ -62,29 +62,33 @@ def generate_launch_description():
                 #
                 # nvblox builds a 3D model; the 2D map is a horizontal slice
                 # through it, and anything inside the band becomes an obstacle.
-                # Set the band by what the ROVER COLLIDES WITH:
+                # Set the band by what the ROVER COLLIDES WITH (measured
+                # 2026-09-24, description/params.yaml):
                 #
-                #   camera        17 cm
-                #   rover height  22 cm   <- this is the number that matters
-                #   table         29 cm   <- 7 cm of clearance above the rover
+                #   frame top        22.0 cm
+                #   LiDAR puck top   26.1 cm  <- the highest point of the rover
+                #   table            29   cm  <- still clears it
                 #
-                #   0 - 10 cm   skipped. The camera pitches down 1.3 deg, so at
-                #               3 m the floor itself reads up to 6.8 cm high and
-                #               would fill the map with phantom obstacles.
-                #   10 - 22 cm  the OBSTACLE band. Anything here, the rover hits.
-                #   above 22 cm ignored. The rover drives under it.
+                #   0 - 5 cm    skipped: one 5 cm voxel, the floor itself.
+                #   5 - 27 cm   the OBSTACLE band. A 6-8 cm remote, shoe or box
+                #               is in it; so is anything the puck would hit.
+                #   above 27 cm ignored. The rover drives under it.
                 #
-                # With the old 0.60 m ceiling a 29 cm table was inside the band,
-                # so driving under one painted obstacles in every direction --
-                # the rover was surrounded by a tabletop it could comfortably fit
-                # beneath. Table LEGS still span 0-29 cm and stay flagged, which
-                # is what actually needs avoiding.
+                # This used to start at 10 cm, because the TF said the camera
+                # was level while it was not: the floor then rose with range
+                # (6.8 cm at 3 m) and filled the map with phantom obstacles.
+                # The price was that everything under 10 cm was invisible. The
+                # camera's tilt is now MEASURED off the floor in its own depth
+                # (./rover camera --floor, 2026-09-25: roll -1.4 deg, pitch
+                # ~0) and is in the TF, so the floor lands at z ~ 0 and one
+                # voxel of margin is enough. If phantom obstacles appear on
+                # bare floor, re-run --floor before raising this.
                 #
-                # Heights are in the odom frame, whose z=0 is where base_link
-                # started -- ground level. Raise this if the rover grows a mast;
-                # lower it and it will drive into things it cannot clear.
-                'static_mapper.esdf_slice_min_height': 0.10,
-                'static_mapper.esdf_slice_max_height': 0.24,
+                # Things under ~5 cm (a flat cable) stay invisible to the map;
+                # the axle is 4.1 cm up, so about 1.5-2 cm is what it can
+                # climb. Heights are in the odom frame: z = 0 is the floor.
+                'static_mapper.esdf_slice_min_height': 0.05,
+                'static_mapper.esdf_slice_max_height': 0.27,
                 'static_mapper.esdf_slice_height': 0.16,
 
                 # How far out to trust depth into the map. Stereo error grows

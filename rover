@@ -2,6 +2,7 @@
 # rover — Phase 1 bring-up, one layer at a time.
 #
 #   ./rover camera     the D555, and nothing else
+#                      --floor  measure its pitch/roll/height off the floor (moves nothing)
 #   ./rover pose       + visual odometry and the gyro
 #   ./rover lidar      RPLidar C1 -> /scan, and its base_link -> laser TF
 #                      --yaw    measure LIDAR_YAW off a target at the nose
@@ -193,6 +194,13 @@ case "${1:-}" in
 
 # ── camera ──────────────────────────────────────────────────────────────────
 camera)
+  # --floor measures the camera's pitch, roll and height from the floor plane
+  # in its own depth (phase1/nodes/floor_calib.py). Needs the layer up; moves
+  # nothing; writes nothing -- it prints the params.yaml lines.
+  if [ "${2:-}" = "--floor" ]; then
+    need_container
+    rexec "python3 $SRC/nodes/floor_calib.py"; exit
+  fi
   start_container
   echo "[camera] D555 — stereo IR + depth + motion"
   echo "         emitter OFF and sync OFF; both are load-bearing, see phase1/README.md"

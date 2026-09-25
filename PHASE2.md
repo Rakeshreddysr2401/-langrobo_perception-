@@ -124,7 +124,7 @@ tables and built TSDF/Color/Feature/Freespace/Occupancy/ESDF layers at 5 cm.
 | `global_frame` | `odom` | no map frame exists yet — see §1 |
 | `voxel_size` | 0.05 m | small enough for a chair leg, large enough that a room fits in GPU memory. Phase 1's 10 cm drift gate was set as two voxels for this reason |
 | `mapping_type` | `static_tsdf` | the dynamic modes track moving objects and cost more; the room is not moving |
-| `esdf_slice_min_height` | **0.10 m** | **the camera sits 16.3 cm up and pitches down 1.3°.** A slice at exactly 0 clips the floor itself and fills the map with phantom obstacles. That mount pitch came from Phase 1's gravity measurement and earns its keep here |
+| `esdf_slice_min_height` | **0.05 m** (0.10 until 2026-09-25) | one voxel above the floor. Needs the camera's tilt in the TF — measured off the floor by `./rover camera --floor` — or the floor rises with range into the band |
 | `esdf_slice_max_height` | **0.24 m** | **the rover's own height, tape-measured** — see below |
 | `max_integration_distance` | **3.0 m** | set by the SLICE HEIGHT, not the camera's range — see below |
 | `decay_tsdf_rate_hz` | **0.0** | **the map forgets otherwise** — see below |
@@ -144,9 +144,9 @@ collides with**:
 
 | band | |
 |---|---|
-| 0 – 10 cm | **skipped.** The camera pitches down 1.3°, so at 3 m the floor itself reads up to 6.8 cm high and would fill the map with phantom obstacles. **This is a real blind spot** — a low rail or threshold is invisible and will still stop the wheels |
-| **10 – 24 cm** | **the obstacle band.** Anything here, the rover hits |
-| above 24 cm | **ignored.** The rover drives under it |
+| 0 – 5 cm | **skipped** — one voxel, the floor. Until 2026-09-25 this was 0 – 10 cm, because the TF called the camera level while it was not, so the floor rose with range. The tilt is now measured off the floor (`./rover camera --floor`: roll −1.4°, pitch ≈ 0) and is in the TF; bare floor 0.4–1.3 m ahead reads 97% within −5…+4 cm |
+| **5 – 27 cm** | **the obstacle band.** Anything here, the rover hits: a 6–8 cm remote, and anything the 26.1 cm LiDAR puck would strike |
+| above 27 cm | **ignored.** The rover drives under it |
 
 **The band was 0.10–0.22 for weeks, set to "the rover's height" before anyone
 measured it.** The rover is 24 cm, so the top 2 cm of it was driving through

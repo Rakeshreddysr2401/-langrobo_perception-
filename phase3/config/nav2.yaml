@@ -366,9 +366,20 @@ global_costmap:
       # forward collision sweep runs every tick. What is given up is honest:
       # 4 cm/side of planner margin, in exchange for the rover being willing to
       # use doorways. Raise this first if it starts grazing again.
-      footprint_padding: 0.03
+      # 0.05 from 0.03 on 2026-09-25: the owner's 5 cm margin, now that the
+      # footprint is the MEASURED 36 x 38 (it was a described 46 x 42 when
+      # 0.03 was chosen). Padded: 46 x 48 cm; turning in place sweeps
+      # hypot(0.232, 0.240) = 0.33 m, so 0.67 m of clear floor to turn around;
+      # passing needs a gap wider than 2 x 0.228 = 0.46 m plus voxel rounding.
+      # Doorways (0.7-0.8 m) still pass. RPP's collision check and the Spin
+      # recovery both sweep this padded footprint as it ROTATES, so this is
+      # also the margin for turning at corners -- for an ideal pivot. The real
+      # pivot still slides ~30 cm per 90 deg (LOCALIZATION.md §7) until the
+      # closed-loop pivot (SENSOR_FUSION_PLAN.md stage E); ./rover drive plans
+      # around that slide in the meantime.
+      footprint_padding: 0.05
 
-      plugins: [nvblox_layer, inflation_layer]
+      plugins: [nvblox_layer, lidar_layer, inflation_layer]
       nvblox_layer:
         plugin: nvblox::nav2::NvbloxCostmapLayer
         enabled: true
@@ -400,6 +411,37 @@ global_costmap:
         # the default so that turning binary mode off returns to stock
         # behaviour rather than to a half-tuned value.
         max_obstacle_distance: 1.0
+      # THE LIDAR, 360 degrees at 25 cm. Added 2026-09-25: until then both
+      # costmaps were camera-only, so nav2 knew nothing it had not LOOKED at --
+      # nothing beside or behind the rover (a rod behind it during a backup
+      # was invisible unless the camera had seen it earlier). The two layers
+      # are complementary, not redundant:
+      #   nvblox  5-27 cm, ahead only (87 deg), REMEMBERS what it saw, so a
+      #           low object stays in the map once it is too close to see
+      #   lidar   one plane at 25 cm, all round, live, sees from 5 cm out
+      # Each layer keeps its own grid and the master takes the max, so the
+      # lidar clearing its own cells never erases nvblox's memory.
+      lidar_layer:
+        plugin: nav2_costmap_2d::ObstacleLayer
+        enabled: true
+        footprint_clearing_enabled: true
+        max_obstacle_height: 0.30
+        observation_sources: scan
+        scan:
+          topic: /scan
+          data_type: LaserScan
+          marking: true
+          clearing: true
+          # the scan is at z 0.25 in odom (the laser plane, description/)
+          min_obstacle_height: 0.0
+          max_obstacle_height: 0.30
+          # nothing of the rover's own is in the plane; 0.20 keeps a stray
+          # return off the chassis from marking the rover's own cell
+          obstacle_min_range: 0.20
+          obstacle_max_range: 6.0
+          raytrace_min_range: 0.20
+          raytrace_max_range: 8.0
+          inf_is_valid: false
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         enabled: true
@@ -484,8 +526,19 @@ local_costmap:
       # forward collision sweep runs every tick. What is given up is honest:
       # 4 cm/side of planner margin, in exchange for the rover being willing to
       # use doorways. Raise this first if it starts grazing again.
-      footprint_padding: 0.03
-      plugins: [nvblox_layer, inflation_layer]
+      # 0.05 from 0.03 on 2026-09-25: the owner's 5 cm margin, now that the
+      # footprint is the MEASURED 36 x 38 (it was a described 46 x 42 when
+      # 0.03 was chosen). Padded: 46 x 48 cm; turning in place sweeps
+      # hypot(0.232, 0.240) = 0.33 m, so 0.67 m of clear floor to turn around;
+      # passing needs a gap wider than 2 x 0.228 = 0.46 m plus voxel rounding.
+      # Doorways (0.7-0.8 m) still pass. RPP's collision check and the Spin
+      # recovery both sweep this padded footprint as it ROTATES, so this is
+      # also the margin for turning at corners -- for an ideal pivot. The real
+      # pivot still slides ~30 cm per 90 deg (LOCALIZATION.md §7) until the
+      # closed-loop pivot (SENSOR_FUSION_PLAN.md stage E); ./rover drive plans
+      # around that slide in the meantime.
+      footprint_padding: 0.05
+      plugins: [nvblox_layer, lidar_layer, inflation_layer]
       nvblox_layer:
         plugin: nvblox::nav2::NvbloxCostmapLayer
         enabled: true
@@ -517,6 +570,37 @@ local_costmap:
         # the default so that turning binary mode off returns to stock
         # behaviour rather than to a half-tuned value.
         max_obstacle_distance: 1.0
+      # THE LIDAR, 360 degrees at 25 cm. Added 2026-09-25: until then both
+      # costmaps were camera-only, so nav2 knew nothing it had not LOOKED at --
+      # nothing beside or behind the rover (a rod behind it during a backup
+      # was invisible unless the camera had seen it earlier). The two layers
+      # are complementary, not redundant:
+      #   nvblox  5-27 cm, ahead only (87 deg), REMEMBERS what it saw, so a
+      #           low object stays in the map once it is too close to see
+      #   lidar   one plane at 25 cm, all round, live, sees from 5 cm out
+      # Each layer keeps its own grid and the master takes the max, so the
+      # lidar clearing its own cells never erases nvblox's memory.
+      lidar_layer:
+        plugin: nav2_costmap_2d::ObstacleLayer
+        enabled: true
+        footprint_clearing_enabled: true
+        max_obstacle_height: 0.30
+        observation_sources: scan
+        scan:
+          topic: /scan
+          data_type: LaserScan
+          marking: true
+          clearing: true
+          # the scan is at z 0.25 in odom (the laser plane, description/)
+          min_obstacle_height: 0.0
+          max_obstacle_height: 0.30
+          # nothing of the rover's own is in the plane; 0.20 keeps a stray
+          # return off the chassis from marking the rover's own cell
+          obstacle_min_range: 0.20
+          obstacle_max_range: 6.0
+          raytrace_min_range: 0.20
+          raytrace_max_range: 8.0
+          inf_is_valid: false
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         enabled: true

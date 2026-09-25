@@ -562,8 +562,10 @@ left. The difference is deliberate in some places and a known gap in others.
 
 ## 9. Before anything drives
 
-- **A human watches, every time.** The rover is blind below 10 cm, above 24 cm,
-  outside 87°, and **downward** — there is no drop-off detection at all.
+- **A human watches, every time.** The rover cannot see anything flatter than
+  5 cm, anything low beside or behind it that the camera never faced (the
+  LiDAR sees all round, but only at 25 cm), or **downward**: there is no
+  drop-off detection at all.
 - **Tapping MANUAL on the phone cancels the active nav2 goal.** That is the stop.
 - **Studio can drive.** With ROS sourced, a `navigate` turn typed into the
   browser publishes real `/cmd_vel` — `/studio_bridge` sits alongside

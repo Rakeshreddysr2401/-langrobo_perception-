@@ -98,7 +98,7 @@ MAX_CORRECTION_M = 5.0
 CAM_YAW_DEG_DEFAULT = 2.06
 
 
-def base_from_optical(cam_x, cam_y, cam_z, cam_yaw_deg=0.0):
+def base_from_optical(cam_x, cam_y, cam_z, cam_yaw_deg=0.0, R_mount=None):
     """The B matrix above: optical (x right, y down, z fwd) -> base (x fwd, y left, z up).
 
     Columns of M are where each optical axis lands in base coordinates:
@@ -109,6 +109,9 @@ def base_from_optical(cam_x, cam_y, cam_z, cam_yaw_deg=0.0):
     cam_yaw_deg corrects the camera not being square on its bracket. It rotates
     the camera's axes about base z; the translation is the physically measured
     mount position and is NOT rotated with it.
+
+    R_mount is base_link <- camera0_link's rotation from TF (the measured roll
+    and pitch, description/params.yaml). None means level.
     """
     M = np.array([[0.0, 0.0, 1.0],
                   [-1.0, 0.0, 0.0],
@@ -118,7 +121,7 @@ def base_from_optical(cam_x, cam_y, cam_z, cam_yaw_deg=0.0):
                    [math.sin(a), math.cos(a), 0.0],
                    [0.0, 0.0, 1.0]])
     B = np.eye(4)
-    B[:3, :3] = Rz @ M
+    B[:3, :3] = Rz @ (np.eye(3) if R_mount is None else R_mount) @ M
     B[:3, 3] = [cam_x, cam_y, cam_z]
     return B
 
@@ -253,10 +256,10 @@ def main():
             self.ns = g('camera_ns')
             self.publish_tf = g('publish_tf')
             self.want_slam = g('slam')
-            cam = (g('cam_x'), g('cam_y'), g('cam_z'))
+            cam, R_mount = (g('cam_x'), g('cam_y'), g('cam_z')), None
             if g('cam_from_tf'):
-                cam = self._camera_from_tf(g('camera_frame'), cam)
-            self.B = base_from_optical(*cam, g('cam_yaw_deg'))
+                cam, R_mount = self._camera_from_tf(g('camera_frame'), cam)
+            self.B = base_from_optical(*cam, g('cam_yaw_deg'), R_mount)
             self.Binv = np.linalg.inv(self.B)
 
             self.bridge = CvBridge()
@@ -354,15 +357,17 @@ def main():
                 self.get_logger().error(
                     f'no base_link -> {frame} after 15 s; using the built-in {fallback}. '
                     'Is robot_state_publisher up? (./rover pose starts it)')
-                return fallback
-            q = tf.rotation
-            if max(abs(q.x), abs(q.y), abs(q.z)) > 1e-3:
-                self.get_logger().warn(
-                    f'base_link -> {frame} is rotated ({q.x:.3f} {q.y:.3f} {q.z:.3f} {q.w:.3f}); '
-                    'only its translation is used')
+                return fallback, None
+            x, y, z, w = tf.rotation.x, tf.rotation.y, tf.rotation.z, tf.rotation.w
+            R = np.array([[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+                          [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+                          [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]])
             cam = (tf.translation.x, tf.translation.y, tf.translation.z)
-            self.get_logger().info('camera mount from TF: x %.4f y %+.4f z %.4f' % cam)
-            return cam
+            roll = math.atan2(R[2, 1], R[2, 2])
+            pitch = -math.asin(max(-1.0, min(1.0, R[2, 0])))
+            self.get_logger().info('camera mount from TF: x %.4f y %+.4f z %.4f, roll %+.2f pitch %+.2f deg'
+                                   % (*cam, math.degrees(roll), math.degrees(pitch)))
+            return cam, R
         def _left_info(self, m):
             self.left_info = m
 
