@@ -294,6 +294,34 @@ ssh 192.168.1.16 'pkill -f teleop_web.py'
 A stale `ROS_DISCOVERY_SERVER`. `./rover` unsets it on every command; if you are
 running something by hand, do the same.
 
+### An obstacle stays in RViz after the person has gone
+
+Pink cells with the light-blue inflation ring, in FRONT of a standing rover,
+still there after whoever made them walked off (owner, 2026-09-26). The local
+costmap is the per-cell max of the camera layer (nvblox, which never forgets
+on purpose: that is how a low object stays in the map once it is too close to
+see) and the LiDAR layer (cleared by raytracing). **Run this while the blob is
+on screen**; it says which layer holds each lethal cell ahead:
+
+```bash
+docker exec rover bash -lc 'unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE; \
+  export ROS_DOMAIN_ID=0; source /opt/ros/jazzy/setup.bash; python3 /opt/rover3/tools/ghost_check.py'
+```
+
+`live` = the LiDAR sees it now; `camera memory` = only nvblox's planning slice
+has it (a low object, or a person nvblox has not yet seen leave); `stuck in the
+LiDAR layer` = no beam has crossed it since.
+
+Measured 2026-09-26, three walk-ins (a pass; 15 s standing facing a door at
+2 m; standing facing open space beyond the camera's 3 m reach): **every one
+cleared**, nvblox within ~2 s. Two things were seen that are not yet
+explained: the costmap cleared in steps up to **~14 s** after nvblox had, and
+twice the costmap ended a test 150-400 lethal cells BELOW where it started --
+stale cells from earlier, flushed by the walk-in, that nvblox's own grid did
+not hold. The next stuck blob, caught with the checker, decides which layer
+to change. Turning nvblox's decay back on is NOT the fix to reach for: it also
+forgets low obstacles (nvblox.launch.py, DO NOT LET THE MAP FORGET).
+
 ---
 
 ## 6. Flashing the ESP32
