@@ -576,8 +576,8 @@ nav)
   echo "      Spin recovery and rotate-to-heading are ON since TODO 40 — the"
   echo "      pivot fault (TODO 14) was fixed on 2026-08-22. Recovery order is"
   echo "      clear costmaps → spin +90° → back up 0.30 m → spin −90° → wait."
-  echo "      Narrowest gap the planner will accept is 0.40 m; the rover is"
-  echo "      0.38 m wide, so margin is 1 cm/side. Watch it near doorways."
+  echo "      Footprint 36 x 38 cm + 5 cm padding: the planner needs a gap over"
+  echo "      ~0.46 m in its 5 cm cells (a real 48 cm gap is borderline)."
   dexec "ros2 launch $SRC3/launch/nav2.launch.py > /tmp/nav.log 2>&1"
   sleep 20
   echo

@@ -441,7 +441,13 @@ global_costmap:
           obstacle_max_range: 6.0
           raytrace_min_range: 0.20
           raytrace_max_range: 8.0
-          inf_is_valid: false
+          # true from false, 2026-09-26: the C1 reports inf where no echo came
+          # back (95 of 720 beams in a room). With false those beams clear
+          # nothing, so a mark left by a person or by carrying the rover stays
+          # forever along any no-echo direction -- it closed a 48 cm gap the
+          # rover fits through (LOCALIZATION.md §13). true: inf clears out to
+          # raytrace_max_range and marks nothing.
+          inf_is_valid: true
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         enabled: true
@@ -600,7 +606,13 @@ local_costmap:
           obstacle_max_range: 6.0
           raytrace_min_range: 0.20
           raytrace_max_range: 8.0
-          inf_is_valid: false
+          # true from false, 2026-09-26: the C1 reports inf where no echo came
+          # back (95 of 720 beams in a room). With false those beams clear
+          # nothing, so a mark left by a person or by carrying the rover stays
+          # forever along any no-echo direction -- it closed a 48 cm gap the
+          # rover fits through (LOCALIZATION.md §13). true: inf clears out to
+          # raytrace_max_range and marks nothing.
+          inf_is_valid: true
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         enabled: true
