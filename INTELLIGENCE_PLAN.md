@@ -246,7 +246,28 @@ Still to grade: "go near the chair" through reach, including one tight gap.
 Seen once, not reproduced: a captured frame that PIL could not open (the
 tool reports it as a vision-model error).
 
-## 6. Recommendation
+## 6. Open bugs and gaps, end of 2026-09-26
+
+After B1 + B2 + B3 on the floor. Ordered by what hurts most.
+
+| # | what | evidence | next step |
+|---|---|---|---|
+| 1 | **The Jetson is CPU-bound, and the camera pays for it** | every core 76-88%; the D555 driver 72-82% and logging "callback took too long"; depth stopped for up to 9 s (in the frames' own stamps); `/odom` stamped 50 ms apart arrived 0.6-441 ms apart. Dropping idle depth subscriptions helped (22 -> 28 Hz, no stall > 0.5 s in 45 s), one sample | measure a longer run; the Python nodes left: fusion2 ~40%, lidar_odom ~38%, gyro ~29%, goal_exec / reach ~27% idle (likely their TF listeners at 66 Hz), pixel_to_goal ~25%, image_bridge ~21% |
+| 2 | **The gyro rides the camera's link** (LOCALIZATION_GAPS G12) | the same link just stalled for 9 s; fusion2 publishes the pose from the gyro callback, so a camera stall can stop the pose, and goal_exec pauses | an IMU on the ESP32 or the Jetson; until then, fusion2 keeps publishing on LiDAR + wheels |
+| 3 | **The VLM is slow and loose** | Gemma 4 12B: 6-40 s a call; y off by up to 45 px (worked around with boxes); "bottle" not found where "the orange bottle" was | B4: a detector on the idle GPU for COCO things; VLM for descriptions and confirmation |
+| 4 | **The checker's "gone" path is only unit-tested** | the floor test ran "still there" only | remove the bottle, ask again |
+| 5 | **Obstacles that linger in the costmap** (owner) | not reproduced in 3 walk-ins; the costmap cleared in steps up to ~14 s after nvblox, and twice dropped 150-400 stale cells mid-test | catch one live with `phase3/tools/ghost_check.py` (OPERATIONS.md §5) |
+| 6 | Turns land slightly short; slides are large | 6/6 within 2° but all ~1.3° short; the 180° turn slid 34 cm | tighten TURN_TOL once the coast is modelled; the slide is the pivot (battery) |
+| 7 | Memory is narrow | written only by locate / approach, not by `look()`; two matching objects -> the best match only; no re-check on arrival; entries expire after 1 h | B5: every look lists what it sees; re-check on arrival |
+| 8 | Studio and the Telegram brain run the same graph | both can drive; only agent_node gets nav-done; Studio's stale run queue survived restarts via orphaned workers | kill the whole process tree on restart (the rover-start skill still says `pkill`); one brain at a time |
+| 9 | `./rover up` exited 7 right after starting Studio | the laptop RViz step never ran; started by hand | not investigated |
+| 10 | Seen once, not reproduced | a captured frame PIL could not open; a Pi 5 ssh drop mid-run | watch |
+
+Still open from LOCALIZATION_GAPS: depth time offset unmeasured (G8), wheel
+ticks unstamped (G6), Pi 5 clock ahead of the Jetson (G9). Still ahead in
+this plan: B4 (fast detector), B5 (smart search), B6 (learning loop).
+
+## 7. Recommendation
 
 Start with **B1 + B2** together: both are small, both are pure integration of
 things that already exist, and together they remove the rotating, the
