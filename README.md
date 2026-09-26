@@ -23,6 +23,7 @@ that. Built one tested layer at a time; every claim below is measured.
 Numbers and how each was measured: [LOCALIZATION.md](LOCALIZATION.md).
 What is still missing, measured: [LOCALIZATION_GAPS.md](LOCALIZATION_GAPS.md).
 The roadmap: [SENSOR_FUSION_PLAN.md](SENSOR_FUSION_PLAN.md) §8.
+Making the brain use all this (object memory, exact moves, fast detection, learning): [INTELLIGENCE_PLAN.md](INTELLIGENCE_PLAN.md).
 
 ## The repo
 
