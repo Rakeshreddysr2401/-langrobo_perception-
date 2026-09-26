@@ -2,6 +2,9 @@
 """goal_exec_node.py — exact (x, y, θ) moves, live (SENSOR_FUSION_PLAN.md M4).
 
     /goal_exec/goal     geometry_msgs/PoseStamped   frame odom or map
+    /goal_exec/pass     std_msgs/String JSON {x, y, th, frame, L, margin, vx}:
+                        a pass through a tight gap (goal_exec.py PASS MODE;
+                        sent by ./rover pass, which finds the gap)
     /goal_exec/cancel   std_msgs/Empty
         -> /cmd_vel             while a goal is active, and a stop when it ends
            /goal_exec/status    JSON, every change: state, result, why, errors
@@ -12,6 +15,9 @@ The logic is phase3/nodes/goal_exec.py, the class the simulator proved
 INPUTS, and why each
     /odom           fusion2: LiDAR-anchored, ~0.3 cm. The controller's pose.
     /scan           the swept-outline and corridor checks (base_link points)
+    depth camera    + what it sees at the rover's height, 1 cm, remembered in
+                    odom (depth_obstacles.py): the LiDAR's one plane at 25 cm
+                    misses low things and passes between a stool's legs
     /fusion/status  the pose's own confidence. The rover does not move on a
                     pose it cannot trust: LiDAR unhealthy, or sd > 3 cm, or
                     the status silent, and it PAUSES (zero command); after
@@ -44,10 +50,12 @@ from std_msgs.msg import Empty, String
 from tf2_ros import Buffer, TransformListener
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from depth_obstacles import DepthObstacles  # noqa: E402
 from goal_exec import GoalExec, wrap  # noqa: E402
 
 PIVOT_FILE = Path('/logs/goal_exec_pivot.json')
 SD_MAX_CM = 3.0
+DEPTH_STALE_S = 1.0             # pass mode stops without a camera update this recent
 PAUSE_S = 5.0
 
 
@@ -76,10 +84,13 @@ class GoalExecNode(Node):
         self.create_subscription(LaserScan, '/scan', self._scan, qos_profile_sensor_data)
         self.create_subscription(String, '/fusion/status', self._fstatus, 10)
         self.create_subscription(PoseStamped, '/goal_exec/goal', self._goal, 10)
+        self.create_subscription(String, '/goal_exec/pass', self._pass, 10)
         self.create_subscription(Empty, '/goal_exec/cancel', self._cancel, 10)
         self.buf = Buffer()
         self.tfl = TransformListener(self.buf, self)
         self.mount = None
+        self.pass_ = None
+        self.dobs = DepthObstacles(self, self.buf, lambda: self.pose)
         self.get_logger().info(f'goal_exec up; pivot prior {prior}')
 
     # ── inputs ──────────────────────────────────────────────────────────────
@@ -103,13 +114,29 @@ class GoalExecNode(Node):
         own = (p[:, 0] < 0.202) & (p[:, 0] > -0.198) & (np.abs(p[:, 1]) < 0.21)   # the rover itself
         self.pts = p[~own]
 
-    def _goal(self, m):
+    def _pass(self, m):
+        try:
+            d = json.loads(m.data)
+            p = PoseStamped()
+            p.header.frame_id = d.get('frame', 'odom')
+            p.pose.position.x, p.pose.position.y = float(d['x']), float(d['y'])
+            p.pose.orientation.z, p.pose.orientation.w = math.sin(d['th'] / 2), math.cos(d['th'] / 2)
+            pass_ = dict(L=float(d['L']), margin=float(d['margin']), vx=float(d['vx']))
+        except (ValueError, KeyError, TypeError) as e:
+            self._say('refused', f'bad pass request: {e}')
+            return
+        if pass_['margin'] < 0.02 or pass_['vx'] > 0.08:
+            self._say('refused', 'a pass needs margin >= 0.02 m and vx <= 0.08 m/s')
+            return
+        self._goal(p, pass_)
+
+    def _goal(self, m, pass_=None):
         self.goal_msg = m
         g = self._goal_in_odom()
         if g is None:
             self._say('refused', f'no transform {m.header.frame_id} -> odom')
             return
-        self.ex.set_goal(g)
+        self.ex.set_goal(g, pass_=pass_)
         self.paused_since = None
         self.get_logger().info(f'goal ({g[0]:.3f}, {g[1]:.3f}, {math.degrees(g[2]):.1f} deg) in odom '
                                f'from {m.header.frame_id}')
@@ -157,7 +184,17 @@ class GoalExecNode(Node):
             if g is not None:
                 self.ex.goal = np.array(g)
                 self.ex.u = np.array([math.cos(g[2]), math.sin(g[2])])
-        vx, wz = self.ex.step(time.time(), self.pose, self.pts)
+        if self.ex.pass_ and self.dobs.age() > DEPTH_STALE_S:
+            # a pass is judged on the camera as much as the LiDAR (a stool's
+            # legs are camera-only): no fresh camera view, no pass
+            self.ex.cancel(f'depth camera view {self.dobs.age():.1f} s old: not passing blind')
+            self._finish()
+            return
+        pts = self.pts
+        dp = self.dobs.points_base(self.pose)
+        if len(dp):
+            pts = dp if pts is None else np.vstack([pts, dp])
+        vx, wz = self.ex.step(time.time(), self.pose, pts)
         if self.ex.state == 'done':
             self._finish()
             return
@@ -196,6 +233,9 @@ class GoalExecNode(Node):
 
     def _report(self, force=False, extra=None):
         d = {'state': self.ex.state, 'result': self.ex.result, 'why': self.ex.why, 'tries': self.ex.tries}
+        if self.ex.pass_:
+            d['pass'] = True
+            d['contacts'] = [list(x) for x in self.ex.log[-3:]]
         if self.ex.goal is not None and self.pose is not None:
             g = self.ex.goal
             d['err_cm'] = round(math.hypot(g[0] - self.pose[0], g[1] - self.pose[1]) * 100, 1)

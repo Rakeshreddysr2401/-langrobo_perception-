@@ -46,6 +46,21 @@ SAFETY, before each primitive and while it runs
     drive  : the outline + MARGIN swept along the leg, against the scan
     always : no progress for STALL_S -> stop; pose unsure (caller says) -> stop
     A refusal ends the goal with the reason; the caller decides what next.
+
+PASS MODE (./rover pass): a straight crawl through a tight gap
+    set_goal(end_pose, pass_=dict(L=..., margin=0.03, vx=0.05)): the goal line
+    is the gap's centre line, the pre-goal L before the goal is in front of the
+    gap, and the approach is the pass. Differences from a normal goal:
+      - the approach is checked along the LINE (where the rover will be once
+        it has steered onto it), outline + the pass margin (owner: 3 cm), not
+        along the body's current heading;
+      - every step, anything within CONTACT of the outline, ahead in the
+        direction of travel or beside it, stops the leg; it then backs up
+        along the line to the pre-goal and tries again (MAX_TRIES);
+      - line speed capped at the pass vx; turns and the pre-goal manoeuvre
+        keep the normal 5 cm margin;
+      - done within 3 cm / 3 deg at the end: past the gap, a final pivot
+        next to its edges is the riskiest move left, so it is not made.
 """
 import math
 
@@ -92,6 +107,7 @@ class GoalExec:
     RUNWAY = 0.20         # m   minimum approach length to steer out cross-track
     MAX_LEG = 1.5         # m   longer moves belong to nav2
     STALL_S = 6.0
+    CONTACT = 0.012       # m   pass mode: this close to the outline stops the leg
 
     def __init__(self, P_prior=None):
         # the learned pivot, per turn direction. A prior (the node saves what
@@ -110,6 +126,9 @@ class GoalExec:
         self.goal = None
         self.tries = 0
         self.log = []
+        self.pass_ = None
+        self.backoff = False
+        self.backing = False
 
     # ── the learned slide ───────────────────────────────────────────────────
     def learn_pivot(self, p0, p1):
@@ -170,8 +189,54 @@ class GoalExec:
             return False, f'obstacle {float(np.min(x[hit]) - edge):.2f} m into the {abs(dist):.2f} m leg'
         return True, ''
 
+    def line_clear(self, pts, pose, a0, a1, m):
+        """Pass mode: the outline + m swept ALONG THE GOAL LINE from along a0 to
+        a1, against points (base_link) -> world -> line coordinates."""
+        if pts is None or len(pts) == 0:
+            return True, ''
+        c, s = math.cos(pose[2]), math.sin(pose[2])
+        w = np.stack([pose[0] + c * pts[:, 0] - s * pts[:, 1], pose[1] + s * pts[:, 0] + c * pts[:, 1]], 1)
+        d = w - self.goal[:2]
+        al = d @ self.u
+        cr = self.u[0] * d[:, 1] - self.u[1] * d[:, 0]
+        lo, hi = min(a0, a1) - REAR, max(a0, a1) + FRONT
+        hit = (al > lo - m) & (al < hi + m) & (np.abs(cr) < SIDE + m)
+        if hit.any():
+            k = int(np.argmin(np.abs(cr) + 10 * ~hit))
+            return False, (f'the gap is too tight: something {abs(cr[k]) - SIDE:+.3f} m from the '
+                           f'side of the line at {al[k] - a0:.2f} m (margin {m:.2f})')
+        return True, ''
+
+    def contact(self, pts, sgn, beside=True):
+        """Pass mode, every step: anything within CONTACT of the outline, ahead
+        in the direction of travel or beside the body."""
+        if pts is None or len(pts) == 0:
+            return ''
+        x, y = pts[:, 0], np.abs(pts[:, 1])
+        c = self.CONTACT
+        ahead = (x * sgn > (FRONT if sgn > 0 else REAR)) & (x * sgn < (FRONT if sgn > 0 else REAR) + c + 0.02) & (y < SIDE + c)
+        side = (x < FRONT) & (x > -REAR) & (y > SIDE - 0.01) & (y < SIDE + c)
+        if ahead.any():
+            return 'contact ahead'
+        if beside and side.any():
+            return 'contact beside'
+        return ''
+
     # ── goals ───────────────────────────────────────────────────────────────
-    def set_goal(self, goal):
+    def set_goal(self, goal, pass_=None):
+        """pass_: None, or dict(L, margin, vx) for a pass (see PASS MODE)."""
+        self.pass_ = pass_
+        self.backoff = False
+        self.log = []
+        cls = type(self)
+        if pass_:
+            self.L = float(pass_['L'])
+            self.L_MAX = self.L + 0.10
+            self.POS_TOL, self.YAW_TOL = 0.03, math.radians(3.0)
+            self.LINE_OK = 0.05
+        else:
+            self.L, self.L_MAX, self.POS_TOL, self.YAW_TOL, self.LINE_OK = (
+                cls.L, cls.L_MAX, cls.POS_TOL, cls.YAW_TOL, cls.LINE_OK)
         self.goal = np.array(goal, dtype=float)
         self.u = np.array([math.cos(self.goal[2]), math.sin(self.goal[2])])   # the goal line
         self.tries = 0
@@ -248,6 +313,11 @@ class GoalExec:
                      and -self.L_MAX <= along <= 0.10)
         if err <= self.POS_TOL:
             self._start_turn(t, pose, g[2], 'final')                 # 4. heading only
+        elif self.backoff and near_line:
+            # pass mode, after a contact stop: out the way it came, then again
+            self.backoff = False
+            self._backing_next = True
+            self._start_line(t, pose, self.goal[:2] - self.L * self.u)
         elif near_line and (along <= -self.RUNWAY or abs(cross) <= self.POS_TOL):
             # 2. approach along the line; the runway is where cross-track error
             #    gets steered out, so it needs some length unless already on it
@@ -308,6 +378,7 @@ class GoalExec:
 
     def _start_line(self, t, pose, point):
         """Drive along the GOAL LINE (heading = goal th) to `point` on it."""
+        self.backing, self._backing_next = getattr(self, '_backing_next', False), False
         along_now, _ = self.line_coords(pose)
         along_to = float((point - self.goal[:2]) @ self.u)
         self.line_mode = True
@@ -340,12 +411,25 @@ class GoalExec:
         rel = pose[:2] - self.leg_origin
         cross = float(self.leg_dir[0] * rel[1] - self.leg_dir[1] * rel[0])   # + left of the line
         sgn = -1.0 if self.rev else 1.0
+        passing = self.pass_ and self.line_mode
         if not self._checked:
-            ok, why = self.drive_clear(pts, sgn * max(left, 0.0))
+            if passing:
+                a_now, _ = self.line_coords(pose)
+                a_to = float((self.aim - self.goal[:2]) @ self.u)
+                ok, why = self.line_clear(pts, pose, a_now, a_to, self.pass_['margin'])
+            else:
+                ok, why = self.drive_clear(pts, sgn * max(left, 0.0))
             if not ok:
                 self._finish('refused', why)
                 return 0.0, 0.0
             self._checked = True
+        if passing:
+            hit = self.contact(pts, sgn, beside=not self.backing)
+            if hit:
+                self.log.append((t, hit, round(cross, 3)))
+                self.backoff = not self.backing
+                self.state = 'plan'              # stop; _plan backs out along the line and retries
+                return 0.0, 0.0
         if left <= self.ARRIVE:
             if self.after_leg == 'toline':
                 self._start_turn(t, pose, self.goal[2], 'align')
@@ -357,7 +441,8 @@ class GoalExec:
         if t - self.best_t > self.STALL_S:
             self._finish('stalled', f'drive stuck {left * 100:.1f} cm short')
             return 0.0, 0.0
-        v = max(self.VX_MIN, min(self.VX_MAX, math.sqrt(2 * self.ACC * left)))
+        vmax = self.pass_['vx'] if passing else self.VX_MAX
+        v = max(self.VX_MIN, min(vmax, math.sqrt(2 * self.ACC * left)))
         # hold the heading and steer onto the line. The SAME sign forward and
         # reversing: turning the body clockwise turns the direction of TRAVEL
         # clockwise either way. (Two earlier versions flipped it for reverse

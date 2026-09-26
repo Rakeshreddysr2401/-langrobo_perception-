@@ -53,7 +53,11 @@ def generate_launch_description():
                 # on. The dynamic modes track moving objects and cost more; the
                 # room is not moving.
                 'mapping_type': 'static_tsdf',
-                'voxel_size': 0.05,
+                # 0.025 from 0.05, 2026-09-26: at 5 cm a cell an edge touches is
+                # solid, so a ~50 cm gap read 40-45 cm and nav2 refused a gap the
+                # rover fits (LOCALIZATION.md §13). 2.5 cm halves that; RAM
+                # unchanged at 5.3 of 7.5 GB (blocks exist only near surfaces).
+                'voxel_size': 0.025,
 
                 'publish_esdf_distance_slice': True,
                 'esdf_mode': '2d',

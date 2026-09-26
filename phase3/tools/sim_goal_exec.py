@@ -71,8 +71,9 @@ class Rover:
                                   self.rng.normal(0, math.radians(0.2))])
 
 
-def scan(pose, segs, rng):
-    """720 beams from the laser; hits on the room's segments, as base_link points."""
+def scan(pose, segs, rng, noise=0.01):
+    """720 beams from the laser; hits on the room's segments, as base_link points.
+    noise: range sd, m. Measured on the C1, 2026-09-26: 1-3 mm under 1.5 m."""
     lx, ly = LASER
     ox, oy = pose[:2] + R(pose[2]) @ np.array([lx, ly])
     a = pose[2] + np.linspace(-math.pi, math.pi, 720, endpoint=False)
@@ -87,7 +88,7 @@ def scan(pose, segs, rng):
         ok = (np.abs(den) > 1e-9) & (tt > 0.05) & (uu >= 0) & (uu <= 1)
         best = np.where(ok & (tt < best), tt, best)
     hit = np.isfinite(best) & (best < 8)
-    r = best[hit] + rng.normal(0, 0.01, hit.sum())
+    r = best[hit] + rng.normal(0, noise, hit.sum())
     wx, wy = ox + r * dx[hit], oy + r * dy[hit]
     return (np.stack([wx - pose[0], wy - pose[1]], 1)) @ R(pose[2])       # into base_link
 

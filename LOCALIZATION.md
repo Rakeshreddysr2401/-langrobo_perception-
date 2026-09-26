@@ -710,5 +710,49 @@ checker is 10 cm / 14° by design; the exact part is goal_exec's.
 | return to start, `--exact`, wires cleared | succeeded in 15.8 s, 4.9 cm from the pre-goal | **reached 1.3 cm / 0.5°** | fused within **0.1 cm / 0.1°** of truth, so ~1.3 cm real; wheels alone 13.4 cm / 18° |
 
 So nav2 drives correctly on fusion2 (TF, costmaps, LiDAR layer), and the route
-+ exact-finish split works. **Not yet shown:** gaps (fits vs refuses), a route
-around an obstacle, approaching an object, a repeat of the 80 s near-goal stall.
++ exact-finish split works.
+
+### Tight gaps: why nav2 refused one the rover fits, and the precise pass
+
+A gap between a wall and a stool, the owner's tape: "nearly 48 cm". The rover
+is 38 cm; nav2 plans with 5 cm padding (needs > ~46 cm of map gap).
+
+What refused it, in the order found:
+
+| cause | evidence | fix |
+|---|---|---|
+| camera map remembered the owner's legs from carrying the rover in | a "thick wall" and an object on the centre line vanished when nvblox restarted | forget-over-time: **open** (decay was disabled 2026-08-22 because 5 Hz erased a room mid-loop; a slow rate needs measuring) |
+| LiDAR marks along no-echo beams never cleared | 95 of 720 beams are `inf` in this room; `inf_is_valid: false` clears nothing along them | `inf_is_valid: true` (committed) |
+| the owner's foot while watching | the object moved 1.0 → 0.9 m ahead between looks; gone when they stepped back | - |
+| 5 cm cells round each edge inward | raw depth points (1 cm) put the gap at ~50 cm; the 5 cm slice at 40-45 | nvblox voxel + costmaps 0.05 → **0.025** (RAM unchanged, 5.3 / 7.5 GB) |
+| the stool's legs splay: narrower at floor height than the seat | at 5-27 cm the pass tool measured the legs-to-wall-corner gap at ~40-45 cm | the owner moved the stool: ~55 cm at the floor |
+
+Even at 2.5 cm and 3-4 cm padding, nav2 found no path through (its only paths
+were an 11 m detour through never-seen floor, `allow_unknown: true`). A
+planner on a cell map with the whole padded outline kept clear is the wrong
+tool for a gap within a few cm of the rover's width. Hence the **precise
+pass** (`./rover pass`, owner's margin 3 cm):
+
+- measure: LiDAR + depth at the rover's height (5-27 cm, 1 cm voxels,
+  remembered in odom, forgotten when seen through: `depth_obstacles.py`);
+  every straight line ±35° through a strip bounded on BOTH sides and passing
+  within 25 cm of the rover; widest wins. Needs 38 + 2 x 3 = 44 cm.
+- drive: goal_exec pass mode: line up (turn, straight, turn, 5 cm margin),
+  then crawl the line at 5 cm/s, checked along the line at 3 cm; any point
+  within 1.2 cm of the outline stops it, it backs out along the line and
+  retries. No fresh camera view (1 s) -> no pass.
+
+Simulated (`phase3/tools/sim_gap_pass.py`, three pack conditions, the C1's
+measured 1-3 mm range noise): 50 and 48 cm pass every time without a touch,
+centred to 2 mm; 43 cm refused every time; 46 cm is the boundary (1 cm of
+slack per side is the size of the pose + point error) and either answer
+comes back, never a touch.
+
+| live run (2026-09-26) | measured | result | LiDAR truth |
+|---|---|---|---|
+| gap ~48 cm (tape), legs splayed | 37.5 cm along the rover's heading | **refused** (needs 44) | - |
+| gap ~55 cm (tape at floor) | 57-60 cm, lane 13 cm | lined up in 7 s, crawled 1.3 m in 29 s: **reached 1.1 cm / 0.8°**, no contact stops | fused within 0.7 cm / 0.3° |
+
+**Not yet shown:** gaps at 50 / 47 / 45 cm live (the limit), nav2 bringing the
+rover to the gap's mouth first, a route around an obstacle, approaching an
+object, a repeat of the 80 s near-goal stall, the camera map's forgetting.
