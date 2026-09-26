@@ -34,3 +34,4 @@ lidar/ws/
 # graded numbers that matter are copied into docs with the run's name.
 logs/bags/
 logs/calib/
+logs/goal_exec_pivot.json
