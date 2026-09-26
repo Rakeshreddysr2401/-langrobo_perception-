@@ -24,6 +24,7 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
+from launch.actions import Shutdown
 from launch_ros.actions import Node
 
 CONFIG = '/opt/rover3/config/nav2.yaml'
@@ -38,14 +39,26 @@ LIFECYCLE = [
 ]
 
 
+# ONE DIES, ALL STOP, since 2026-09-26: planner_server segfaulted (exit -11)
+# after live footprint_padding changes and nothing noticed -- the global
+# costmap lives in that process, so RViz showed a frozen map while the rest of
+# nav2 ran. nav2's own respawn (respawn=True + attempt_respawn_reconnection)
+# was tried and left the lifecycle manager stuck mid-reset: planner
+# unconfigured, controller active, navigator inactive. So any node exiting
+# now ends this launch, and phase3/launch/nav2_supervise.sh (./rover nav)
+# starts nav2 again from scratch, which always comes up clean.
+# Do not change the footprint live: restart nav2.
+STOP_ALL = dict(on_exit=[Shutdown(reason='a nav2 node exited')])
+
+
 def generate_launch_description():
     common = {'use_sim_time': False}
     nodes = [
         Node(package='nav2_controller', executable='controller_server',
-             name='controller_server', output='screen', parameters=[CONFIG],
+             name='controller_server', output='screen', **STOP_ALL, parameters=[CONFIG],
              remappings=[('cmd_vel', 'cmd_vel_nav')]),
         Node(package='nav2_planner', executable='planner_server',
-             name='planner_server', output='screen', parameters=[CONFIG]),
+             name='planner_server', output='screen', **STOP_ALL, parameters=[CONFIG]),
         # behavior_server ALSO goes through the smoother. It publishes to
         # `cmd_vel` by default, which on this rover is the wheels -- so every
         # recovery was a step change straight into the PID, bypassing the very
@@ -54,21 +67,21 @@ def generate_launch_description():
         # 1.5 rad/s from a standstill, which is exactly the slip that corrupts
         # the odometry nav2 is steering by. Remapped 2026-09-11, TODO 40.
         Node(package='nav2_behaviors', executable='behavior_server',
-             name='behavior_server', output='screen', parameters=[CONFIG],
+             name='behavior_server', output='screen', **STOP_ALL, parameters=[CONFIG],
              remappings=[('cmd_vel', 'cmd_vel_nav')]),
         Node(package='nav2_bt_navigator', executable='bt_navigator',
-             name='bt_navigator', output='screen', parameters=[CONFIG]),
+             name='bt_navigator', output='screen', **STOP_ALL, parameters=[CONFIG]),
         # The smoother sits between the controller and the wheels, so the
         # controller publishes cmd_vel_nav and only smoothed output reaches
         # /cmd_vel. Without it a step change in commanded velocity goes straight
         # to the PID, and on a skid-steer that is how you get wheel slip -- which
         # corrupts the very odometry nav2 is steering by.
         Node(package='nav2_velocity_smoother', executable='velocity_smoother',
-             name='velocity_smoother', output='screen', parameters=[CONFIG],
+             name='velocity_smoother', output='screen', **STOP_ALL, parameters=[CONFIG],
              remappings=[('cmd_vel', 'cmd_vel_nav'),
                          ('cmd_vel_smoothed', 'cmd_vel')]),
         Node(package='nav2_lifecycle_manager', executable='lifecycle_manager',
-             name='lifecycle_manager_navigation', output='screen',
+             name='lifecycle_manager_navigation', output='screen', **STOP_ALL,
              parameters=[{'use_sim_time': False,
                           'autostart': True,
                           'node_names': LIFECYCLE}]),

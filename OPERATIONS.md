@@ -228,8 +228,11 @@ it; `./rover drive` plans around it. See [LOCALIZATION.md](LOCALIZATION.md).
 | `bt_navigator` fails: *"spin action server not available"* | a behaviour tree still references Spin. **Both** trees need overriding, `navigate_to_pose` and `navigate_through_poses` |
 | costmap topic silent but the node is fine | `always_send_full_costmap: false` — it only sends deltas after the first full map |
 | `Invalid frame ID "odom"` at startup | a race; the costmaps come up before the TF is flowing and recover |
-| rover sits still after a goal | it was told to rotate in place, which it cannot do. See TODO §14 and the `NO-PIVOT` settings |
+| rover sits still after a goal | stale row: it pivots since 2026-08-22. Look at the recoveries in `./rover logs nav` |
 | goal rejected as unreachable | the GOAL cell is blocked, or the rover is standing in one. `logs/around.py` shows which; `logs/where.py` lists what IS reachable |
+| RViz costmap frozen while the rover moves | a nav2 process died (planner_server hosts the global costmap). nav2 now runs under `nav2_supervise.sh`: any death restarts it whole within ~20 s; restarts are in `/tmp/nav_restarts.log` (in the container) |
+| planner_server segfaults (exit -11) | changing `footprint_padding` live with `ros2 param set`. **Don't**: edit nav2.yaml and `./rover nav` |
+| a gap the rover fits is solid cyan in RViz | cyan = the centre may not go there. A passable gap shows pink edges, cyan bands, and a coloured strip in the middle. Too tight for nav2's 5 cm padding: `./rover pass` (LOCALIZATION.md §13) |
 
 ### RViz shows nothing
 
