@@ -754,6 +754,8 @@ comes back, never a touch.
 | gap ~55 cm (tape at floor) | 57-60 cm, lane 13 cm | lined up in 7 s, crawled 1.3 m in 29 s: **reached 1.1 cm / 0.8°**, no contact stops | fused within 0.7 cm / 0.3° |
 | gap ~50 cm at the floor: **the stool's feet stick out under 5 cm** | 58-60 cm at 5-27 cm, where the legs are | reached 0.9 cm, no stop; the feet were not in the path the camera could see | fused within 0.5 cm / 0.25° |
 
+| same gap, after the low band + look ±25° | **51.5 cm** (the feet counted; the owner's tape: ~50) | lane 7.5 cm: **reached 1.1 cm / 1.0°** | - |
+
 **The feet.** The owner measured 50 cm at the floor; the sensors saw 60 at 5-27
 cm. The camera's band started at 5 cm (floor noise) and the wheels reach the
 floor, so feet under 5 cm were invisible to every check. Measured on free
@@ -765,6 +767,11 @@ closes in, so the pass re-checks the rest of its line every step, stops with
 ±25° each way (the owner's idea), so the camera's 87° sees the gap's sides.
 Flatter than ~2 cm stays invisible (ROVER_BUILD_PLAN: bumper / ToF).
 
-**Not yet shown:** gaps at 50 / 47 / 45 cm live (the limit), nav2 bringing the
-rover to the gap's mouth first, a route around an obstacle, approaching an
+Camera stall during this work: depth and colour stopped (driver "callback took
+too long"; gyro unaffected). Restarting the driver meant restarting pose,
+lidar, fused, slam (SLAM=false pose first), map. The 2.5 cm nvblox now
+integrates ~5 Hz: the first suspect if it recurs.
+
+**Not yet shown:** 47 / 45 cm live (the limit), nav2 bringing the rover to the
+gap's mouth and switching to the pass by itself, a route around an obstacle, approaching an
 object, a repeat of the 80 s near-goal stall, the camera map's forgetting.
