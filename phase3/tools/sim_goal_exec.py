@@ -33,10 +33,10 @@ LASER = (0.1342, 0.0)
 
 
 class Rover:
-    def __init__(self, P, turn_eff, w_dead, rng, lag=0.2):
+    def __init__(self, P, turn_eff, arc, rng, lag=0.2):
         self.x = np.zeros(3)
         self.P = {+1: np.array(P[0]), -1: np.array(P[1])}
-        self.k, self.w_dead, self.lag, self.rng = turn_eff, w_dead, lag, rng
+        self.k, self.arc, self.lag, self.rng = turn_eff, arc, lag, rng
         self.w = 0.0
         self.v = 0.0
 
@@ -45,13 +45,15 @@ class Rover:
         vl, vr = vx - wz * 0.17, vx + wz * 0.17
         if abs(vl) < 0.01 and abs(vr) < 0.01:
             vx, wz = 0.0, 0.0
-        # the scrub is a PIVOT problem: turning in place, small commands do
-        # nothing and big ones reach a fraction. Steering while driving, both
-        # sides roll and an arc follows the command closely.
+        # MEASURED (./rover response, 2026-09-26): in place the rover turns at
+        # 0.52*cmd - 0.21 rad/s (nothing below ~0.4); steering while driving it
+        # follows only ~22% of the command (the first model said 85%, and the
+        # executor tuned on it could not steer on the real floor). self.k
+        # scales the pivot for the pack; self.arc is the arc share.
         if abs(vx) > 0.02:
-            w_cmd = 0.85 * wz
+            w_cmd = self.arc * wz
         else:
-            w_cmd = 0.0 if abs(wz) < self.w_dead else self.k * wz
+            w_cmd = math.copysign(max(0.0, self.k * (0.52 * abs(wz) - 0.21)), wz)
         a = DT / (self.lag + DT)
         self.w += a * (w_cmd - self.w)
         self.v += a * (0.97 * vx - self.v)
@@ -117,9 +119,10 @@ def main():
     rng = np.random.default_rng(seed)
     room = box(0.0, 0.0, 3.2, 3.2)             # walls 1.6 m from the start
     conditions = {
-        'charged (P near centre)':   ([(0.0, 0.03), (0.0, -0.03)], 0.45, 0.5),
-        'weak pack (P left tyres)':  ([(0.017, 0.277), (0.017, 0.277)], 0.30, 0.6),
-        'asymmetric (L != R)':       ([(0.03, 0.12), (-0.02, -0.05)], 0.40, 0.5),
+        # (pivot points, pivot-rate scale, arc share)
+        'charged (P near centre)':   ([(0.0, 0.03), (0.0, -0.03)], 1.0, 0.22),
+        'weak pack (P left tyres)':  ([(0.017, 0.277), (0.017, 0.277)], 0.6, 0.15),
+        'asymmetric (L != R)':       ([(0.03, 0.12), (-0.02, -0.05)], 0.9, 0.20),
     }
     ok_all = True
     for name, (P, eff, wd) in conditions.items():
@@ -147,10 +150,10 @@ def main():
         ok_all &= (good + refused) >= 11 and E.max() < 3.0
     # a turn that must be refused: a box right beside the rover
     blocked = room + box(0.0, 0.33, 0.25, 0.12)
-    out, e, eh, t, ex = run((0.0, 0.0, math.radians(90)), [(0.0, 0.03), (0.0, -0.03)], 0.45, 0.5, rng, blocked)
+    out, e, eh, t, ex = run((0.0, 0.0, math.radians(90)), [(0.0, 0.03), (0.0, -0.03)], 1.0, 0.22, rng, blocked)
     print(f'{"box 3 cm beside, turn 90":28s} {out}: {ex.why}')
     ok_all &= out == 'refused'
-    out, e, eh, t, ex = run((1.2, 0.0, 0.0), [(0.0, 0.03), (0.0, -0.03)], 0.45, 0.5, rng, room + box(0.7, 0.0, 0.2, 0.4))
+    out, e, eh, t, ex = run((1.2, 0.0, 0.0), [(0.0, 0.03), (0.0, -0.03)], 1.0, 0.22, rng, room + box(0.7, 0.0, 0.2, 0.4))
     print(f'{"box in the path, 1.2 m":28s} {out}: {ex.why}')
     ok_all &= out == 'refused'
     print('\nSUITE', 'PASS' if ok_all else 'FAIL')

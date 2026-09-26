@@ -68,24 +68,28 @@ def R(a):
 class GoalExec:
     # limits and gains (tuned in the simulator, then on the rover)
     WZ_MAX = 1.5          # rad/s commanded; the pivot reaches far less (M4 motion data)
-    WZ_MIN = 0.6          # below this the scrub wins and nothing turns
+    WZ_MIN = 1.0          # measured: 0.6 turns at ~0.1 rad/s and stalled a live goal; 1.0 gives ~0.31
+    STOP_LEAD = 0.25      # s   stop a turn this far ahead on the measured rate (it coasts)
     VX_MAX = 0.15         # m/s
     VX_MIN = 0.035        # the firmware drops a side's target under 0.01 m/s
     ACC = 0.10            # m/s^2 planned deceleration: gentle, the drive coasts ~0.2 s after a stop
     K_TH = 2.5            # turn: rad/s per rad of heading error
-    K_HOLD = 3.0          # drive: heading hold
-    K_CT = 4.0            # drive: cross-track pull toward the line
+    # while driving the rover follows only ~22% of a turn command (measured),
+    # so the gains are in COMMAND units and ~4x what a responsive base needs
+    K_HOLD = 10.0         # drive: heading hold
+    K_CT = 15.0           # drive: cross-track pull toward the line
+    WZ_DRIVE = 1.0        # drive: turn-command clip (~0.22 rad/s actual)
     POS_TOL = 0.015       # m   final position
     YAW_TOL = math.radians(1.0)
     FACE_TOL = math.radians(2.0)
     ARRIVE = 0.003        # m   along-track: close enough to stop the leg
     REVERSE_WITHIN = 0.6  # m   a point this close and behind is reached backwards
     MAX_TRIES = 8         # a full correction cycle (pre-goal + approach) is two
-    L = 0.25              # m   pre-goal distance behind the goal, on its line
-    L_MAX = 0.40          # m   the line approach covers at most this
+    L = 0.35              # m   pre-goal distance behind the goal: runway to steer on
+    L_MAX = 0.50          # m   the line approach covers at most this
     LINE_OK = 0.08        # m   cross-track that a line approach can still steer out
     LINE_YAW = math.radians(15)
-    RUNWAY = 0.12         # m   minimum approach length to steer out cross-track
+    RUNWAY = 0.20         # m   minimum approach length to steer out cross-track
     MAX_LEG = 1.5         # m   longer moves belong to nav2
     STALL_S = 6.0
 
@@ -267,6 +271,7 @@ class GoalExec:
         self.best, self.best_t = abs(a), t
         self.state = 'turn'
         self._checked = False
+        self._w_prev = None                      # (t, th) for the measured turn rate
 
     def _turn(self, t, pose, pts):
         e = wrap(self.turn_target - pose[2])
@@ -277,7 +282,13 @@ class GoalExec:
                 return 0.0, 0.0
             self._checked = True
         tol = self.YAW_TOL if self.turn_purpose in ('final', 'align') else self.FACE_TOL
-        if abs(e) <= tol:
+        # the measured turn rate, to stop early by what it will coast
+        w_meas = 0.0
+        if self._w_prev is not None and t > self._w_prev[0]:
+            w_meas = wrap(pose[2] - self._w_prev[1]) / (t - self._w_prev[0])
+        self._w_prev = (t, pose[2])
+        lead = abs(w_meas) * self.STOP_LEAD if w_meas * e > 0 else 0.0
+        if abs(e) <= max(tol, lead):
             self.learn_pivot(self.turn_start, pose)
             if self.turn_purpose == 'face':
                 self._start_leg(t, pose, self.aim, self.rev, hold=None)
@@ -291,9 +302,9 @@ class GoalExec:
         if t - self.best_t > self.STALL_S:
             self._finish('stalled', f'turn stuck {math.degrees(e):+.1f} deg from target')
             return 0.0, 0.0
+        # never below WZ_MIN: under it the scrub wins and the turn stalls
         w = min(self.WZ_MAX, max(self.WZ_MIN, self.K_TH * abs(e)))
-        w = min(w, math.sqrt(2 * 3.0 * abs(e)) + self.WZ_MIN * 0.5)
-        return 0.0, math.copysign(max(w, self.WZ_MIN), e)
+        return 0.0, math.copysign(w, e)
 
     def _start_line(self, t, pose, point):
         """Drive along the GOAL LINE (heading = goal th) to `point` on it."""
@@ -353,5 +364,5 @@ class GoalExec:
         # and drove off the line backwards, simulator 2026-09-26.)
         he = wrap(self.leg_hold - pose[2])
         wz = self.K_HOLD * he - self.K_CT * cross
-        wz = max(-0.8, min(0.8, wz))
+        wz = max(-self.WZ_DRIVE, min(self.WZ_DRIVE, wz))
         return sgn * v, wz
