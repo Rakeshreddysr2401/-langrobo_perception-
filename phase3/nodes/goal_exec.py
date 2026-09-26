@@ -42,8 +42,13 @@ THE SLIDE, LEARNED
 
 SAFETY, before each primitive and while it runs
     turn   : the outline + MARGIN swept about P over the turn, every 3 deg,
-             against the scan
-    drive  : the outline + MARGIN swept along the leg, against the scan
+             against the scan -- at the start, and every step for what is
+             left of the turn
+    drive  : the outline + MARGIN swept along the leg, against the scan --
+             at the start, and every step for what is left of the leg
+             (until 2026-09-26 only at the start: a person stepping in
+             mid-leg was not seen). Mid-motion a block must show on
+             BLOCK_STEPS consecutive steps, so one noisy point cannot stop it.
     always : no progress for STALL_S -> stop; pose unsure (caller says) -> stop
     A refusal ends the goal with the reason; the caller decides what next.
 
@@ -111,6 +116,7 @@ class GoalExec:
     MAX_LEG = 1.5         # m   longer moves belong to nav2
     STALL_S = 6.0
     CONTACT = 0.012       # m   pass mode: this close to the outline stops the leg
+    BLOCK_STEPS = 2       # consecutive blocked steps that stop a turn or leg mid-motion
 
     def __init__(self, P_prior=None):
         # the learned pivot, per turn direction. A prior (the node saves what
@@ -354,6 +360,13 @@ class GoalExec:
                 self._finish('refused', why)
                 return 0.0, 0.0
             self._checked = True
+            self._blocked = 0
+        else:
+            ok, why = self.turn_clear(pts, e)            # what is left of the swing
+            self._blocked = 0 if ok else self._blocked + 1
+            if self._blocked >= self.BLOCK_STEPS:
+                self._finish('refused', 'blocked mid-turn: ' + why)
+                return 0.0, 0.0
         tol = self.YAW_TOL if self.turn_purpose in ('final', 'align') else self.FACE_TOL
         # the measured turn rate, to stop early by what it will coast
         w_meas = 0.0
@@ -426,6 +439,13 @@ class GoalExec:
                 self._finish('refused', why)
                 return 0.0, 0.0
             self._checked = True
+            self._blocked = 0
+        elif not passing:
+            ok, why = self.drive_clear(pts, sgn * max(left, 0.0))   # what is left of the leg
+            self._blocked = 0 if ok else self._blocked + 1
+            if self._blocked >= self.BLOCK_STEPS:
+                self._finish('refused', 'blocked mid-leg: ' + why)
+                return 0.0, 0.0
         if passing and not self.backing:
             # the rest of the line, every step: things low down are seen only
             # once the camera is close (depth_obstacles.py, band floor by

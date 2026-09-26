@@ -1084,6 +1084,8 @@ status)
       "map:/nvblox_node/static_occupancy_grid:1" \
       "nav:/global_costmap/costmap:0.5" \
       "nav:/local_costmap/costmap:1" \
+      "map:/nvblox_node/back_projected_depth/camera0_depth_optical_frame:4" \
+      "exec:/goal_exec/obstacles:1" \
       "vlm:/camera/color/image_raw/compressed:2"; do
     l=${row%%:*}; rest=${row#*:}; t=${rest%:*}; want=${rest##*:}
     r=$(rate_of "$t")
@@ -1096,6 +1098,14 @@ status)
   # ask whether their publisher is alive instead.
   if docker exec "$NAME" pgrep -f '[r]obot_state_publisher' >/dev/null 2>&1; then v="OK"; else v="--"; fi
   printf '  %-9s %-40s %6s  %5s %s\n' frames "robot_state_publisher (description/)" "" "" "$v"
+  # goal_exec (exact moves, its obstacle cloud is the rate row above) and reach
+  # (RViz goals) are processes; nav2 restarts are counted by its supervisor --
+  # a restart means a nav2 node died (today's frozen costmap), so say how many.
+  if docker exec "$NAME" pgrep -f '[r]each_node.py' >/dev/null 2>&1; then v="OK"; else v="--"; fi
+  printf '  %-9s %-40s %6s  %5s %s\n' reach "reach_node (RViz 2D Goal Pose)" "" "" "$v"
+  nr=$(docker exec "$NAME" bash -lc 'wc -l < /tmp/nav_restarts.log 2>/dev/null || echo 0' 2>/dev/null)
+  last=$(docker exec "$NAME" bash -lc 'tail -1 /tmp/nav_restarts.log 2>/dev/null' 2>/dev/null)
+  printf '  %-9s %-40s %6s  %5s %s\n' nav "nav2 restarts by the supervisor" "${nr:-0}" "" "$([ "${nr:-0}" = 0 ] && echo OK || echo "SEE: $last")"
 
   # cuVSLAM can be publishing at 30 Hz and still be lying. It has diverged three
   # times (TODO 21) and the fallback to dead reckoning is SILENT: every rate

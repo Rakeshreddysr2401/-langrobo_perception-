@@ -54,6 +54,7 @@ WAIT_S = 3.0
 NAV_TIMEOUT = 120.0
 PASS_D = 0.9           # m: how far a recovery pass crawls
 MARGIN = 0.03
+NAV_LOG = Path('/tmp/nav.log')
 
 
 def yaw_of(q):
@@ -121,6 +122,10 @@ class Reach(GP.Pass):
     def run_nav2(self, g):
         if not self.nav.wait_for_server(timeout_sec=3):
             return 'failed', 'nav2 not up'
+        try:
+            self.log_from = NAV_LOG.stat().st_size      # only this attempt's lines explain it
+        except OSError:
+            self.log_from = 0
         goal = NavigateToPose.Goal()
         goal.pose = pose_msg('odom', *g)
         goal.pose.header.stamp = self.get_clock().now().to_msg()
@@ -146,13 +151,15 @@ class Reach(GP.Pass):
     def nav_reason(self):
         """What nav2 last complained about (its log is the only place it says)."""
         try:
-            lines = Path('/tmp/nav.log').read_text(errors='ignore').splitlines()[-400:]
+            with NAV_LOG.open('rb') as f:
+                f.seek(getattr(self, 'log_from', 0))
+                text = f.read().decode(errors='ignore')
         except OSError:
             return 'nav2 failed'
         for key, why in (('collision ahead', 'narrow: nav2 path follower saw collision ahead'),
                          ('failed to plan', 'no path: planner found none'),
                          ('patience exceeded', 'stuck: controller patience exceeded')):
-            if any(key in l for l in lines[-120:]):
+            if key in text:
                 return why
         return 'nav2 failed'
 

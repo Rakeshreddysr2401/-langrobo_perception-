@@ -60,6 +60,7 @@ from goal_exec import GoalExec, wrap  # noqa: E402
 PIVOT_FILE = Path('/logs/goal_exec_pivot.json')
 SD_MAX_CM = 3.0
 DEPTH_STALE_S = 1.0             # pass mode stops without a camera update this recent
+SCAN_STALE_S = 0.5              # no scan this recent: the checks would run on a frozen view
 PAUSE_S = 5.0
 
 
@@ -78,6 +79,7 @@ class GoalExecNode(Node):
         self.ex = GoalExec(prior)
         self.pose = None
         self.pts = None
+        self.pts_t = 0.0
         self.fstatus, self.fstatus_t = None, 0.0
         self.goal_msg = None
         self.paused_since = None
@@ -119,6 +121,7 @@ class GoalExecNode(Node):
         p = np.stack([r[ok] * np.cos(a[ok] + yaw) + x, r[ok] * np.sin(a[ok] + yaw) + y], 1)
         own = (p[:, 0] < 0.202) & (p[:, 0] > -0.198) & (np.abs(p[:, 1]) < 0.21)   # the rover itself
         self.pts = p[~own]
+        self.pts_t = time.time()
 
     def _pass(self, m):
         try:
@@ -216,6 +219,8 @@ class GoalExecNode(Node):
         self._report()
 
     def _pose_unsure(self):
+        if time.time() - self.pts_t > SCAN_STALE_S:
+            return f'no LiDAR scan for {time.time() - self.pts_t:.1f} s'
         s = self.fstatus
         if s is None or time.time() - self.fstatus_t > 2.5:
             return 'no /fusion/status'

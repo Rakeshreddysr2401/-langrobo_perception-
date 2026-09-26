@@ -98,12 +98,16 @@ def box(cx, cy, w, h):
     return [(c[i], c[(i + 1) % 4]) for i in range(4)]
 
 
-def run(goal, P, eff, w_dead, rng, segs, t_max=90.0, ex=None):
+def run(goal, P, eff, w_dead, rng, segs, t_max=90.0, ex=None, appear=None):
+    """appear: (t, segments) -- obstacles that arrive mid-goal (a person)."""
     rov = Rover(P, eff, w_dead, rng)
     ex = ex or GoalExec()
     ex.set_goal(goal)
     t = 0.0
     while ex.state != 'done' and t < t_max:
+        if appear and t >= appear[0]:
+            segs = segs + appear[1]
+            appear = None
         pts = scan(rov.x, segs, rng) if int(t / DT) % 2 == 0 else pts
         vx, wz = ex.step(t, rov.sensed(), pts)
         rov.step(vx, wz)
@@ -157,6 +161,13 @@ def main():
     out, e, eh, t, ex = run((1.2, 0.0, 0.0), [(0.0, 0.03), (0.0, -0.03)], 1.0, 0.22, rng, room + box(0.7, 0.0, 0.2, 0.4))
     print(f'{"box in the path, 1.2 m":28s} {out}: {ex.why}')
     ok_all &= out == 'refused'
+    # something steps into a straight leg after it started (checked once, at
+    # the start, until 2026-09-26): it must stop short, not drive into it
+    rov_goal = (1.2, 0.0, 0.0)
+    out, e, eh, t, ex = run(rov_goal, [(0.0, 0.03), (0.0, -0.03)], 1.0, 0.22, rng, room,
+                            appear=(3.0, box(0.95, 0.0, 0.1, 0.3)))
+    print(f'{"box appears mid-leg, t=3 s":28s} {out}: {ex.why}')
+    ok_all &= out == 'refused' and 'mid-leg' in ex.why
     print('\nSUITE', 'PASS' if ok_all else 'FAIL')
     return 0 if ok_all else 1
 

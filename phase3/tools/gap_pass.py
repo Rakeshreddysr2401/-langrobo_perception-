@@ -160,10 +160,12 @@ class Pass(Node):
         self.dobs = DepthObstacles(self, self.buf, lambda: self.pose)
         self.mount = None
         self.scans = []
+        self.pose_t = self.scan_t = 0.0
 
     def _odom(self, m):
         p = m.pose.pose
         self.pose = (p.position.x, p.position.y, yaw_of(p.orientation))
+        self.pose_t = time.time()
 
     def _scan(self, m):
         if self.mount is None:
@@ -178,6 +180,7 @@ class Pass(Node):
         p = np.stack([r[ok] * np.cos(a[ok] + yaw) + x, r[ok] * np.sin(a[ok] + yaw) + y], 1)
         own = (p[:, 0] < 0.202) & (p[:, 0] > -0.198) & (np.abs(p[:, 1]) < 0.21)
         self.scans.append(p[~own])
+        self.scan_t = time.time()
         self.scans = self.scans[-10:]
 
     def spin_for(self, s):
@@ -204,10 +207,19 @@ def turn_to(n, heading, ex=None, tol_deg=3.0):
     ok, why = ex.turn_clear(pts, e)
     if not ok:
         return why
-    t0, last = time.time(), None
+    t0, last, blocked, why = time.time(), None, 0, ''
     while time.time() - t0 < 8.0:
         n.spin_for(0.05)
+        # never turn on a frozen view: the pose drives the stop, the scan the check
+        if time.time() - n.pose_t > 0.3 or time.time() - n.scan_t > 0.5:
+            why = 'pose or scan stale: stopped'
+            break
         e = wrap(heading - n.pose[2])
+        ok, w_ = ex.turn_clear(np.vstack(n.scans[-1:] + [n.dobs.points_base(n.pose)]), e)
+        blocked = 0 if ok else blocked + 1
+        if blocked >= ex.BLOCK_STEPS:
+            why = 'blocked mid-turn: ' + w_
+            break
         w_meas = 0.0 if last is None else wrap(n.pose[2] - last[1]) / max(time.time() - last[0], 1e-3)
         last = (time.time(), n.pose[2])
         lead = abs(w_meas) * ex.STOP_LEAD if w_meas * e > 0 else 0.0
@@ -219,7 +231,7 @@ def turn_to(n, heading, ex=None, tol_deg=3.0):
     for _ in range(3):
         n.cmd.publish(Twist())
     n.spin_for(0.6)                               # let it settle; the camera catches up
-    return ''
+    return why
 
 
 def look_to(n, heading):
