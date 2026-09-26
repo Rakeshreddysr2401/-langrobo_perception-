@@ -752,6 +752,18 @@ comes back, never a touch.
 |---|---|---|---|
 | gap ~48 cm (tape), legs splayed | 37.5 cm along the rover's heading | **refused** (needs 44) | - |
 | gap ~55 cm (tape at floor) | 57-60 cm, lane 13 cm | lined up in 7 s, crawled 1.3 m in 29 s: **reached 1.1 cm / 0.8°**, no contact stops | fused within 0.7 cm / 0.3° |
+| gap ~50 cm at the floor: **the stool's feet stick out under 5 cm** | 58-60 cm at 5-27 cm, where the legs are | reached 0.9 cm, no stop; the feet were not in the path the camera could see | fused within 0.5 cm / 0.25° |
+
+**The feet.** The owner measured 50 cm at the floor; the sensors saw 60 at 5-27
+cm. The camera's band started at 5 cm (floor noise) and the wheels reach the
+floor, so feet under 5 cm were invisible to every check. Measured on free
+floor (nothing within 8 cm): within 0.9 m no floor pixel above 2.0 cm (sd 4-7
+mm), 0.9-1.7 m 0.2-0.7% above 2 cm. The band's floor is now by range: 2 cm
+under 1 m, 3.5 cm to 1.6 m, 5 cm beyond; things low down appear as the rover
+closes in, so the pass re-checks the rest of its line every step, stops with
+"blocked ahead" and re-measures (at most twice). Before measuring it LOOKS:
+±25° each way (the owner's idea), so the camera's 87° sees the gap's sides.
+Flatter than ~2 cm stays invisible (ROVER_BUILD_PLAN: bumper / ToF).
 
 **Not yet shown:** gaps at 50 / 47 / 45 cm live (the limit), nav2 bringing the
 rover to the gap's mouth first, a route around an obstacle, approaching an

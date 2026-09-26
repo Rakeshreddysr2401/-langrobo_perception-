@@ -212,14 +212,36 @@ Visualization Manager:
       Use Timestamp: false
       Value: false
 
-    # ── what nav2 plans on. OFF by default: it hides the map underneath. ─
-    - Alpha: 0.55
+    # ── what nav2 plans on, NEAR the rover (4 x 4 m local costmap). ─────
+    # Pink = an obstacle, cyan = the rover's centre may not go there, blue ->
+    # red = allowed but close to something. A passable gap shows a coloured
+    # strip down its middle between the cyan bands (OPERATIONS.md, nav2).
+    - Alpha: 0.45
+      Binary representation: false
+      Class: rviz_default_plugins/Map
+      Color Scheme: costmap
+      Draw Behind: false
+      Enabled: true
+      Name: nav2 costmap (near)
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /local_costmap/costmap
+      Use Timestamp: false
+      Value: true
+
+    # The WHOLE room's costmap. OFF by default: every obstacle wears a 45 cm
+    # cost halo (inflation_radius), and over a room it is blobs that hide the
+    # map (the owner's screenshots, 2026-09-26).
+    - Alpha: 0.35
       Binary representation: false
       Class: rviz_default_plugins/Map
       Color Scheme: costmap
       Draw Behind: false
       Enabled: false
-      Name: nav2 costmap
+      Name: nav2 costmap (whole room)
       Topic:
         Depth: 1
         Durability Policy: Transient Local
@@ -228,6 +250,54 @@ Visualization Manager:
         Value: /global_costmap/costmap
       Use Timestamp: false
       Value: false
+
+    # ── obstacles at the rover's height, 1 cm: what goal_exec and ./rover
+    # pass decide on (depth camera, remembered in odom). Coloured by height:
+    # the low end (2-5 cm: feet, remotes, cables) is what nothing else sees.
+    - Alpha: 1
+      Autocompute Intensity Bounds: false
+      Axis: Z
+      Channel Name: z
+      Class: rviz_default_plugins/PointCloud2
+      Color: 255; 255; 255
+      Color Transformer: AxisColor
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 0.27
+      Min Color: 0; 0; 0
+      Min Intensity: 0.0
+      Name: Obstacles at rover height (1 cm)
+      Position Transformer: XYZ
+      Selectable: false
+      Size (Pixels): 3
+      Size (m): 0.012
+      Style: Boxes
+      Topic:
+        Depth: 1
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /goal_exec/obstacles
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+
+    # ── the tight-gap pass: the strip found, the rover + margin swept along
+    # the line, the line, and the width. Green fits, red too tight. ───────
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: Gap pass
+      Namespaces:
+        {}
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /gap_pass/markers
+      Value: true
 
     # ── the planned route, when nav2 is running ─────────────────────────
     - Alpha: 1

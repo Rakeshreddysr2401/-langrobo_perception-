@@ -22,9 +22,17 @@ WHY IT FORGETS
     MEM_S; nothing beyond RANGE is kept.
 
 FILTERS
-    band      z 0.05-0.27 m in base_link, the rover's height (floor noise below
-              5 cm; objects over 27 cm are above the rover). Low objects under
-              5 cm stay invisible, as they are to nvblox.
+    band      z up to 0.27 m in base_link (objects over 27 cm are above the
+              rover); the FLOOR of the band depends on range, because the
+              floor's own noise does. Measured 2026-09-26 on free floor (no
+              object within 8 cm): within 0.9 m no floor pixel above 2.0 cm
+              (sd 4-7 mm); 0.9-1.7 m, 0.2-0.7% above 2 cm, rare above 2.5.
+                  range < 1.0 m    2.0 cm
+                  1.0 - 1.6 m      3.5 cm
+                  beyond           5.0 cm
+              A stool's feet stuck out under the old flat 5 cm and the wheels
+              reach the floor: the feet are seen now as the rover closes in,
+              and remembered. Flatter than ~2 cm stays invisible.
     edges     pixels whose 3x3 neighbourhood spans > 5 cm of depth are
               dropped: the depth camera's flying pixels at object edges.
     repeats   a voxel counts once seen in MIN_HITS updates.
@@ -40,7 +48,8 @@ from sensor_msgs.msg import CameraInfo, Image
 
 DEPTH = '/camera/camera0/depth/image_rect_raw'
 INFO = '/camera/camera0/depth/camera_info'
-Z_MIN, Z_MAX = 0.05, 0.27
+Z_MAX = 0.27
+Z_FLOOR = ((1.0, 0.020), (1.6, 0.035), (9e9, 0.050))   # (range below, min height), m
 VOX = (0.01, 0.01, 0.02)        # m, x y z
 STRIDE = 3                      # px
 RATE_HZ = 5.0
@@ -123,7 +132,9 @@ class DepthObstacles:
         z = d[v, u]
         uu, vv = u * STRIDE, v * STRIDE
         P = np.stack([(uu - cx) * z / fx, (vv - cy) * z / fy, z], 1) @ Rc.T + tc   # base_link
-        P = P[(P[:, 2] > Z_MIN) & (P[:, 2] < Z_MAX)]
+        rng = np.hypot(P[:, 0], P[:, 1])
+        zmin = np.select([rng < r for r, _ in Z_FLOOR], [z for _, z in Z_FLOOR])
+        P = P[(P[:, 2] > zmin) & (P[:, 2] < Z_MAX)]
         c, s = math.cos(pose[2]), math.sin(pose[2])
         Wd = np.stack([pose[0] + c * P[:, 0] - s * P[:, 1], pose[1] + s * P[:, 0] + c * P[:, 1], P[:, 2]], 1)
 

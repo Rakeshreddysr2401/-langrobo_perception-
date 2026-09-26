@@ -54,6 +54,9 @@ PASS MODE (./rover pass): a straight crawl through a tight gap
       - the approach is checked along the LINE (where the rover will be once
         it has steered onto it), outline + the pass margin (owner: 3 cm), not
         along the body's current heading;
+      - every step the rest of the line is re-checked (low things appear
+        only as the camera closes in): blocked -> 'refused: blocked ahead',
+        and ./rover pass re-measures from there and tries a new line;
       - every step, anything within CONTACT of the outline, ahead in the
         direction of travel or beside it, stops the leg; it then backs up
         along the line to the pre-goal and tries again (MAX_TRIES);
@@ -423,6 +426,17 @@ class GoalExec:
                 self._finish('refused', why)
                 return 0.0, 0.0
             self._checked = True
+        if passing and not self.backing:
+            # the rest of the line, every step: things low down are seen only
+            # once the camera is close (depth_obstacles.py, band floor by
+            # range), so the corridor can close after the crawl has begun
+            a_now, _ = self.line_coords(pose)
+            a_to = float((self.aim - self.goal[:2]) @ self.u)
+            if a_to - a_now > 0.02:
+                ok, why = self.line_clear(pts, pose, a_now + 0.02, a_to, self.pass_['margin'])
+                if not ok:
+                    self._finish('refused', 'blocked ahead: ' + why)
+                    return 0.0, 0.0
         if passing:
             hit = self.contact(pts, sgn, beside=not self.backing)
             if hit:

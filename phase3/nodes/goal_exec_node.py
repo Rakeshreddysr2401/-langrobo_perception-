@@ -8,6 +8,9 @@
     /goal_exec/cancel   std_msgs/Empty
         -> /cmd_vel             while a goal is active, and a stop when it ends
            /goal_exec/status    JSON, every change: state, result, why, errors
+           /goal_exec/obstacles PointCloud2 (odom), 2 Hz: what the depth camera
+                                has seen at the rover's height, 1 cm -- the
+                                points goal_exec and ./rover pass decide on
 
 The logic is phase3/nodes/goal_exec.py, the class the simulator proved
 (phase3/tools/sim_goal_exec.py: 180 goals, 177 reached, worst 2.0 cm).
@@ -45,12 +48,13 @@ from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from rclpy.time import Time
-from sensor_msgs.msg import LaserScan
+from sensor_msgs.msg import LaserScan, PointCloud2
+from sensor_msgs_py import point_cloud2
 from std_msgs.msg import Empty, String
 from tf2_ros import Buffer, TransformListener
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from depth_obstacles import DepthObstacles  # noqa: E402
+from depth_obstacles import MIN_HITS, DepthObstacles  # noqa: E402
 from goal_exec import GoalExec, wrap  # noqa: E402
 
 PIVOT_FILE = Path('/logs/goal_exec_pivot.json')
@@ -80,6 +84,8 @@ class GoalExecNode(Node):
         self.last_status = None
         self.cmd = self.create_publisher(Twist, '/cmd_vel', 10)
         self.pub_status = self.create_publisher(String, '/goal_exec/status', 10)
+        self.pub_obs = self.create_publisher(PointCloud2, '/goal_exec/obstacles', 1)
+        self.n_odom = 0
         self.create_subscription(Odometry, '/odom', self._odom, 10)
         self.create_subscription(LaserScan, '/scan', self._scan, qos_profile_sensor_data)
         self.create_subscription(String, '/fusion/status', self._fstatus, 10)
@@ -166,6 +172,12 @@ class GoalExecNode(Node):
     def _odom(self, m):
         p = m.pose.pose
         self.pose = (p.position.x, p.position.y, yaw_of(p.orientation))
+        self.n_odom += 1
+        if self.n_odom % 10 == 0:                 # 2 Hz, on the pose (no timers: fusion2 lesson)
+            mem = self.dobs.mem
+            mem = mem[mem[:, 4] >= MIN_HITS] if len(mem) else mem
+            m.header.frame_id = 'odom'
+            self.pub_obs.publish(point_cloud2.create_cloud_xyz32(m.header, mem[:, :3].tolist() if len(mem) else []))
         if self.ex.state in ('idle', 'done'):
             return
         unsure = self._pose_unsure()
