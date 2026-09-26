@@ -226,7 +226,11 @@ class GoalExecNode(Node):
         dp = self.dobs.points_base(self.pose)
         if len(dp):
             pts = dp if pts is None else np.vstack([pts, dp])
-        vx, wz = self.ex.step(time.time(), self.pose, pts)
+        # the controller's clock is the POSE's stamp: arrival times on this
+        # loaded Jetson bunch up (0.6-441 ms apart for poses stamped 50 ms apart)
+        st = m.header.stamp
+        t = st.sec + st.nanosec * 1e-9 if (st.sec or st.nanosec) else time.time()
+        vx, wz = self.ex.step(t, self.pose, pts)
         if self.ex.state == 'done':
             self._finish()
             return

@@ -98,10 +98,14 @@ def box(cx, cy, w, h):
     return [(c[i], c[(i + 1) % 4]) for i in range(4)]
 
 
-def run(goal, P, eff, w_dead, rng, segs, t_max=90.0, ex=None, appear=None, turn_only=False, start=None):
+def run(goal, P, eff, w_dead, rng, segs, t_max=90.0, ex=None, appear=None, turn_only=False, start=None,
+        bursty=False, lag=0.2):
     """appear: (t, segments) -- obstacles that arrive mid-goal (a person).
-    turn_only: TURN-ONLY MODE; ex.max_vx records the largest forward command."""
-    rov = Rover(P, eff, w_dead, rng)
+    turn_only: TURN-ONLY MODE; ex.max_vx records the largest forward command.
+    bursty: the controller's clock is ARRIVAL time, as it was live -- poses
+    stamped 50 ms apart arrived 0.6-441 ms apart on the loaded Jetson
+    (2026-09-26); 1 in 8 comes 1 ms after the one before."""
+    rov = Rover(P, eff, w_dead, rng, lag=lag)
     if start is not None:
         rov.x = np.array(start, dtype=float)
     ex = ex or GoalExec()
@@ -113,7 +117,11 @@ def run(goal, P, eff, w_dead, rng, segs, t_max=90.0, ex=None, appear=None, turn_
             segs = segs + appear[1]
             appear = None
         pts = scan(rov.x, segs, rng) if int(t / DT) % 2 == 0 else pts
-        vx, wz = ex.step(t, rov.sensed(), pts)
+        t_seen = t
+        if bursty:
+            k = int(round(t / DT))
+            t_seen = t + (-(DT - 0.001) if k % 8 == 1 else 0.0)
+        vx, wz = ex.step(t_seen, rov.sensed(), pts)
         ex.max_vx = max(ex.max_vx, abs(vx))
         rov.step(vx, wz)
         t += DT
@@ -176,6 +184,34 @@ def main():
         for b in bad:
             print(f'   ! {b}')
         ok_all &= not bad
+    # the live failure, 2026-09-26: bursty arrival times made the measured
+    # turn rate spike, the coast lead with it, and a 5 deg correction ended
+    # the instant it began, 8 times -> "failed". Small corrections, bursty.
+    ex, bad = GoalExec(), []
+    for k in range(10):
+        a = math.radians(rng.choice([-1, 1]) * rng.uniform(3, 8))
+        out, e, eh, t, ex = run((0.0, 0.0, a), [(0.0, 0.03), (0.0, -0.03)], 1.0, 0.22, rng, room,
+                                ex=ex, turn_only=True, bursty=True)
+        if out != 'reached' or eh > 2.5:
+            bad.append(f'{math.degrees(a):+.1f} deg: {out}, {eh:.1f} deg -- {ex.why}')
+    print(f'{"turn-only 3-8 deg, bursty clock":40s} {10 - len(bad)}/10 within 2.5 deg')
+    for b in bad:
+        print(f'   ! {b}')
+    ok_all &= not bad
+    # ... and a coast shorter than STOP_LEAD assumes: the turn stops short, and
+    # the retries must wait for the rover to settle, not each judge "done"
+    # while it is still rolling toward the target (-5.6 deg after 8 tries).
+    ex, bad = GoalExec(), []
+    for k in range(10):
+        a = math.radians(rng.choice([-1, 1]) * rng.uniform(60, 120))
+        out, e, eh, t, ex = run((0.0, 0.0, a), [(0.0, 0.03), (0.0, -0.03)], 1.0, 0.22, rng, room,
+                                ex=ex, turn_only=True, bursty=True, lag=0.08)
+        if out != 'reached' or eh > 2.5:
+            bad.append(f'{math.degrees(a):+.0f} deg: {out}, {eh:.1f} deg, tries {ex.tries} -- {ex.why}')
+    print(f'{"turn-only 60-120 deg, short coast":40s} {10 - len(bad)}/10 within 2.5 deg')
+    for b in bad:
+        print(f'   ! {b}')
+    ok_all &= not bad
     # a turn that must be refused: a box right beside the rover
     blocked = room + box(0.0, 0.33, 0.25, 0.12)
     out, e, eh, t, ex = run((0.0, 0.0, math.radians(90)), [(0.0, 0.03), (0.0, -0.03)], 1.0, 0.22, rng, blocked)

@@ -103,6 +103,12 @@ class GoalExec:
     WZ_MAX = 1.5          # rad/s commanded; the pivot reaches far less (M4 motion data)
     WZ_MIN = 1.0          # measured: 0.6 turns at ~0.1 rad/s and stalled a live goal; 1.0 gives ~0.31
     STOP_LEAD = 0.25      # s   stop a turn this far ahead on the measured rate (it coasts)
+    RATE_DT = 0.04        # s   the turn rate is measured over at least this: poses stamped
+                          #     50 ms apart ARRIVED 0.6-441 ms apart live (2026-09-26), and a
+                          #     rate over 0.6 ms made the coast lead ~50 deg, ending turns short
+    SETTLE_S = 0.6        # s   after a turn, let it stop rolling before judging it: judged
+                          #     while coasting, each retry "arrived" at once and 8 tries burned
+                          #     in under a second (live: -5.6 deg after 8 tries, 2026-09-26)
     VX_MAX = 0.15         # m/s
     VX_MIN = 0.035        # the firmware drops a side's target under 0.01 m/s
     ACC = 0.10            # m/s^2 planned deceleration: gentle, the drive coasts ~0.2 s after a stop
@@ -150,6 +156,7 @@ class GoalExec:
         self.backoff = False
         self.backing = False
         self.turn_only = False
+        self.settle_until = -1e9
 
     # ── the learned slide ───────────────────────────────────────────────────
     def learn_pivot(self, p0, p1):
@@ -264,6 +271,7 @@ class GoalExec:
         self.goal = np.array(goal, dtype=float)
         self.u = np.array([math.cos(self.goal[2]), math.sin(self.goal[2])])   # the goal line
         self.tries = 0
+        self.settle_until = -1e9                 # a new goal owes nothing to the last one's turn
         self.result, self.why = None, ''
         self.state = 'plan'
 
@@ -312,6 +320,8 @@ class GoalExec:
         if self.state in ('idle', 'done'):
             return 0.0, 0.0
         if self.state == 'plan':
+            if t < self.settle_until:
+                return 0.0, 0.0                  # still rolling from the last turn
             self._plan(t, pose)
             if self.state in ('done', 'plan'):
                 return 0.0, 0.0
@@ -392,14 +402,18 @@ class GoalExec:
                 self._finish('refused', 'blocked mid-turn: ' + why)
                 return 0.0, 0.0
         tol = self.YAW_TOL if self.turn_purpose in ('final', 'align') else self.FACE_TOL
-        # the measured turn rate, to stop early by what it will coast
-        w_meas = 0.0
-        if self._w_prev is not None and t > self._w_prev[0]:
-            w_meas = wrap(pose[2] - self._w_prev[1]) / (t - self._w_prev[0])
-        self._w_prev = (t, pose[2])
+        # the measured turn rate, to stop early by what it will coast -- over at
+        # least RATE_DT, so two poses arriving together cannot fake a huge rate
+        if self._w_prev is None:
+            self._w_prev, self._w = (t, pose[2]), 0.0
+        elif t - self._w_prev[0] >= self.RATE_DT:
+            self._w = wrap(pose[2] - self._w_prev[1]) / (t - self._w_prev[0])
+            self._w_prev = (t, pose[2])
+        w_meas = self._w
         lead = abs(w_meas) * self.STOP_LEAD if w_meas * e > 0 else 0.0
         if abs(e) <= max(tol, lead):
             self.learn_pivot(self.turn_start, pose)
+            self.settle_until = t + self.SETTLE_S
             if self.turn_purpose == 'face':
                 self._start_leg(t, pose, self.aim, self.rev, hold=None)
             elif self.turn_purpose == 'toline':
