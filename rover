@@ -968,7 +968,7 @@ record)
   ttyflag=""; [ -t 0 ] && ttyflag="-it"   # Ctrl-C must reach Python: it stops the motors
   docker exec $ttyflag -e GIT_REV="$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null)" \
     -e RUN_STAMP="$(date +%Y%m%d-%H%M%S)" "$NAME" \
-    bash -lc "$ENVSET python3 $SRC/harness/run.py $(printf '%q ' "$@")"
+    bash -lc "$ENVSET python3 -u $SRC/harness/run.py $(printf '%q ' "$@")"
   ;;
 grade)
   need_container

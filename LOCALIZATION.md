@@ -623,3 +623,32 @@ path. Learned P matches the true pivot to ~1 cm.
 **Live, so far** (no motion): a goal at the current pose reports `reached 0.0 cm`;
 a 2.5 m goal is refused as nav2's job. **Next: short live goals, watched, on a
 charged pack.**
+
+### M4 live, first goals on the rover (2026-09-26)
+
+Sent with `./rover goto` (the brain's LLM was down; the same topic it will use).
+Every goal was recorded by the harness, with the goal sent only after the
+recorder was running. The first attempt ran each goal *after* its recording
+ended, because `run.py`'s output was block-buffered when piped; `./rover
+record` now runs it with `python3 -u`.
+
+| goal | result (goal_exec's pose) | LiDAR truth |
+|---|---|---|
+| 1. back 40 cm | **reached 0.7 cm / 0.0°**, 9.8 s: back to the pre-goal, 25 cm straight in | moved −40.8 / −0.1 cm, +0.06°: **0.8 cm from the goal**; fused within 0.1 cm of the truth |
+| 2. turn 90° left in place | **stalled**: the first turn landed at +90.0° but slid 8.8 cm; a +20° correction turn then stopped moving (stuck 12.4° short for 16 s) | to grade |
+| 3. back-right 58 cm, face −90° | **failed**, a limit cycle: each line approach ended 6-7 cm off the line with ±4° heading, so it backed up and tried again, 8 times | to grade |
+| 4. return to the start pose (78 cm, +17° away) | **reached 1.2 cm / 0.5°**, 21.8 s, after 8 small corrections | to grade |
+
+**What the rover showed that the simulator did not:**
+
+- **Small turns in place stall.** The turn slows to WZ_MIN = 0.6 rad/s
+  commanded near its target. On the real rover that is below what the scrub
+  lets through (0.6 × ~30-45% efficiency), so a small correction turn never
+  finishes. The harness turned reliably at a constant 1.5. Fix: keep the
+  command at or above ~1.2 and stop early on the measured rate, instead of
+  slowing down.
+- **Steering while driving corrects less than modelled.** A 25 cm approach
+  did not remove 6-7 cm of cross-track error on the real floor. The simulator
+  assumed an arc follows 85% of the command. Fix: measure the real arc
+  response, then a longer runway or stronger cross-track gain.
+- The simulator must get both measured responses before the next live round.
