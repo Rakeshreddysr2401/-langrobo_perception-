@@ -652,3 +652,23 @@ record` now runs it with `python3 -u`.
   assumed an arc follows 85% of the command. Fix: measure the real arc
   response, then a longer runway or stronger cross-track gain.
 - The simulator must get both measured responses before the next live round.
+
+### The measured response (`./rover response`, 2026-09-26, charged pack, this floor)
+
+| motion | commanded | actual | share |
+|---|---|---|---|
+| pivot in place | 0.6 / 0.8 / 1.0 / 1.2 / 1.5 rad/s | 0.10-0.15 / 0.20-0.25 / 0.31-0.34 / 0.42-0.45 / 0.58 | 17-39%, rising with the command: **ω ≈ 0.52·cmd − 0.21** |
+| pivot slide | per 10-60° turned | 1-4 cm | (P near the centre on a charged pack) |
+| arc at 0.10 m/s | wz 0.15 / 0.30 / 0.50 | 0.023-0.029 / 0.059-0.066 / 0.116-0.127 | **15-25%**; the speed tracks (0.09-0.11 m/s) |
+| creep straight | 0.02 / 0.035 / 0.05 m/s | moves every time | straight driving is fine even very slow |
+
+The simulator had assumed arcs follow 85% of the command. The real 20% is why
+a line approach could not steer out 6-7 cm of cross-track error (live goal 3).
+The pivot curve is why a correction turn slowed to 0.6 rad/s stalled (goal 2).
+
+**The drive froze again** during the first full run, after ~20 s of pivoting
+(ten 2 s pivots). The −1.5 pivot, the arcs and the creep after it moved little
+or not at all, and a nudge right afterwards drove normally. It is the same
+pattern as §8 and §9: driver protection or the pack under sustained stall
+current (ROVER_BUILD_PLAN.md §4.5). The arc and creep rows above are from a
+separate run on a rested drive.

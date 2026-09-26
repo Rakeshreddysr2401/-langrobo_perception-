@@ -934,6 +934,21 @@ view)
   done
   ;;
 
+# ── response ────────────────────────────────────────────────────────────────
+# How this rover really answers a command on this floor: pivot rate per
+# command, arc following, creep speed (phase3/tools/response_test.py). Moves
+# within ~30 cm. Re-run per surface; goal_exec and its simulator are set from it.
+response)
+  need_container
+  assert_rate /odom 15 "fused odom" || die "no pose — ./rover fused first"
+  mode=$(timeout 5 curl -s http://192.168.1.16:8091/mode 2>/dev/null)
+  case "$mode" in *'"manual": true'*) die "teleop is in MANUAL. Tap AUTO." ;; esac
+  echo "  THIS MOVES THE ROVER (turns in place, short arcs). Watch it."
+  ttyflag=""; [ -t 0 ] && ttyflag="-it"
+  shift
+  docker exec $ttyflag "$NAME" bash -lc "$ENVSET python3 -u $SRC3/tools/response_test.py $*"
+  ;;
+
 # ── goto ────────────────────────────────────────────────────────────────────
 # Exact (x, y, θ) moves (SENSOR_FUSION_PLAN.md M4): goal_exec closes on
 # fusion2's pose, approaches along the goal line, learns this rover's turn
