@@ -694,3 +694,21 @@ gone.
 
 **Not yet shown:** a drive freeze mid-goal (the executor's stall stop is the
 guard), goals on other floors, and approaching an object.
+
+## 13. M5: nav2 on the fused pose, and `./rover navto` (2026-09-26)
+
+The first nav2 drives since fusion2 took over `/odom`. `./rover navto X Y DEG
+--exact` splits the work: nav2 plans and drives the route (costmaps: nvblox +
+LiDAR, 5 cm padding) to the **pre-goal**, 35 cm behind the target on its
+heading line, and goal_exec does the straight final approach. nav2's own goal
+checker is 10 cm / 14° by design; the exact part is goal_exec's.
+
+| run | nav2 | goal_exec | LiDAR truth |
+|---|---|---|---|
+| nav2 only: 0.5 m fwd, 0.2 m left | succeeded in 13.5 s, 8.6 cm from its goal (inside its 10 cm) | - | - |
+| return to start, `--exact` (wires under the rover) | reached ~14 cm in 20 s, then held 10-14 cm for ~80 s before succeeding at 9.3 cm | **refused**: obstacle 18 cm into its 30 cm leg | recording has no moving checkpoints; the stall's cause is **not established** (suspect: the wires) |
+| return to start, `--exact`, wires cleared | succeeded in 15.8 s, 4.9 cm from the pre-goal | **reached 1.3 cm / 0.5°** | fused within **0.1 cm / 0.1°** of truth, so ~1.3 cm real; wheels alone 13.4 cm / 18° |
+
+So nav2 drives correctly on fusion2 (TF, costmaps, LiDAR layer), and the route
++ exact-finish split works. **Not yet shown:** gaps (fits vs refuses), a route
+around an obstacle, approaching an object, a repeat of the 80 s near-goal stall.

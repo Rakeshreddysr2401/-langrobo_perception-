@@ -17,8 +17,8 @@ that. Built one tested layer at a time; every claim below is measured.
 | **M1 Calibrate** | camera ↔ LiDAR, camera tilt, lever arm, gyro | ✅ camera within 4 mm of two independent methods; gyro scale 1.001 |
 | **M2 LiDAR odometry** | the pose from the walls, every scan | ✅ worst 0.9 cm / 0.39° over 17 runs; ~1 cm vs the owner's tape marks |
 | **M3 Fusion** | gyro + LiDAR + VO + wheels, each weighted by its own evidence | ✅ **live**, owns `/odom`: worst 0.8 cm / 0.45° over 19 runs (Phase 1 fusion: 20.5 cm / 13°) |
-| **M4 Motion control** | exact x, y, θ moves closed on the pose; firmware fixes | goal executor built: 177/180 simulated goals, 1.1-1.3 cm mean; **live tests next** (`./rover goto`) |
-| **M5 Safe navigation** | nav2 on the fused pose, LiDAR + depth obstacles, 5 cm margin, collision monitor | partly in: LiDAR in the costmaps, 5-27 cm obstacle band, 5 cm padding |
+| **M4 Motion control** | exact x, y, θ moves closed on the pose; firmware fixes | ✅ **live**: four-goal loop closes within 1.4 cm / 0.8° vs LiDAR truth (`./rover goto`) |
+| **M5 Safe navigation** | nav2 on the fused pose, LiDAR + depth obstacles, 5 cm margin, collision monitor | nav2 drives on fusion2; nav2 route + goal_exec finish reached 1.3 cm (`./rover navto --exact`); gaps and objects next |
 
 Numbers and how each was measured: [LOCALIZATION.md](LOCALIZATION.md).
 What is still missing, measured: [LOCALIZATION_GAPS.md](LOCALIZATION_GAPS.md).
@@ -56,6 +56,7 @@ The Pi 5 brain (LangGraph, voice, teleop) is a separate repo: `~/ros2_ws` on the
 description/build                  # after any measurement change: URDF, CAD, drift check
 
 ./rover goto X Y [DEG]             # an exact move, relative (DRIVES); --map / --odom for frames
+./rover navto X Y DEG [--exact]    # nav2 plans the route; --exact: goal_exec finishes to ~1 cm (DRIVES)
 ```
 
 [OPERATIONS.md](OPERATIONS.md) has the rest and the troubleshooting;
