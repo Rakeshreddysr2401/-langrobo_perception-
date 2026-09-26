@@ -672,3 +672,25 @@ or not at all, and a nudge right afterwards drove normally. It is the same
 pattern as §8 and §9: driver protection or the pack under sustained stall
 current (ROVER_BUILD_PLAN.md §4.5). The arc and creep rows above are from a
 separate run on a rested drive.
+
+### M4 live, round 2: retuned on the measured response (2026-09-26)
+
+After `./rover response`, the simulator was given the measured model and the
+executor retuned: turn floor 1.0, early stop on the measured rate, steering
+gains ~4× in command units, 35 cm runway. Simulator: 104/108 reached, mean
+0.9-1.2 cm. Then on the rover, each goal recorded:
+
+| goal | goal_exec | LiDAR truth |
+|---|---|---|
+| forward 30 cm | reached 0.9 cm / 0.3° | after it finished, the rover crept ~11 cm over ~12 s with no command running (the owner reported wires under the wheels during the run) |
+| **turn 90° in place** (stalled in round 1) | reached 0.2 cm / 0.7° | **0.8 cm / 0.96°** |
+| forward-left (0.3, 0.4), face +90° | reached 1.5 cm / 0.6° | **1.25 cm / 0.8°** |
+| return to the start pose | reached 0.9 cm / 0.9° | **the whole four-goal loop closes within 1.4 cm / 0.8°** |
+
+fused (fusion2) agreed with the LiDAR truth to 0.1-0.4 cm in every run; the
+wheels alone were off by up to 59 cm / 74° over the same moves. Both round 1
+failure modes, the stalling small turn and the line-approach limit cycle, are
+gone.
+
+**Not yet shown:** a drive freeze mid-goal (the executor's stall stop is the
+guard), goals on other floors, and approaching an object.
