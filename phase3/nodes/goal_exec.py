@@ -69,6 +69,16 @@ PASS MODE (./rover pass): a straight crawl through a tight gap
         keep the normal 5 cm margin;
       - done within 3 cm / 3 deg at the end: past the gap, a final pivot
         next to its edges is the riskiest move left, so it is not made.
+
+TURN-ONLY MODE (/goal_exec/turn: "face the bottle", the brain's L:90)
+    set_goal((x, y, th), turn_only=True): turn to th, and that is all. A normal
+    goal at the same x, y would turn, find the turn's slide had moved it off
+    the point, and drive back to undo it -- right for a docking goal, wrong for
+    "turn left 90" or "face that way", where nobody asked for a drive. The
+    turn is the same primitive (swept-outline check about the learned pivot,
+    stop early by the measured coast, stall stop, the pivot learned from it);
+    it is repeated until within TURN_TOL, and the slide is reported, not
+    corrected.
 """
 import math
 
@@ -105,6 +115,7 @@ class GoalExec:
     POS_TOL = 0.015       # m   final position
     YAW_TOL = math.radians(1.0)
     FACE_TOL = math.radians(2.0)
+    TURN_TOL = math.radians(2.0)   # turn-only mode: done within this
     ARRIVE = 0.003        # m   along-track: close enough to stop the leg
     REVERSE_WITHIN = 0.6  # m   a point this close and behind is reached backwards
     MAX_TRIES = 8         # a full correction cycle (pre-goal + approach) is two
@@ -138,6 +149,7 @@ class GoalExec:
         self.pass_ = None
         self.backoff = False
         self.backing = False
+        self.turn_only = False
 
     # ── the learned slide ───────────────────────────────────────────────────
     def learn_pivot(self, p0, p1):
@@ -232,9 +244,12 @@ class GoalExec:
         return ''
 
     # ── goals ───────────────────────────────────────────────────────────────
-    def set_goal(self, goal, pass_=None):
-        """pass_: None, or dict(L, margin, vx) for a pass (see PASS MODE)."""
+    def set_goal(self, goal, pass_=None, turn_only=False):
+        """pass_: None, or dict(L, margin, vx) for a pass (see PASS MODE).
+        turn_only: turn to goal th only; x, y are where the turn started
+        (see TURN-ONLY MODE)."""
         self.pass_ = pass_
+        self.turn_only = bool(turn_only) and not pass_
         self.backoff = False
         self.log = []
         cls = type(self)
@@ -310,6 +325,15 @@ class GoalExec:
         g = self.goal
         err = float(np.hypot(*(g[:2] - pose[:2])))
         yerr = wrap(g[2] - pose[2])
+        if self.turn_only:
+            if abs(yerr) <= self.TURN_TOL:
+                self._finish('reached', f'{math.degrees(yerr):+.1f} deg, slid {err * 100:.1f} cm')
+            elif self.tries >= self.MAX_TRIES:
+                self._finish('failed', f'{math.degrees(yerr):+.1f} deg after {self.tries} tries')
+            else:
+                self.tries += 1
+                self._start_turn(t, pose, g[2], 'final')
+            return
         along, cross = self.line_coords(pose)
         if err <= self.POS_TOL and abs(yerr) <= self.YAW_TOL:
             self._finish('reached', f'{err * 100:.1f} cm, {math.degrees(yerr):+.1f} deg')

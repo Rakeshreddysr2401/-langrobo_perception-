@@ -98,11 +98,15 @@ def box(cx, cy, w, h):
     return [(c[i], c[(i + 1) % 4]) for i in range(4)]
 
 
-def run(goal, P, eff, w_dead, rng, segs, t_max=90.0, ex=None, appear=None):
-    """appear: (t, segments) -- obstacles that arrive mid-goal (a person)."""
+def run(goal, P, eff, w_dead, rng, segs, t_max=90.0, ex=None, appear=None, turn_only=False, start=None):
+    """appear: (t, segments) -- obstacles that arrive mid-goal (a person).
+    turn_only: TURN-ONLY MODE; ex.max_vx records the largest forward command."""
     rov = Rover(P, eff, w_dead, rng)
+    if start is not None:
+        rov.x = np.array(start, dtype=float)
     ex = ex or GoalExec()
-    ex.set_goal(goal)
+    ex.set_goal(goal, turn_only=turn_only)
+    ex.max_vx = 0.0
     t = 0.0
     while ex.state != 'done' and t < t_max:
         if appear and t >= appear[0]:
@@ -110,6 +114,7 @@ def run(goal, P, eff, w_dead, rng, segs, t_max=90.0, ex=None, appear=None):
             appear = None
         pts = scan(rov.x, segs, rng) if int(t / DT) % 2 == 0 else pts
         vx, wz = ex.step(t, rov.sensed(), pts)
+        ex.max_vx = max(ex.max_vx, abs(vx))
         rov.step(vx, wz)
         t += DT
     for _ in range(20):                        # let it settle, as the real one coasts
@@ -153,6 +158,24 @@ def main():
         if others:
             print(f'{"":28s} other outcomes: {others}')
         ok_all &= (good + refused) >= 11 and E.max() < 3.0
+    # TURN-ONLY MODE (the brain's L:90, "face the bottle"): the heading within
+    # 2 deg, the slide reported, and never a forward command
+    for name, (P, eff, wd) in conditions.items():
+        ex, EH, bad = GoalExec(), [], []
+        for _ in range(8):
+            a = math.radians(rng.choice([-1, 1]) * rng.uniform(20, 175))
+            th = wrap(rng.uniform(-math.pi, math.pi))
+            rov_start = (0.0, 0.0, th)
+            out, e, eh, t, ex = run((0.0, 0.0, wrap(th + a)), P, eff, wd, rng, room, ex=ex,
+                                    turn_only=True, start=rov_start)
+            EH.append(eh)
+            if out != 'reached' or eh > 2.5 or ex.max_vx > 0:
+                bad.append(f'{math.degrees(a):+.0f} deg: {out}, {eh:.1f} deg, vx {ex.max_vx:.2f} -- {ex.why}')
+        print(f'{"turn-only, " + name:40s} {8 - len(bad)}/8 within 2.5 deg, heading max {max(EH):.2f} deg, '
+              f'no forward command' if not bad else f'{"turn-only, " + name:40s} FAILED')
+        for b in bad:
+            print(f'   ! {b}')
+        ok_all &= not bad
     # a turn that must be refused: a box right beside the rover
     blocked = room + box(0.0, 0.33, 0.25, 0.12)
     out, e, eh, t, ex = run((0.0, 0.0, math.radians(90)), [(0.0, 0.03), (0.0, -0.03)], 1.0, 0.22, rng, blocked)

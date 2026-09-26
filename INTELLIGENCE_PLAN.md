@@ -172,9 +172,9 @@ objects).
 
 | step | what | fixes | size | graded by |
 |---|---|---|---|---|
-| **B1 — the brain moves with the Jetson's primitives** | Pi 5 `ros2_bridge`: `start_reach(x, y, yaw)` publishes `/reach/goal` and reads `/reach/status` for the done callback (it replaces `_nav_worker`'s raw nav2 call). Every brain turn (`move_robot` L/R, search, scan) becomes a goal_exec heading goal, closed on fusion2's yaw, not a timed twist. goal_exec needs a **turn-only mode** (hold x, y; turn to θ) so a "face it" turn never drives off; add and test it in `sim_goal_exec.py` first | §2.1, §2.2, C2, C5 | small–medium, both repos | `move_robot L:90` ×6: heading error < 2°, slide pre-compensated. "go near the chair" through a 55 cm gap: reached, not abandoned |
-| **B2 — ground the pixel at the moment of the photo** | Keep the camera stamp end to end: `ros2_bridge` stores (jpeg, header.stamp); `ground_pixel` sends the stamp (in `PointStamped.header.stamp`, which is free today); `pixel_to_goal` keeps a 3 s ring of depth frames and uses the one nearest the stamp, with TF looked up **at that stamp** (the TF buffer already holds 10 s). Refuse if nothing is within 50 ms. Later: pair colour and depth at capture as a snapshot id | C1 | small, both repos | bottle on a taped mark; `locate_object` from 3 poses, including right after a turn: spread of the reported (x, y) < 5 cm |
-| **B3 — object memory** | A session memory on the Pi 5: `{label, description, x, y, z, seen_at, seen_from_pose, confidence, source}` in `odom`. Every look / locate / approach writes to it. New tools: `recall_object("bottle")` (where and how long ago) and `face_object` (exact turn to the stored bearing from the **current** pose, then one look to confirm). `approach_described_object` checks memory **first**: known → face → confirm → reach; unknown → search. Objects move, so an entry is a hint to confirm, never a fact to drive at blind; confidence decays with age | C3, your question 3 | medium, Pi 5 | see the bottle at pose A; drive elsewhere by hand; "face the bottle": bearing error < 3°. The LOCALIZATION_GAPS requirement ("what the camera sees at (x1, y1) must still be at (x1, y1)"), measured on an object |
+| **B1 — the brain moves with the Jetson's primitives** ✅ built, floor test pending (§5) | Pi 5 `ros2_bridge`: `start_reach(x, y, yaw)` publishes `/reach/goal` and reads `/reach/status` for the done callback (it replaces `_nav_worker`'s raw nav2 call). Every brain turn (`move_robot` L/R, search, scan) becomes a goal_exec heading goal, closed on fusion2's yaw, not a timed twist. goal_exec needs a **turn-only mode** (hold x, y; turn to θ) so a "face it" turn never drives off; add and test it in `sim_goal_exec.py` first | §2.1, §2.2, C2, C5 | small–medium, both repos | `move_robot L:90` ×6: heading error < 2°, slide pre-compensated. "go near the chair" through a 55 cm gap: reached, not abandoned |
+| **B2 — ground the pixel at the moment of the photo** ✅ built, floor test pending (§5) | Keep the camera stamp end to end: `ros2_bridge` stores (jpeg, header.stamp); `ground_pixel` sends the stamp (in `PointStamped.header.stamp`, which is free today); `pixel_to_goal` keeps a 3 s ring of depth frames and uses the one nearest the stamp, with TF looked up **at that stamp** (the TF buffer already holds 10 s). Refuse if nothing is within 50 ms. Later: pair colour and depth at capture as a snapshot id | C1 | small, both repos | bottle on a taped mark; `locate_object` from 3 poses, including right after a turn: spread of the reported (x, y) < 5 cm |
+| **B3 — object memory** | A session memory on the Pi 5: `{label, description, x, y, z, seen_at, seen_from_pose, confidence, source}` in `odom`. Every look / locate / approach writes to it. New tools: `recall_object("bottle")` (where and how long ago) and `face_object` (exact turn to the stored bearing from the **current** pose, then one look to confirm). `approach_described_object` checks memory **first**: known → face → confirm → reach; unknown → search. Objects move, so an entry is a hint to confirm, never a fact to drive at blind; confidence decays with age. **The checker** (owner, 2026-09-26: "sometimes the bottle may be removed by someone"): after facing the stored bearing, one fresh look. Still there → re-ground it (updated x, y) and reach. Moved a little → the new position replaces the old. Gone → forget the entry, say so, and fall back to the search. Re-checked once more on arrival | C3, your question 3 | medium, Pi 5 | see the bottle at pose A; drive elsewhere by hand; "face the bottle": bearing error < 3°. The LOCALIZATION_GAPS requirement ("what the camera sees at (x1, y1) must still be at (x1, y1)"), measured on an object |
 | **B4 — fast eyes** | `phase4/nodes/detections_3d.py` (YOLOv8n) already publishes the documented `/vision/detections_3d` contract. Export it to TensorRT so it runs on the GPU (tegrastats 2026-09-26: GPU 0–9% busy, CPU 73–87% on all six cores, so the CPU is the scarce resource), feed B3's memory continuously, and restore the Pi 5 subscription. COCO covers bottle, cup, chair, couch, person, laptop, backpack, etc. Later, an open-vocabulary detector (YOLO-World / YOLOE) for descriptions COCO lacks | C4, §2.3 | medium | CPU and nav rates before vs after (the depth stall under VLM load is known); detections of a bottle at 1–3 m land within 5 cm of its taped mark |
 | **B5 — smart search** | Exact turns of ~60° (overlap with the 87° view), one VLM call per view that **lists everything it sees** (all written to memory, not just the target), stop as soon as the target shows, and turn toward unseen directions first | C2, C4, §2.3 | small, after B1+B3 | time-to-find for a bottle placed behind the rover: today up to 5 × (turn + 40 s); target < 60 s, with no view gaps |
 | **B6 — the learning loop** | Log every episode (command, detections, VLM pixel and answer, grounded pose, outcome, time). Weekly: success-rate report; VLM-labelled frames → fine-tune the detector on the owner's own objects (Mac mini), TensorRT → Jetson; refit the motion response from harness runs | §1.4 | ongoing | success rate and time-to-reach per week, from the log |
@@ -206,7 +206,41 @@ B2 is the largest remaining error, and the cheapest fix.
 
 ---
 
-## 5. Recommendation
+## 5. B1 + B2 as built, 2026-09-26
+
+Both repos: rover `phase3/nodes/goal_exec*.py`, `reach_node.py`,
+`phase4/nodes/pixel_to_goal.py`; Pi 5 `ros2_bridge.py`, `tools/movement.py`,
+`tools/approach.py`, `tools/locate.py`, `bridges/stub.py`.
+
+| piece | what changed |
+|---|---|
+| goal_exec **TURN-ONLY MODE** | `/goal_exec/turn` (PoseStamped, heading only): turn to it and stop, within 2°, with the slide reported and not driven back. The same turn primitive as before: swept-outline check about the learned pivot, early stop for the coast, stall stop, the pivot learned from every turn |
+| goal ids | `/goal_exec/status` and `/reach/status` carry `goal_stamp`, the goal message's header.stamp, so a caller matches the result to its own goal and not to the one it preempted |
+| brain moves | `move_robot` F/B/L/R → `bridge.drive_by` / `turn_by` on goal_exec, in pieces (≤170° turns re-aimed on the measured turn, ≤1 m legs); the reply says what the pose measured ("L:90 (turned +89 deg, slid 5 cm)"); a refusal stops the sequence and names the reason. The approach search (4 exact 90° views, was 5 timed) and `scan_surroundings` (6 × 60°) use the same turn. Timed twists remain **only** as the fallback when goal_exec is not running, and the reply then says so |
+| brain navigation | `start_nav_to_pose` → `/reach/goal` (nav2 route + exact finish + look / pass / wait retries); plain nav2 only when reach_node is absent, or with `LANGROBO_NAV_BACKEND=nav2` |
+| photo-time grounding | the Pi 5 keeps each frame's camera stamp and, on taking a frame for the VLM, publishes `/vision/pixel_snapshot`. pixel_to_goal freezes the depth frame nearest that stamp (from a 2 s ring, ≤100 ms away) and the camera's odom pose **at** the stamp, for 8 photos. The query carries the stamp; the object is placed from the photo's depth and pose, and `relative` / `goal` are measured from where the robot is now. If the photo is gone, the Pi 5 re-grounds on the newest view only if the robot has not moved since (≤2 cm, ≤1°) |
+
+**Verified, moving nothing (2026-09-26):**
+- `sim_goal_exec.py`: suite PASS, with the new turn-only cases in all three
+  chassis conditions: 24/24 within 2.5°, worst 1.35°, no forward command.
+  The one weak-pack refusal is unchanged from before (a wall near that goal).
+- pixel_to_goal live: snapshot frozen 33 ms from the photo; a stamp 30 s old
+  is refused `snapshot_expired`; with the rover still, photo-time and newest
+  grounding agree to 2 mm.
+- The real Pi 5 bridge against the live Jetson: frame stamp → hold → query
+  `"at_capture": true`; `turn_by(0.5°)` through `/goal_exec/turn`, matched by
+  its stamp: `reached, slid 0.0 cm`.
+- Pi 5 tests: 228 pass (213 before, plus 15 for exact moves and photo-time
+  grounding).
+
+**Not yet graded, and needs the owner watching the floor:**
+1. `move_robot L:90` × 6 each way: heading error < 2° (vs LiDAR truth).
+2. `move_robot F:60,L:90,F:30`: every step reported with its measured values.
+3. "go near the chair" through reach, including one tight gap.
+4. The bottle test: bottle on a taped mark; `locate_object` from 3 poses, one
+   right after a turn; the reported (x, y) within 5 cm of each other.
+
+## 6. Recommendation
 
 Start with **B1 + B2** together: both are small, both are pure integration of
 things that already exist, and together they remove the rotating, the

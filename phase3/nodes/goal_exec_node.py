@@ -5,9 +5,15 @@
     /goal_exec/pass     std_msgs/String JSON {x, y, th, frame, L, margin, vx}:
                         a pass through a tight gap (goal_exec.py PASS MODE;
                         sent by ./rover pass, which finds the gap)
+    /goal_exec/turn     geometry_msgs/PoseStamped   turn in place to the pose's
+                        heading, and only that (goal_exec.py TURN-ONLY MODE;
+                        the Pi 5 brain's L:/R: and "face it"). Position ignored
     /goal_exec/cancel   std_msgs/Empty
         -> /cmd_vel             while a goal is active, and a stop when it ends
-           /goal_exec/status    JSON, every change: state, result, why, errors
+           /goal_exec/status    JSON, every change: state, result, why, errors,
+                                and goal_stamp: the goal message's header.stamp
+                                ("sec.nanosec"), so a caller can tell its own
+                                goal's result from the one it preempted
            /goal_exec/obstacles PointCloud2 (odom), 2 Hz: what the depth camera
                                 has seen at the rover's height, 1 cm -- the
                                 points goal_exec and ./rover pass decide on
@@ -93,6 +99,7 @@ class GoalExecNode(Node):
         self.create_subscription(String, '/fusion/status', self._fstatus, 10)
         self.create_subscription(PoseStamped, '/goal_exec/goal', self._goal, 10)
         self.create_subscription(String, '/goal_exec/pass', self._pass, 10)
+        self.create_subscription(PoseStamped, '/goal_exec/turn', self._turn, 10)
         self.create_subscription(Empty, '/goal_exec/cancel', self._cancel, 10)
         self.buf = Buffer()
         self.tfl = TransformListener(self.buf, self)
@@ -139,16 +146,25 @@ class GoalExecNode(Node):
             return
         self._goal(p, pass_)
 
-    def _goal(self, m, pass_=None):
+    def _turn(self, m):
+        if self.pose is None:
+            self.goal_msg = m
+            self._say('refused', 'no pose yet')
+            return
+        self._goal(m, turn_only=True)
+
+    def _goal(self, m, pass_=None, turn_only=False):
         self.goal_msg = m
         g = self._goal_in_odom()
         if g is None:
             self._say('refused', f'no transform {m.header.frame_id} -> odom')
             return
-        self.ex.set_goal(g, pass_=pass_)
+        if turn_only:
+            g = (self.pose[0], self.pose[1], g[2])     # the turn starts here; its slide is reported
+        self.ex.set_goal(g, pass_=pass_, turn_only=turn_only)
         self.paused_since = None
-        self.get_logger().info(f'goal ({g[0]:.3f}, {g[1]:.3f}, {math.degrees(g[2]):.1f} deg) in odom '
-                               f'from {m.header.frame_id}')
+        self.get_logger().info(f'{"turn" if turn_only else "goal"} ({g[0]:.3f}, {g[1]:.3f}, '
+                               f'{math.degrees(g[2]):.1f} deg) in odom from {m.header.frame_id}')
         self._report(force=True)
 
     def _cancel(self, _):
@@ -194,7 +210,8 @@ class GoalExecNode(Node):
                 self._report(extra={'paused': unsure})
             return
         self.paused_since = None
-        if self.ex.state == 'plan' and self.goal_msg is not None and self.goal_msg.header.frame_id == 'map':
+        if (self.ex.state == 'plan' and self.goal_msg is not None and self.goal_msg.header.frame_id == 'map'
+                and not self.ex.turn_only):        # a turn's x, y are where it started, not the message's
             g = self._goal_in_odom()               # a SLAM correction since the goal arrived
             if g is not None:
                 self.ex.goal = np.array(g)
@@ -250,6 +267,11 @@ class GoalExecNode(Node):
 
     def _report(self, force=False, extra=None):
         d = {'state': self.ex.state, 'result': self.ex.result, 'why': self.ex.why, 'tries': self.ex.tries}
+        if self.goal_msg is not None:
+            st = self.goal_msg.header.stamp
+            d['goal_stamp'] = f'{st.sec}.{st.nanosec:09d}'
+        if self.ex.turn_only:
+            d['turn_only'] = True
         if self.ex.pass_:
             d['pass'] = True
             d['contacts'] = [list(x) for x in self.ex.log[-3:]]

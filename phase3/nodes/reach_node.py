@@ -3,7 +3,10 @@
 
     /reach/goal     geometry_msgs/PoseStamped (odom or map) -- RViz "2D Goal Pose"
     /reach/cancel   std_msgs/Empty
-        -> /reach/status  JSON: attempt, phase, why, result
+        -> /reach/status  JSON: attempt, phase, why, result, and goal_stamp --
+                          the goal's header.stamp ("sec.nanosec"), so a caller
+                          (the Pi 5 brain) can tell its goal's final line from
+                          the "cancelled" of the goal it just preempted
 
 WHY
     nav2 alone gives up on the first bad spell: in a 51 cm corridor its path
@@ -78,6 +81,7 @@ class Reach(GP.Pass):
         self.clear_l = self.create_client(ClearEntireCostmap, '/local_costmap/clear_entirely_local_costmap')
         self.clear_g = self.create_client(ClearEntireCostmap, '/global_costmap/clear_entirely_global_costmap')
         self.pending = None
+        self.goal_stamp = None
         self.stop_req = False
         self.create_subscription(PoseStamped, '/reach/goal', self._goal, 10)
         self.create_subscription(Empty, '/reach/cancel', lambda _: setattr(self, 'stop_req', True), 10)
@@ -90,6 +94,8 @@ class Reach(GP.Pass):
     # ── helpers ─────────────────────────────────────────────────────────────
     def say(self, **d):
         d['t'] = round(time.time(), 1)
+        if self.goal_stamp:
+            d['goal_stamp'] = self.goal_stamp
         self.pub_status.publish(String(data=json.dumps(d)))
         self.get_logger().info(json.dumps(d))
 
@@ -184,6 +190,7 @@ class Reach(GP.Pass):
 
     # ── one goal, until reached ─────────────────────────────────────────────
     def pursue(self, m):
+        self.goal_stamp = f'{m.header.stamp.sec}.{m.header.stamp.nanosec:09d}'
         self.stop_req = False
         t0 = time.time()
         g = self.goal_odom(m)

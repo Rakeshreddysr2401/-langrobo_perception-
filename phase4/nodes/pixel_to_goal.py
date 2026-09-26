@@ -51,6 +51,30 @@ been publishing into the void since it was written):
          "no_reply_from_jetson" — every OTHER failure here must still reply,
          with a reason, or the Pi 5 waits the full timeout for nothing.
 
+AT THE MOMENT OF THE PHOTO (INTELLIGENCE_PLAN.md B2, 2026-09-26)
+    The VLM takes 10-40 s to pick its pixel. This node used to project that
+    pixel with the NEWEST depth frame and the NEWEST camera pose, so anything
+    that moved in between -- the rover coasting after a turn, a search step,
+    a nudge -- put the pixel on the wrong depth, at the wrong bearing. The
+    photo carries the camera's own stamp (image_bridge keeps the header), so:
+
+    in   /vision/pixel_snapshot  geometry_msgs/PointStamped
+         header.stamp = the photo's camera stamp, sent by the Pi 5 the moment
+         it takes the frame for the VLM (point ignored, no reply). This node
+         freezes the depth frame nearest that stamp (within SNAP_MAX_DT_S)
+         and the camera's odom pose AT that stamp, for SNAPSHOTS photos.
+         Two parts because the VLM outlasts both buffers: depth frames are
+         kept ~2 s (900 KB each), TF 10 s.
+
+    /vision/pixel_query with header.stamp set grounds against that snapshot
+    (made on the spot if the photo is still inside the depth ring), so the
+    object lands where it was when photographed. "relative" and "goal" are
+    then measured from where the robot is NOW -- the object is fixed in odom,
+    the robot is not. stamp 0 = the old behaviour: newest depth, newest pose.
+    Replies add "at_capture": true/false and, when true, "capture_dt_ms".
+    A stamp with no snapshot and no ring frame fails "snapshot_expired": the
+    Pi 5 decides whether the newest view is still the same view.
+
 FRAME: odom, not map. approach.py's docstring and ros2_bridge.py's
 get_current_pose()/_nav_worker() were written assuming a `map` frame from a
 different, fuller perception stack (Isaac ROS detections_3d, a pan/tilt
@@ -88,6 +112,7 @@ import json
 import math
 import os
 import time
+from collections import OrderedDict, deque
 
 import numpy as np
 import rclpy
@@ -120,6 +145,13 @@ _MAX_SENSOR_AGE_S = 1.5   # camera_info / depth older than this = stale, refuse
 _DEPTH_WINDOWS = (2, 5, 10, 18)   # half-widths tried in order: 5x5, 11x11, 21x21, 37x37
 _MIN_DEPTH_M = 0.3        # D555 depth is blind closer than this
 _MAX_DEPTH_M = 6.0        # beyond this the reading is usually noise
+
+# Photo-time grounding (see AT THE MOMENT OF THE PHOTO above).
+DEPTH_RING_S = 2.0        # depth frames kept this long ...
+DEPTH_RING_DT = 0.09      # ... at most one per this: ~22 x 900 KB
+SNAP_MAX_DT_S = 0.10      # nearest depth frame must be this close to the photo
+SNAPSHOTS = 8             # photos remembered (a VLM call is 10-40 s; one at a time)
+SNAP_RETRY_S = 0.6        # TF for the stamp not in yet: retry this long
 
 
 def compute_standoff_goal(rx, ry, ox, oy, standoff):
@@ -170,6 +202,9 @@ class PixelToGoal(Node):
         self._camera_info_at = 0.0
         self._depth = None
         self._depth_at = 0.0
+        self._ring = deque()                 # (stamp_ns, depth array)
+        self._snaps = OrderedDict()          # stamp_ns -> {depth, cam_tf, dt_ms}
+        self._snap_pending = []              # (stamp_ns, first try, monotonic)
 
         self.create_subscription(
             CameraInfo, '/camera/camera0/color/camera_info', self._on_camera_info, 5)
@@ -177,6 +212,9 @@ class PixelToGoal(Node):
             Image, '/camera/camera0/aligned_depth_to_color/image_raw', self._on_depth, 1)
         self.create_subscription(
             PointStamped, '/vision/pixel_query', self._on_query, 5)
+        self.create_subscription(
+            PointStamped, '/vision/pixel_snapshot', self._on_snapshot, 5)
+        self.create_timer(0.1, self._retry_snapshots)
         self._result_pub = self.create_publisher(String, '/vision/pixel_result', 5)
         self.get_logger().info('pixel_to_goal up — waiting for /vision/pixel_query')
 
@@ -185,12 +223,69 @@ class PixelToGoal(Node):
         self._camera_info_at = time.monotonic()
 
     def _on_depth(self, msg: Image) -> None:
+        stamp_ns = msg.header.stamp.sec * 1_000_000_000 + msg.header.stamp.nanosec
+        if self._ring and stamp_ns - self._ring[-1][0] < DEPTH_RING_DT * 1e9:
+            return                           # decimated: no decode for a frame nobody keeps
         try:
-            self._depth = self._cv_bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
+            depth = self._cv_bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
         except Exception as e:
             self.get_logger().warning(f'depth imgmsg_to_cv2 failed: {e}', throttle_duration_sec=5.0)
             return
+        self._depth = depth
         self._depth_at = time.monotonic()
+        self._ring.append((stamp_ns, depth))
+        while self._ring and stamp_ns - self._ring[0][0] > DEPTH_RING_S * 1e9:
+            self._ring.popleft()
+
+    # ── photo-time snapshots ────────────────────────────────────────────────
+    def _make_snapshot(self, stamp_ns: int) -> tuple:
+        """(snapshot, '') or (None, reason). reason 'tf_not_yet' is retryable."""
+        info = self._camera_info
+        if info is None:
+            return None, 'no_camera_info'
+        if not self._ring:
+            return None, 'no_depth_frame'
+        near_ns, depth = min(self._ring, key=lambda f: abs(f[0] - stamp_ns))
+        dt = abs(near_ns - stamp_ns) / 1e9
+        if dt > SNAP_MAX_DT_S:
+            # older than the ring: gone. Otherwise the depth stream had a gap there.
+            return None, ('snapshot_expired' if stamp_ns < self._ring[0][0]
+                          else f'no_depth_near_stamp:{dt * 1000:.0f}ms')
+        try:
+            cam_tf = self._tf_buffer.lookup_transform(
+                'odom', info.header.frame_id, Time(nanoseconds=stamp_ns))
+        except Exception as e:
+            name = type(e).__name__
+            return None, ('tf_not_yet' if 'Extrapolation' in name else f'tf_failed:{name}')
+        snap = {'depth': depth, 'cam_tf': cam_tf, 'dt_ms': round(dt * 1000, 1)}
+        self._snaps[stamp_ns] = snap
+        while len(self._snaps) > SNAPSHOTS:
+            self._snaps.popitem(last=False)
+        return snap, ''
+
+    def _on_snapshot(self, msg: PointStamped) -> None:
+        stamp_ns = msg.header.stamp.sec * 1_000_000_000 + msg.header.stamp.nanosec
+        if stamp_ns == 0 or stamp_ns in self._snaps:
+            return
+        snap, why = self._make_snapshot(stamp_ns)
+        if snap is not None:
+            self.get_logger().info(f'snapshot {stamp_ns}: depth {snap["dt_ms"]} ms from the photo')
+        elif why == 'tf_not_yet':
+            self._snap_pending.append((stamp_ns, time.monotonic()))
+        else:
+            self.get_logger().warning(f'snapshot {stamp_ns}: {why}')
+
+    def _retry_snapshots(self) -> None:
+        keep = []
+        for stamp_ns, t0 in self._snap_pending:
+            snap, why = self._make_snapshot(stamp_ns)
+            if snap is not None:
+                self.get_logger().info(f'snapshot {stamp_ns}: depth {snap["dt_ms"]} ms from the photo (retried)')
+            elif why == 'tf_not_yet' and time.monotonic() - t0 < SNAP_RETRY_S:
+                keep.append((stamp_ns, t0))
+            else:
+                self.get_logger().warning(f'snapshot {stamp_ns}: {why}')
+        self._snap_pending = keep
 
     def _reply(self, req_id: str, ok: bool, **fields) -> None:
         self._result_pub.publish(String(data=json.dumps({"id": req_id, "ok": ok, **fields})))
@@ -214,17 +309,31 @@ class PixelToGoal(Node):
         req_id = msg.header.frame_id
         u, v = msg.point.x, msg.point.y
         now = time.monotonic()
+        stamp_ns = msg.header.stamp.sec * 1_000_000_000 + msg.header.stamp.nanosec
 
         info = self._camera_info
         if info is None or now - self._camera_info_at > _MAX_SENSOR_AGE_S:
             self.get_logger().warning(f'query {req_id} ({u:.0f},{v:.0f}): no_camera_info')
             self._reply(req_id, False, reason="no_camera_info")
             return
-        depth = self._depth
-        if depth is None or now - self._depth_at > _MAX_SENSOR_AGE_S:
-            self.get_logger().warning(f'query {req_id} ({u:.0f},{v:.0f}): no_depth_frame')
-            self._reply(req_id, False, reason="no_depth_frame")
-            return
+        snap = None
+        if stamp_ns:
+            # the photo's own depth and camera pose (AT THE MOMENT OF THE PHOTO)
+            snap = self._snaps.get(stamp_ns)
+            if snap is None:
+                snap, why = self._make_snapshot(stamp_ns)
+                if snap is None:
+                    why = 'snapshot_expired' if why == 'tf_not_yet' else why
+                    self.get_logger().warning(f'query {req_id} ({u:.0f},{v:.0f}): {why}')
+                    self._reply(req_id, False, reason=why.split(':')[0])
+                    return
+            depth = snap['depth']
+        else:
+            depth = self._depth
+            if depth is None or now - self._depth_at > _MAX_SENSOR_AGE_S:
+                self.get_logger().warning(f'query {req_id} ({u:.0f},{v:.0f}): no_depth_frame')
+                self._reply(req_id, False, reason="no_depth_frame")
+                return
 
         ui, vi = int(round(u)), int(round(v))
         h, w = depth.shape[:2]
@@ -263,12 +372,15 @@ class PixelToGoal(Node):
         # failure. Latest-available (Time()) is right anyway — cuVSLAM
         # publishes odom->base_link at 20 Hz and the depth frame this pixel
         # came from is already gated at _MAX_SENSOR_AGE_S.
-        try:
-            cam_to_odom = self._tf_buffer.lookup_transform(
-                'odom', info.header.frame_id, Time())
-        except Exception as e:
-            self._reply(req_id, False, reason=f"tf_failed:{type(e).__name__}")
-            return
+        if snap is not None:
+            cam_to_odom = snap['cam_tf']          # where the camera was when the photo was taken
+        else:
+            try:
+                cam_to_odom = self._tf_buffer.lookup_transform(
+                    'odom', info.header.frame_id, Time())
+            except Exception as e:
+                self._reply(req_id, False, reason=f"tf_failed:{type(e).__name__}")
+                return
 
         t = cam_to_odom.transform.translation
         rot_x, rot_y, rot_z = _rotate_by_quat(
@@ -295,7 +407,10 @@ class PixelToGoal(Node):
         forward = dx * math.cos(r_yaw) + dy * math.sin(r_yaw)
         left = -dx * math.sin(r_yaw) + dy * math.cos(r_yaw)
 
-        self._reply(req_id, True,
+        extra = {"at_capture": snap is not None}
+        if snap is not None:
+            extra["capture_dt_ms"] = snap['dt_ms']
+        self._reply(req_id, True, **extra,
                    goal={"x": round(gx, 3), "y": round(gy, 3), "yaw": round(yaw, 4)},
                    depth_m=round(depth_m, 2),
                    object={"x": round(ox, 3), "y": round(oy, 3)},
