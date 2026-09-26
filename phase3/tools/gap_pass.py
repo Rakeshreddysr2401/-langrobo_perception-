@@ -143,7 +143,7 @@ def corridor_markers(stamp, pose, g, D, margin, ok):
 
 
 class Pass(Node):
-    def __init__(self, name='gap_pass'):
+    def __init__(self, name='gap_pass', depth_active=True):
         super().__init__(name)
         self.pose, self.scan_pts, self.status = None, None, []
         self.buf = Buffer()
@@ -157,7 +157,7 @@ class Pass(Node):
         # latched, so RViz shows the last measurement whenever it looks
         self.pub_mk = self.create_publisher(MarkerArray, '/gap_pass/markers', QoSProfile(
             depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
-        self.dobs = DepthObstacles(self, self.buf, lambda: self.pose)
+        self.dobs = DepthObstacles(self, self.buf, lambda: self.pose, active=depth_active)
         self.mount = None
         self.scans = []
         self.pose_t = self.scan_t = 0.0

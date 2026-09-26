@@ -68,6 +68,7 @@ SD_MAX_CM = 3.0
 DEPTH_STALE_S = 1.0             # pass mode stops without a camera update this recent
 SCAN_STALE_S = 0.5              # no scan this recent: the checks would run on a frozen view
 PAUSE_S = 5.0
+DEPTH_WARM_S = 2.0              # after a goal arrives, wait this long at most for a first depth view
 
 
 def yaw_of(q):
@@ -105,7 +106,8 @@ class GoalExecNode(Node):
         self.tfl = TransformListener(self.buf, self)
         self.mount = None
         self.pass_ = None
-        self.dobs = DepthObstacles(self, self.buf, lambda: self.pose)
+        self.dobs = DepthObstacles(self, self.buf, lambda: self.pose, active=False)   # only during a goal
+        self.warm_until = 0.0
         self.get_logger().info(f'goal_exec up; pivot prior {prior}')
 
     # ── inputs ──────────────────────────────────────────────────────────────
@@ -162,6 +164,8 @@ class GoalExecNode(Node):
         if turn_only:
             g = (self.pose[0], self.pose[1], g[2])     # the turn starts here; its slide is reported
         self.ex.set_goal(g, pass_=pass_, turn_only=turn_only)
+        self.dobs.set_active(True)
+        self.warm_until = time.time() + DEPTH_WARM_S
         self.paused_since = None
         self.get_logger().info(f'{"turn" if turn_only else "goal"} ({g[0]:.3f}, {g[1]:.3f}, '
                                f'{math.degrees(g[2]):.1f} deg) in odom from {m.header.frame_id}')
@@ -171,6 +175,7 @@ class GoalExecNode(Node):
         if self.ex.state not in ('idle', 'done'):
             self.ex.cancel('cancelled')
             self._stop()
+            self.dobs.set_active(False)
             self._report(force=True)
 
     def _goal_in_odom(self):
@@ -216,6 +221,10 @@ class GoalExecNode(Node):
             if g is not None:
                 self.ex.goal = np.array(g)
                 self.ex.u = np.array([math.cos(g[2]), math.sin(g[2])])
+        if self.dobs.age() > 0.5 and time.time() < self.warm_until:
+            self._stop()                           # depth just switched on: one fresh view first
+            self._report(extra={'paused': 'waiting for the depth camera'})
+            return
         if self.ex.pass_ and self.dobs.age() > DEPTH_STALE_S:
             # a pass is judged on the camera as much as the LiDAR (a stool's
             # legs are camera-only): no fresh camera view, no pass
@@ -258,6 +267,7 @@ class GoalExecNode(Node):
 
     def _finish(self):
         self._stop()
+        self.dobs.set_active(False)
         try:
             PIVOT_FILE.write_text(json.dumps(self.ex.pivot_state()))
         except OSError:

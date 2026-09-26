@@ -80,7 +80,7 @@ class DepthObstacles:
         dobs = DepthObstacles(node, tf_buffer, lambda: node.pose)
         dobs.points_base()  -> N x 2, base_link"""
 
-    def __init__(self, node, tf_buffer, get_pose):
+    def __init__(self, node, tf_buffer, get_pose, active=True):
         self.node, self.buf, self.get_pose = node, tf_buffer, get_pose
         self.K = None
         self.cam = None                  # (R, t) camera optical -> base_link
@@ -97,7 +97,25 @@ class DepthObstacles:
         # Depth 5, not 1: a frame is ~800 KB in fragments, and with a history
         # of 1 each new frame's fragments evicted the one being reassembled --
         # no image ever arrived (2026-09-26).
-        node.create_subscription(Image, DEPTH, self._raw, qos_profile_sensor_data, raw=True)
+        self.sub = None
+        self.set_active(active)
+
+    def set_active(self, on: bool) -> None:
+        """Subscribe to depth only while someone needs it.
+
+        Receiving is the cost, not decoding: every ~800 KB frame, ~25 a second,
+        crosses into Python even though only RATE_HZ are decoded. Idle,
+        goal_exec and reach did that all day -- ~40% CPU each, measured
+        2026-09-26 -- on a Jetson at 76-88% on every core, where the camera
+        driver ("callback took too long") then dropped depth for up to 9 s and
+        the brain could not measure an object it had just found. The memory
+        is kept while inactive; it just is not updated."""
+        if on and self.sub is None:
+            self.sub = self.node.create_subscription(Image, DEPTH, self._raw, qos_profile_sensor_data,
+                                                     raw=True)
+        elif not on and self.sub is not None:
+            self.node.destroy_subscription(self.sub)
+            self.sub = None
 
     def _info(self, m):
         if self.K is None:

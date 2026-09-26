@@ -74,7 +74,7 @@ def pose_msg(frame, x, y, th):
 
 class Reach(GP.Pass):
     def __init__(self):
-        super().__init__('reach')
+        super().__init__('reach', depth_active=False)   # depth only while pursuing a goal
         self.nav = ActionClient(self, NavigateToPose, 'navigate_to_pose')
         self.ge_goal = self.create_publisher(PoseStamped, '/goal_exec/goal', 10)
         self.pub_status = self.create_publisher(String, '/reach/status', 10)
@@ -190,6 +190,13 @@ class Reach(GP.Pass):
 
     # ── one goal, until reached ─────────────────────────────────────────────
     def pursue(self, m):
+        self.dobs.set_active(True)
+        try:
+            self._pursue(m)
+        finally:
+            self.dobs.set_active(False)
+
+    def _pursue(self, m):
         self.goal_stamp = f'{m.header.stamp.sec}.{m.header.stamp.nanosec:09d}'
         self.stop_req = False
         t0 = time.time()
