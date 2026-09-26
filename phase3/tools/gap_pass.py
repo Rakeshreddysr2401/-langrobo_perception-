@@ -143,8 +143,8 @@ def corridor_markers(stamp, pose, g, D, margin, ok):
 
 
 class Pass(Node):
-    def __init__(self):
-        super().__init__('gap_pass')
+    def __init__(self, name='gap_pass'):
+        super().__init__(name)
         self.pose, self.scan_pts, self.status = None, None, []
         self.buf = Buffer()
         self.tfl = TransformListener(self.buf, self)
@@ -186,39 +186,57 @@ class Pass(Node):
             rclpy.spin_once(self, timeout_sec=0.05)
 
 
-def look(n, deg):
-    """Turn deg left, back, deg right, back, on the fused heading; each swing
-    checked first against the outline swept about the learned pivot (5 cm).
-    The depth memory fills in as it turns (it is in odom)."""
+def _ex():
     try:
         prior = json.loads(PIVOT_FILE.read_text())
     except (OSError, ValueError):
         prior = None
-    ex = GoalExec(prior)
+    return GoalExec(prior)
+
+
+def turn_to(n, heading, ex=None, tol_deg=3.0):
+    """Turn in place to `heading` (odom) on the fused heading; the swing is
+    checked first against the outline swept about the learned pivot (5 cm).
+    Returns '' or why it did not turn."""
+    ex = ex or _ex()
+    e = wrap(heading - n.pose[2])
+    pts = np.vstack(n.scans[-3:] + [n.dobs.points_base(n.pose)])
+    ok, why = ex.turn_clear(pts, e)
+    if not ok:
+        return why
+    t0, last = time.time(), None
+    while time.time() - t0 < 8.0:
+        n.spin_for(0.05)
+        e = wrap(heading - n.pose[2])
+        w_meas = 0.0 if last is None else wrap(n.pose[2] - last[1]) / max(time.time() - last[0], 1e-3)
+        last = (time.time(), n.pose[2])
+        lead = abs(w_meas) * ex.STOP_LEAD if w_meas * e > 0 else 0.0
+        if abs(e) <= max(math.radians(tol_deg), lead):
+            break
+        tw = Twist()
+        tw.angular.z = math.copysign(min(ex.WZ_MAX, max(ex.WZ_MIN, ex.K_TH * abs(e))), e)
+        n.cmd.publish(tw)
+    for _ in range(3):
+        n.cmd.publish(Twist())
+    n.spin_for(0.6)                               # let it settle; the camera catches up
+    return ''
+
+
+def look_to(n, heading):
+    why = turn_to(n, heading)
+    if why:
+        print(f'  face: skipped ({why})')
+
+
+def look(n, deg):
+    """Turn deg left, back, deg right, back. The depth memory fills in as it
+    turns (it is in odom)."""
+    ex = _ex()
     th0 = n.pose[2]
     for target in (deg, 0.0, -deg, 0.0):
-        goal = wrap(th0 + math.radians(target))
-        e = wrap(goal - n.pose[2])
-        pts = np.vstack(n.scans[-3:] + [n.dobs.points_base(n.pose)])
-        ok, why = ex.turn_clear(pts, e)
-        if not ok:
+        why = turn_to(n, wrap(th0 + math.radians(target)), ex)
+        if why:
             print(f'  look: skipped the turn to {target:+.0f} deg ({why})')
-            continue
-        t0, last = time.time(), None
-        while time.time() - t0 < 8.0:
-            n.spin_for(0.05)
-            e = wrap(goal - n.pose[2])
-            w_meas = 0.0 if last is None else wrap(n.pose[2] - last[1]) / max(time.time() - last[0], 1e-3)
-            last = (time.time(), n.pose[2])
-            lead = abs(w_meas) * ex.STOP_LEAD if w_meas * e > 0 else 0.0
-            if abs(e) <= max(math.radians(3.0), lead):
-                break
-            tw = Twist()
-            tw.angular.z = math.copysign(min(ex.WZ_MAX, max(ex.WZ_MIN, ex.K_TH * abs(e))), e)
-            n.cmd.publish(tw)
-        for _ in range(3):
-            n.cmd.publish(Twist())
-        n.spin_for(0.6)                           # let it settle; the camera catches up
     print(f'  look: ±{deg:.0f} deg done, heading {math.degrees(wrap(n.pose[2] - th0)):+.1f} deg from the start, '
           f'depth memory {len(n.dobs.points_base(n.pose))} points')
 
