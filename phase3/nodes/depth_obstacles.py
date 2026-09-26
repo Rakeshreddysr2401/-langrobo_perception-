@@ -37,11 +37,13 @@ FILTERS
               dropped: the depth camera's flying pixels at object edges.
     repeats   a voxel counts once seen in MIN_HITS updates.
 """
+import json
 import math
 import time
+from pathlib import Path
 
 import numpy as np
-from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
+from rclpy.qos import qos_profile_sensor_data
 from rclpy.serialization import deserialize_message
 from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo, Image
@@ -58,6 +60,12 @@ MEM_S = 120.0
 MIN_HITS = 2
 SEE_THROUGH = 0.04              # m beyond a voxel that proves it gone
 EDGE = 0.05                     # m of depth spread that marks a flying pixel
+# The camera mount (base_link -> depth optical) is static and calibrated, but
+# a node flooded by 30 Hz images and /tf could go 15 s+ without receiving it
+# from /tf_static -- and without it the camera is blind (./rover pass refused
+# on "0 frames", 2026-09-26). Saved on every live lookup, used after TF_WAIT.
+CAM_CACHE = Path('/logs/calib/depth_cam_tf.json')
+TF_WAIT = 3.0                   # s
 
 
 def quat_R(q):
@@ -80,12 +88,16 @@ class DepthObstacles:
         self.last_t = 0.0
         self.frames = 0
         self.updated = 0.0               # time of the last completed update
+        self.first_img = 0.0
+        self.cam_src = None
         node.create_subscription(CameraInfo, INFO, self._info, qos_profile_sensor_data)
         # RAW: the camera sends 30 Hz; decoding every frame in Python starved
         # the node under load (0 frames in 12 s while the recorder ran,
         # 2026-09-26). Only the RATE_HZ frames used are deserialized.
-        node.create_subscription(Image, DEPTH, self._raw, QoSProfile(
-            depth=1, reliability=ReliabilityPolicy.BEST_EFFORT), raw=True)
+        # Depth 5, not 1: a frame is ~800 KB in fragments, and with a history
+        # of 1 each new frame's fragments evicted the one being reassembled --
+        # no image ever arrived (2026-09-26).
+        node.create_subscription(Image, DEPTH, self._raw, qos_profile_sensor_data, raw=True)
 
     def _info(self, m):
         if self.K is None:
@@ -105,17 +117,44 @@ class DepthObstacles:
         pose = self.get_pose()
         if pose is None:
             return
-        if self.cam is None:
-            if not self.buf.can_transform('base_link', m.header.frame_id, Time()):
+        if self.cam is None or self.cam_src == 'cache':
+            self._mount(m.header.frame_id, now)
+            if self.cam is None:
                 return
-            tr = self.buf.lookup_transform('base_link', m.header.frame_id, Time()).transform
-            self.cam = (quat_R(tr.rotation), np.array([tr.translation.x, tr.translation.y, tr.translation.z]))
         self.last_t = now
         if m.encoding not in ('16UC1', 'mono16'):
             return
         d = np.frombuffer(m.data, dtype=np.uint16).reshape(m.height, m.width)[::STRIDE, ::STRIDE]
         d = d.astype(np.float32) * 0.001
         self.update(d, pose, now)
+
+    def _mount(self, frame, now):
+        self.first_img = self.first_img or now
+        if self.buf.can_transform('base_link', frame, Time()):
+            tr = self.buf.lookup_transform('base_link', frame, Time()).transform
+            q = [tr.rotation.x, tr.rotation.y, tr.rotation.z, tr.rotation.w]
+            t = [tr.translation.x, tr.translation.y, tr.translation.z]
+            self.cam = (quat_R(tr.rotation), np.array(t))
+            self.cam_src = 'tf'
+            try:
+                CAM_CACHE.parent.mkdir(parents=True, exist_ok=True)
+                CAM_CACHE.write_text(json.dumps({'frame': frame, 'q': q, 't': t, 'saved': time.time()}))
+            except OSError:
+                pass
+        elif self.cam is None and now - self.first_img > TF_WAIT:
+            try:
+                d = json.loads(CAM_CACHE.read_text())
+            except (OSError, ValueError):
+                return
+            if d.get('frame') != frame:
+                return
+            class _Q:
+                pass
+            q = _Q()
+            q.x, q.y, q.z, q.w = d['q']
+            self.cam = (quat_R(q), np.array(d['t']))
+            self.cam_src = 'cache'
+            self.node.get_logger().warn(f'depth camera mount from {CAM_CACHE} (no /tf_static after {TF_WAIT:.0f} s)')
 
     # ── the model, no ROS (testable) ────────────────────────────────────────
     def update(self, d, pose, now):
