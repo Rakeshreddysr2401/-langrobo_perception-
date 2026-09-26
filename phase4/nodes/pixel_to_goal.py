@@ -75,6 +75,25 @@ AT THE MOMENT OF THE PHOTO (INTELLIGENCE_PLAN.md B2, 2026-09-26)
     A stamp with no snapshot and no ring frame fails "snapshot_expired": the
     Pi 5 decides whether the newest view is still the same view.
 
+THE OBJECT'S BOX, NOT ONE PIXEL (2026-09-26)
+    Floor test: a bottle 1 m ahead was placed at two positions 65 cm apart.
+    The VLM (Gemma 4 12B) had pointed at the top edge of the cap, and the
+    depth there was the door behind it. Measured on one photo against four
+    objects: Gemma's x is good to ~5 px, its y is off by up to ~45 px either
+    way (a handle 40 px low, the bottle 45 px high). One pixel on a thin
+    object is a coin toss between the object and its background.
+
+    So the query may carry the VLM's box: header.frame_id = "<id>;box=x0,y0,x1,y1"
+    (colour pixels; the reply's id is <id>). Then every valid depth pixel in
+    the box -- widened by BOX_PAD_Y px up and down for the y error -- is put
+    in odom with the photo's camera pose, points under FLOOR_Z (the floor is
+    z = 0: base_link is on it, the plane calibrated to 3.5 mm) are dropped,
+    and the NEAREST dense slab of what is left (CLUSTER_N points within
+    CLUSTER_DEPTH of each other in range) is the object: an object stands in
+    front of its background. Its median is the object point. Nothing left
+    above the floor (a flat thing) -> the old centre-pixel sample, and the
+    reply says "region": false. Replies add "region": true, "points": N.
+
 FRAME: odom, not map. approach.py's docstring and ros2_bridge.py's
 get_current_pose()/_nav_worker() were written assuming a `map` frame from a
 different, fuller perception stack (Isaac ROS detections_3d, a pan/tilt
@@ -153,6 +172,15 @@ SNAP_MAX_DT_S = 0.10      # nearest depth frame must be this close to the photo
 SNAPSHOTS = 8             # photos remembered (a VLM call is 10-40 s; one at a time)
 SNAP_RETRY_S = 0.6        # TF for the stamp not in yet: retry this long
 
+# Box grounding (see THE OBJECT'S BOX, NOT ONE PIXEL above).
+BOX_PAD_Y = 45            # px added above and below: the VLM's measured y error
+BOX_PAD_X = 6             # px either side: its x error
+BOX_STEP = 2              # sample every 2nd pixel: ~4x fewer points, same answer
+FLOOR_Z = 0.04            # m in odom: at or under this is floor (plane 3.5 mm rms, depth noise)
+TOP_Z = 1.5               # m: above this is not a thing on or near the floor
+CLUSTER_DEPTH = 0.10      # m of range: one object's front-to-back slab
+CLUSTER_MIN = 12          # points for a slab to count (not a speck of noise)
+
 
 def compute_standoff_goal(rx, ry, ox, oy, standoff):
     """Nav2 goal (gx, gy, yaw_rad) that parks `standoff` metres short of the
@@ -167,6 +195,39 @@ def compute_standoff_goal(rx, ry, ox, oy, standoff):
         return rx, ry, yaw
     scale = (dist - standoff) / dist
     return rx + dx * scale, ry + dy * scale, yaw
+
+
+def _quat_matrix(q) -> np.ndarray:
+    """3x3 rotation matrix of quaternion q (x, y, z, w)."""
+    x, y, z, w = q.x, q.y, q.z, q.w
+    return np.array([
+        [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+        [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+        [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]])
+
+
+def nearest_slab(pts: np.ndarray, cam_xy: tuple, depth_slab=None, min_n=None):
+    """The nearest dense slab of points (N x 3, odom) as seen from the camera
+    at cam_xy: points within depth_slab of each other in horizontal range,
+    at least min_n of them, the nearest such. Returns (median point, indices
+    into pts) or (None, empty). Pure: unit-testable without ROS."""
+    depth_slab = CLUSTER_DEPTH if depth_slab is None else depth_slab
+    min_n = CLUSTER_MIN if min_n is None else min_n
+    none = (None, np.zeros(0, dtype=int))
+    if len(pts) < min_n:
+        return none
+    r = np.hypot(pts[:, 0] - cam_xy[0], pts[:, 1] - cam_xy[1])
+    order = np.argsort(r)
+    rs = r[order]
+    # for each point (nearest first), how many lie within depth_slab behind it
+    ends = np.searchsorted(rs, rs + depth_slab, side='right')
+    counts = ends - np.arange(len(rs))
+    ok = np.nonzero(counts >= min_n)[0]
+    if len(ok) == 0:
+        return none
+    i = ok[0]
+    idx = order[i:ends[i]]
+    return np.median(pts[idx], axis=0), idx
 
 
 def _yaw_from_quat(q) -> float:
@@ -290,6 +351,31 @@ class PixelToGoal(Node):
     def _reply(self, req_id: str, ok: bool, **fields) -> None:
         self._result_pub.publish(String(data=json.dumps({"id": req_id, "ok": ok, **fields})))
 
+    def _ground_box(self, depth, box, K, cam_to_odom):
+        """The object in a VLM box: ((x, y, z) odom, n points, depth_m) or None.
+        See THE OBJECT'S BOX, NOT ONE PIXEL."""
+        fx, fy, cx, cy = K
+        h, w = depth.shape[:2]
+        x0, y0, x1, y1 = box
+        x0, x1 = int(max(0, min(x0, x1) - BOX_PAD_X)), int(min(w - 1, max(x0, x1) + BOX_PAD_X))
+        y0, y1 = int(max(0, min(y0, y1) - BOX_PAD_Y)), int(min(h - 1, max(y0, y1) + BOX_PAD_Y))
+        if x1 <= x0 or y1 <= y0:
+            return None
+        vs, us = np.mgrid[y0:y1 + 1:BOX_STEP, x0:x1 + 1:BOX_STEP]
+        z = depth[vs, us].astype(np.float64) / 1000.0
+        ok = (z >= _MIN_DEPTH_M) & (z <= _MAX_DEPTH_M)
+        if not ok.any():
+            return None
+        z, us, vs = z[ok], us[ok], vs[ok]
+        cam = np.stack([(us - cx) * z / fx, (vs - cy) * z / fy, z], 1)
+        tr = cam_to_odom.transform.translation
+        pts = cam @ _quat_matrix(cam_to_odom.transform.rotation).T + np.array([tr.x, tr.y, tr.z])
+        keep = (pts[:, 2] > FLOOR_Z) & (pts[:, 2] < TOP_Z)
+        centre, idx = nearest_slab(pts[keep], (tr.x, tr.y))
+        if centre is None:
+            return None
+        return (float(centre[0]), float(centre[1]), float(centre[2])), len(idx), float(np.median(z[keep][idx]))
+
     def _sample_depth(self, depth: np.ndarray, ui: int, vi: int) -> tuple:
         """Median depth (mm) near (ui, vi), trying each window in
         _DEPTH_WINDOWS until one has valid data. Returns (depth_mm,
@@ -306,7 +392,15 @@ class PixelToGoal(Node):
         return None, half
 
     def _on_query(self, msg: PointStamped) -> None:
-        req_id = msg.header.frame_id
+        req_id, _, opts = msg.header.frame_id.partition(';')
+        box = None
+        if opts.startswith('box='):
+            try:
+                box = [float(a) for a in opts[4:].split(',')]
+                if len(box) != 4:
+                    box = None
+            except ValueError:
+                box = None
         u, v = msg.point.x, msg.point.y
         now = time.monotonic()
         stamp_ns = msg.header.stamp.sec * 1_000_000_000 + msg.header.stamp.nanosec
@@ -343,35 +437,13 @@ class PixelToGoal(Node):
             self._reply(req_id, False, reason="pixel_out_of_bounds")
             return
 
-        depth_mm, half = self._sample_depth(depth, ui, vi)
-        if depth_mm is None:
-            self.get_logger().warning(
-                f'query {req_id} ({ui},{vi}): no valid depth within {2*half+1}x{2*half+1} window')
-            self._reply(req_id, False, reason="no_depth_at_pixel")
-            return
-        depth_m = depth_mm / 1000.0   # D400-series depth is mm, uint16
-        if not (_MIN_DEPTH_M <= depth_m <= _MAX_DEPTH_M):
-            self.get_logger().warning(
-                f'query {req_id} ({ui},{vi}): depth {depth_m:.2f}m out of range')
-            self._reply(req_id, False, reason="depth_out_of_range")
-            return
-        self.get_logger().info(
-            f'query {req_id} ({ui},{vi}): depth {depth_m:.2f}m (window ±{half}px)')
-
-        fx, fy = info.k[0], info.k[4]
-        cx, cy = info.k[2], info.k[5]
-        x_cam = (u - cx) * depth_m / fx
-        y_cam = (v - cy) * depth_m / fy
-        z_cam = depth_m   # optical-frame convention: Z forward, X right, Y down
-
         # NO TIMEOUT. This runs in _on_query, i.e. inside the single-threaded
         # executor's callback — the very thread the TransformListener needs in
         # order to consume /tf and fill the buffer. Blocking here cannot
         # succeed: the buffer can only be filled by the thread we are blocking,
         # so a 0.5s timeout was a guaranteed 0.5s stall followed by the same
-        # failure. Latest-available (Time()) is right anyway — cuVSLAM
-        # publishes odom->base_link at 20 Hz and the depth frame this pixel
-        # came from is already gated at _MAX_SENSOR_AGE_S.
+        # failure. Latest-available (Time()) is right for an unstamped query;
+        # a stamped one uses the photo's own camera pose (snapshot).
         if snap is not None:
             cam_to_odom = snap['cam_tf']          # where the camera was when the photo was taken
         else:
@@ -381,11 +453,39 @@ class PixelToGoal(Node):
             except Exception as e:
                 self._reply(req_id, False, reason=f"tf_failed:{type(e).__name__}")
                 return
-
         t = cam_to_odom.transform.translation
-        rot_x, rot_y, rot_z = _rotate_by_quat(
-            x_cam, y_cam, z_cam, cam_to_odom.transform.rotation)
-        ox, oy = t.x + rot_x, t.y + rot_y
+        fx, fy = info.k[0], info.k[4]
+        cx, cy = info.k[2], info.k[5]
+
+        region = None
+        if box is not None:
+            region = self._ground_box(depth, box, (fx, fy, cx, cy), cam_to_odom)
+        if region is not None:
+            (ox, oy, oz), n_pts, depth_m = region
+            extra_log = f'box {[round(b) for b in box]}: {n_pts} points above the floor, nearest slab'
+        else:
+            depth_mm, half = self._sample_depth(depth, ui, vi)
+            if depth_mm is None:
+                self.get_logger().warning(
+                    f'query {req_id} ({ui},{vi}): no valid depth within {2*half+1}x{2*half+1} window')
+                self._reply(req_id, False, reason="no_depth_at_pixel")
+                return
+            depth_m = depth_mm / 1000.0   # D400-series depth is mm, uint16
+            if not (_MIN_DEPTH_M <= depth_m <= _MAX_DEPTH_M):
+                self.get_logger().warning(
+                    f'query {req_id} ({ui},{vi}): depth {depth_m:.2f}m out of range')
+                self._reply(req_id, False, reason="depth_out_of_range")
+                return
+            x_cam = (u - cx) * depth_m / fx
+            y_cam = (v - cy) * depth_m / fy
+            z_cam = depth_m   # optical-frame convention: Z forward, X right, Y down
+            rot_x, rot_y, rot_z = _rotate_by_quat(
+                x_cam, y_cam, z_cam, cam_to_odom.transform.rotation)
+            ox, oy = t.x + rot_x, t.y + rot_y
+            n_pts = 0
+            extra_log = f'window ±{half}px' + (' (box: nothing above the floor)' if box else '')
+        self.get_logger().info(
+            f'query {req_id} ({ui},{vi}): depth {depth_m:.2f}m ({extra_log})')
 
         try:
             base_tf = self._tf_buffer.lookup_transform('odom', 'base_link', Time())
@@ -407,7 +507,9 @@ class PixelToGoal(Node):
         forward = dx * math.cos(r_yaw) + dy * math.sin(r_yaw)
         left = -dx * math.sin(r_yaw) + dy * math.cos(r_yaw)
 
-        extra = {"at_capture": snap is not None}
+        extra = {"at_capture": snap is not None, "region": region is not None}
+        if region is not None:
+            extra["points"] = n_pts
         if snap is not None:
             extra["capture_dt_ms"] = snap['dt_ms']
         self._reply(req_id, True, **extra,

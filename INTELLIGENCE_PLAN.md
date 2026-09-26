@@ -233,12 +233,18 @@ Both repos: rover `phase3/nodes/goal_exec*.py`, `reach_node.py`,
 - Pi 5 tests: 228 pass (213 before, plus 15 for exact moves and photo-time
   grounding).
 
-**Not yet graded, and needs the owner watching the floor:**
-1. `move_robot L:90` × 6 each way: heading error < 2° (vs LiDAR truth).
-2. `move_robot F:60,L:90,F:30`: every step reported with its measured values.
-3. "go near the chair" through reach, including one tight gap.
-4. The bottle test: bottle on a taped mark; `locate_object` from 3 poses, one
-   right after a turn; the reported (x, y) within 5 cm of each other.
+**Floor tests with the owner, 2026-09-26** (the brain's own code path,
+`move_robot` / `_capture` / `_vlm_locate` / `_ground` on the real bridge):
+
+| test | first run | fix | after |
+|---|---|---|---|
+| `L:90` ×3, `R:90` ×3 | 5/6 within 2°; one R:90 **failed "−5.6° after 8 tries"** | goal_exec judged the retries while the rover still coasted, and measured the turn rate from arrival times (poses stamped 50 ms apart arrived 0.6–441 ms apart). Reproduced in the simulator (1/10), fixed: settle before judging, rate over ≥ 40 ms, the pose stamp as the clock | **6/6 within 2°** (0.5–1.8°, all slightly short); slides 6.5–21.5 cm (timed: 31–68) |
+| `F:30,L:90,F:30` | — | — | legs end 0.8 and 0.5 cm from their goals, turn +88°, 10.7 s, each step reported with its measured values |
+| bottle ~1.2 m ahead, located from 3 poses | positions **65 cm apart**; one photo hit a 1.1 s depth stall | Gemma's y is off by up to ~45 px (x ~5 px): its "centre" was the top edge of the cap and the depth there was the door behind. Now the VLM gives a **box**, and pixel_to_goal takes the nearest solid slab above the floor inside it | start / after L:15 / after F:30: **all within 0.7 cm** of each other; VLM 6–7 s per call |
+
+Still to grade: "go near the chair" through reach, including one tight gap.
+Seen once, not reproduced: a captured frame that PIL could not open (the
+tool reports it as a vision-model error).
 
 ## 6. Recommendation
 
