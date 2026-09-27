@@ -28,6 +28,7 @@ EACH ATTEMPT
          the raw LiDAR + depth points (1 cm) and PASS it (3 cm margin, 5 cm/s)
       4. otherwise wait WAIT_S (a person, a moved chair) and go again
     until reached, MAX_ATTEMPTS, MAX_S, or a new goal / cancel.
+    Within AT_GOAL_M with only the final turn refused counts as reached.
 """
 import json
 import math
@@ -57,6 +58,13 @@ WAIT_S = 3.0
 NAV_TIMEOUT = 120.0
 PASS_D = 0.9           # m: how far a recovery pass crawls
 MARGIN = 0.03
+# At the spot, only the final turn to the goal heading refused ("... in the
+# +84 deg swing"): that IS arrival. For an approach the goal heading faces
+# the object, and the thing in the swing is usually the object itself or the
+# wall beside it. Before this, reach retried the refused turn 8 times over
+# 3 min and reported the whole trip FAILED with the rover 1 cm from the goal
+# (2026-09-27, "go to the white box"). Reported as reached, with a note.
+AT_GOAL_M = 0.05
 NAV_LOG = Path('/tmp/nav.log')
 
 
@@ -226,6 +234,12 @@ class Reach(GP.Pass):
                 return
             if r == 'cancelled' or self.stop_req:
                 break
+            if 'swing' in why and self.dist(g) <= AT_GOAL_M:
+                self.stop()
+                self.say(result='reached', attempt=attempt, dist_cm=round(self.dist(g) * 100, 1),
+                         secs=round(time.time() - t0), tried=tried,
+                         note=f'at the spot, but could not turn fully to the goal heading ({why})')
+                return
             tried.append(why)
             self.say(attempt=attempt, phase='recover', why=why)
             # ── recover: stop, clear, look, then pass if narrow, else wait ──
