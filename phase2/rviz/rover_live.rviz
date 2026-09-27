@@ -325,6 +325,67 @@ Visualization Manager:
         Value: /plan
       Value: true
 
+    # ── what the Pi 5 brain has found: an orange dot + "bottle, 3 min ago"
+    # per remembered object (its object memory, published latched by
+    # ros2_bridge). "Go to the bottle" drives to one of these. ─────────────
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: Objects the brain found
+      Namespaces:
+        {}
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /brain/objects
+      Value: true
+
+    # ── where it is going: the goal reach is driving to (from the brain,
+    # or from this window's 2D Goal Pose). Magenta arrow. ─────────────────
+    - Alpha: 1
+      Axes Length: 0.3
+      Axes Radius: 0.03
+      Class: rviz_default_plugins/Pose
+      Color: 255; 0; 255
+      Enabled: true
+      Head Length: 0.12
+      Head Radius: 0.08
+      Name: Goal (reach)
+      Shaft Length: 0.35
+      Shaft Radius: 0.03
+      Shape: Arrow
+      Topic:
+        Depth: 1
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /reach/goal
+      Value: true
+
+    # ── an exact turn / short move's target (goal_exec). Cyan arrow. ─────
+    - Alpha: 1
+      Axes Length: 0.3
+      Axes Radius: 0.03
+      Class: rviz_default_plugins/Pose
+      Color: 0; 220; 255
+      Enabled: true
+      Head Length: 0.10
+      Head Radius: 0.06
+      Name: Exact-move target
+      Shaft Length: 0.25
+      Shaft Radius: 0.02
+      Shape: Arrow
+      Topic:
+        Depth: 1
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /goal_exec/goal
+      Value: true
+
     # ── frames. OFF by default: 8 frames of clutter over a small map. ───
     - Class: rviz_default_plugins/TF
       Enabled: false

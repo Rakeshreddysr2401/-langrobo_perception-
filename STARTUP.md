@@ -27,16 +27,21 @@ For the full runbook including calibration and troubleshooting see
 **Single command:** `./rover up` runs every step below in order — camera,
 lidar, pose (with `SLAM=false`), fused, slam, map, nav, vlm, the ESP32 check,
 the Pi 5 check, Studio, and the laptop view — and prints the Studio tunnel link
-and the LangSmith project at the end. Add `--voice` to also bring up Pi 5 STT/TTS and reconnect the boAt
-Stone 650. It restarts the container, so it's for a cold power-on — don't run
+and the LangSmith project at the end. Add `--voice` to also check the Pi 5's
+voice. It restarts the container, so it's for a cold power-on — don't run
 it against a stack that's already up and healthy, it throws the running state
 away for nothing. The layer-by-layer steps below are what it runs, and what to
 fall back to when one of them fails and you need to see which.
 
-**Voice on its own:** `./rover voice` — same bring-up, no Jetson side, safe to
-run any time. It skips if voice is already up (a second pair double-speaks),
-then prints the providers, the wake setting, the mic gain and the speaker
-state. Use this rather than `up --voice` when only voice needs restarting.
+**From the Pi 5 instead:** `~/ros2_ws/scripts/fleet.sh rover` runs this same
+`./rover up` — but only when the stack is not already up (it asks over ROS), so
+it is safe to run any time. `fleet.sh check` then proves every link with data.
+
+**Voice:** it lives on the Pi 5 as the `langrobo-voice` systemd user unit
+(starts at boot). `./rover voice` starts it if it is not running — never a
+second copy — and prints the providers, the wake setting, and which speaker +
+mic the Pi 5's audio owner picked (any paired Bluetooth device). Say "Mitra"
+in the sentence; only speech containing the name becomes a turn.
 
 **The voice trap: a mic that is too quiet fails silently and looks like a dead
 brain.** The Bluetooth HFP mic delivers speech at rms ~0.024 against a

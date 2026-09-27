@@ -46,7 +46,6 @@ IMAGE=${IMAGE:-orin-nav:1.1}
 NAME=${NAME:-rover}
 LAPTOP_USER=${LAPTOP_USER:-rakhi24}   # LAPTOP_IP is DISCOVERED, not fixed: DHCP moves it
 PI5_HOST=${PI5_HOST:-192.168.1.16}    # fixed — unlike the laptop, not on DHCP
-BT_SPEAKER=${BT_SPEAKER:-D6:AA:BB:59:EF:B6}  # boAt Stone 650
 SRC=/opt/rover
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOSTSRC="$REPO/phase1"
@@ -652,13 +651,13 @@ up)
   echo
   echo "[pi5] teleop + agent_node"
   procs=$(timeout 8 ssh -o BatchMode=yes -o ConnectTimeout=4 "$LAPTOP_USER@$PI5_HOST" \
-    'pgrep -af "teleop_we[b]|agent_[n]ode"' 2>/dev/null)
+    'pgrep -af "teleop_we[b]|agent_[n]ode"' 2>/dev/null || true)
   if [ -n "$procs" ]; then
     echo "      teleop + agent_node running"
   else
     echo "      ✗ teleop and/or agent_node not found on the Pi 5 — check it by hand"
   fi
-  mode=$(timeout 8 curl -s "http://$PI5_HOST:8091/mode" 2>/dev/null)
+  mode=$(timeout 8 curl -s "http://$PI5_HOST:8091/mode" 2>/dev/null || true)
   case "$mode" in
     *'"manual": false'*|*'"manual":false'*) echo "      teleop: AUTO — OK" ;;
     *) echo "      ✗ teleop not in AUTO ($mode) — MANUAL streams zeros and cancels nav2. Flip it." ;;
@@ -674,8 +673,12 @@ up)
   studio_ok=""
   for i in 1 2 3 4 5 6; do
     sleep 5
+    # `|| true`: until Studio is listening, curl exits 7, and under set -e a
+    # failing $(...) assignment ends the script -- silently, right here. That
+    # was OPEN_ISSUES #9 ("up exited 7 after starting Studio"); the laptop
+    # RViz step after it never ran.
     studio_ok=$(timeout 5 ssh -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" \
-      'curl -s http://127.0.0.1:2024/ok' 2>/dev/null)
+      'curl -s http://127.0.0.1:2024/ok' 2>/dev/null || true)
     [ "$studio_ok" = '{"ok":true}' ] && break
   done
   if [ "$studio_ok" = '{"ok":true}' ]; then
@@ -706,63 +709,42 @@ up)
   ;;
 
 voice)
-    echo "[voice] Pi 5 STT/TTS + $BT_SPEAKER"
-    # Bracketed, or the pattern matches the ssh command line carrying it and
-    # every run reports "already running" — so --voice never started anything.
-    already=$(timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" \
-      'pgrep -af "stt_nod[e]|tts_nod[e]"' 2>/dev/null || true)
-    if [ -n "$already" ]; then
-      echo "      already running — leaving it alone (a second pair double-speaks)"
+    echo "[voice] Pi 5 STT/TTS (langrobo-voice)"
+    # The Pi 5 runs voice as a systemd USER unit (langrobo-voice: audio owner +
+    # STT + TTS, starts at boot, restarts on failure). Start THAT, never a
+    # second copy by hand: two stt_nodes answer every turn twice.
+    state=$(timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" \
+      "systemctl --user is-active langrobo-voice" 2>/dev/null || true)
+    if [ "$state" = active ]; then
+      echo "      langrobo-voice already active — leaving it alone"
     else
-      gate=$(bash ~/robot/scripts/fleet_role.sh voice status 2>/dev/null || true)
-      echo "      gate: ${gate:-unknown}"
-      case "$gate" in
-        *stopped*) ;;
-        *) echo "      ✗ Jetson's own voice stack is not confirmed stopped — not starting Pi 5 voice." ;;
-      esac
-      if [ -z "$gate" ] || [[ "$gate" == *stopped* ]]; then
-        # timeout, because this ssh does NOT return on its own: the launched
-        # process keeps the channel's fds open even under setsid+nohup, so the
-        # connection just sits there. Killing it is safe — voice_launch is
-        # already detached on the Pi 5 and keeps running.
-        timeout 15 ssh -n -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" 'cd ~/ros2_ws && setsid nohup bash -lc \
-          "source /opt/ros/jazzy/setup.bash && source install/setup.bash && \
-           ros2 launch pi5_voice_pkg voice_launch.py" \
-          > /tmp/voice_launch.log 2>&1 < /dev/null &' 2>/dev/null || true
-        # Loading whisper takes ~20s and the gain is re-applied 5s after that,
-        # so a blind `sleep 6` reported on a pipeline that wasn't up yet. Wait
-        # ON the Pi 5 in ONE ssh: polling from here cost 20 connections, and
-        # ssh to this box is slow enough that that alone ran past four minutes.
-        timeout 90 ssh -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" \
-          'for i in $(seq 1 40); do
-             grep -q "re-applied" /tmp/voice_launch.log 2>/dev/null && break
-             sleep 2
-           done' 2>/dev/null || true
-      fi
+      timeout 15 ssh -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" \
+        "systemctl --user start langrobo-voice" 2>/dev/null || true
+      # Loading whisper takes ~20 s and the mic gain is re-applied 5 s after
+      # that. Wait ON the Pi 5, in one ssh (ssh to it is slow).
+      timeout 90 ssh -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" \
+        "for i in \$(seq 1 40); do
+           journalctl --user -u langrobo-voice --since -2min -o cat | grep -q re-applied && break
+           sleep 2
+         done" 2>/dev/null || true
+      state=$(timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" \
+        "systemctl --user is-active langrobo-voice" 2>/dev/null || true)
+      echo "      langrobo-voice: ${state:-unknown}"
     fi
     timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" \
-      'grep -hE "stt_provider =|tts_provider =|wake_detector =|mic gain .* re-applied" \
-         /tmp/voice_launch.log | sed "s/.*\] //"' 2>/dev/null | sed 's/^/      /' || true
-    conn=$(timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" \
-      "bluetoothctl info $BT_SPEAKER | grep -i connected" 2>/dev/null || true)
-    echo "      speaker: ${conn:-unknown}"
-    case "$conn" in
-      *": yes"*) ;;
-      *)
-        ssh -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" "bluetoothctl connect $BT_SPEAKER" >/dev/null 2>&1 || true
-        conn=$(timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" \
-          "bluetoothctl info $BT_SPEAKER | grep -i connected" 2>/dev/null || true)
-        echo "      speaker retry: ${conn:-unknown}"
-        case "$conn" in
-          *": yes"*) ;;
-          *) echo "      ✗ speaker not connecting — page-timeout means it's off or out of range. Power-cycle it." ;;
-        esac
-        ;;
-    esac
+      "journalctl --user -u langrobo-voice -b -o cat | grep -hE \"stt_provider =|tts_provider =|wake_detector =|mic gain .* re-applied\" | tail -4 | sed \"s/.*\\] //\"" \
+      2>/dev/null | sed "s/^/      /" || true
+    # Which speaker + mic: the Pi 5's audio_device_node is the ONE owner of
+    # Bluetooth (any paired device, wired fallback). Report its choice; never
+    # connect a device from here -- two owners fight over the HFP profile.
+    ready=$(timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" \
+      'journalctl --user -u langrobo-voice -b -o cat | grep -E "audio ready:|no audio device" | tail -1 | sed "s/.*pi5_audio_device\]: //"' 2>/dev/null || true)
+    echo "      audio: ${ready:-unknown -- on the Pi 5: journalctl --user -u langrobo-voice | grep audio}"
   echo
-  echo "  Wake word is OFF (wake_detector: transcript_alias, require_wake:false)"
-  echo "  — just talk, every transcript goes to the brain. Watch a turn land:"
-  echo "     https://smith.langchain.com  ->  project 'pi5'  ->  run 'turn:voice'"
+  echo "  Say \"Mitra\" in the sentence (\"Mitra, what time is it?\") — only speech"
+  echo "  containing the name becomes a turn (wake_detector line above says how it"
+  echo "  is heard). Watch a turn land:"
+  echo "     https://smith.langchain.com  ->  project pi5  ->  run turn:voice"
   ;;
 
 detect)
