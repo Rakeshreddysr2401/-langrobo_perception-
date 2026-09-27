@@ -445,7 +445,17 @@ global_costmap:
       # the same 1 cm -- change all four.
       footprint_padding: 0.01
 
-      plugins: [nvblox_layer, lidar_layer, inflation_layer]
+      # footprint_clear AFTER the obstacle layers, BEFORE inflation (NAV_PLAN.md
+      # N6): the cells under the rover's own outline are free -- it is standing
+      # there. GLOBAL only: the planner stops refusing its own start pose
+      # ("Start occupied", 6x on 2026-09-27); MPPI's local costmap keeps every
+      # mark. Plugin: phase3/plugins (build.sh).
+      plugins: [nvblox_layer, lidar_layer, footprint_clear, inflation_layer]
+      footprint_clear:
+        plugin: rover_costmap_plugins::FootprintClearLayer
+        enabled: true
+        extra_padding: 0.02            # past the padded outline (edge rasterisation)
+        heading_sweep: 0.19635         # +-11.25 deg: half the lattice's 16-heading bin
       nvblox_layer:
         plugin: nvblox::nav2::NvbloxCostmapLayer
         enabled: true

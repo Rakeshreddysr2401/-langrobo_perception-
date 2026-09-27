@@ -8,6 +8,9 @@
 # container and the next ./rover nav, which truncates /tmp/nav.log.
 n=0
 mkdir -p /logs/nav_crashes 2>/dev/null
+# the rover's own costmap plugins (footprint_clear; phase3/plugins/build.sh)
+PLUGINS=/opt/rover3/plugins/ws/install/setup.bash
+if [ -f "$PLUGINS" ]; then source "$PLUGINS"; else echo "[nav2_supervise] WARNING: $PLUGINS missing -- run phase3/plugins/build.sh"; fi
 while true; do
   from=$(stat -c %s /tmp/nav.log 2>/dev/null || echo 0)    # only THIS run's lines
   ros2 launch /opt/rover3/launch/nav2.launch.py

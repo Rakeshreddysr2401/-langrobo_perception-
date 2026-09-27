@@ -35,3 +35,9 @@ lidar/ws/
 logs/bags/
 logs/calib/
 logs/goal_exec_pivot.json
+
+# The costmap plugin workspace: src/ is ours (tracked); build/install/log are
+# its compiled output, recreated by phase3/plugins/build.sh in ~20 s.
+phase3/plugins/ws/build/
+phase3/plugins/ws/install/
+phase3/plugins/ws/log/

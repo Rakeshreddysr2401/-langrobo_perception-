@@ -1,0 +1,5 @@
+<library path="rover_costmap_plugins">
+  <class type="rover_costmap_plugins::FootprintClearLayer" base_class_type="nav2_costmap_2d::Layer">
+    <description>Clears the master grid under the robot's own (padded) outline.</description>
+  </class>
+</library>

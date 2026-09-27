@@ -127,7 +127,7 @@ OPEN_ISSUES #1 may have to move up) → N4 → N5. Each phase is one commit with
 its CSV. nav2.yaml keeps its convention: every changed value says why, when,
 and what was measured.
 
-## Status — 2026-09-27, 23:10 (written, NOT yet running: needs `./rover nav`)
+## Status — 2026-09-27, 23:10 (live since 23:15; see the session sections below)
 
 | step | state |
 |---|---|
@@ -201,3 +201,52 @@ escape (straight only, closed on fresh points); local padding 0.02 vs global
 0.01 so MPPI never parks where the planner refuses to start; clearance
 weights (CostCritic 6.0, PathAlign 8.0, lattice cost_penalty 3.0). Controller
 held 20 Hz throughout; no nav2 crash after the change.
+
+## Session 2026-09-28 (after midnight) — N6 built and drive-tested
+
+### What was built
+| piece | where | what it does |
+|---|---|---|
+| **footprint_clear** costmap layer (C++) | `phase3/plugins/` (`build.sh`, built inside the image like `lidar/build.sh`) | GLOBAL costmap only, after nvblox + LiDAR, before inflation: cells under the rover's own outline are FREE. Swept ±11.25° (the lattice checks its start at the nearest of 16 headings) + 2 cm. The local costmap MPPI checks against keeps every mark. |
+| **goal snapping** | `reach_node.py` `fit()` | A goal whose outline would touch something moves to the nearest pose (same heading, ≤ 50 cm) with 3 cm of real clearance, using the planner's own costmap; reach reports `phase: snap`. Unseen floor is left alone (N8). |
+| **escape, straight only** | `reach_node.py` `escape()` / `drive_straight()` | Closed-loop 5 cm/s straight move, fresh LiDAR + depth + local costmap every 50 ms, stops if the gap shrinks. No longer uses goal_exec (its docking turned 30° first). Points INSIDE the body are ignored (floor bumps already driven over). |
+| **reach cancels on shutdown** | `reach_node.py` main | SIGTERM (pkill, `./rover nav`) cancels its nav2 goal and any goal_exec move, then stops. Tested 5/5. Before: a restart mid-goal left nav2 driving for 20 s. |
+| `.gitignore` | repo root | plugin build/install/log ignored; src tracked |
+
+### What improved (measured on the floor)
+| | before (session 1) | now |
+|---|---|---|
+| "Start occupied" | 6× per session; goals died in the pocket | **0** after the heading-sweep fix; the pocket start now gets a real answer from the planner (208 no path, not 205 start occupied) |
+| 2.6 m through a gap between two obstacles | — | **reached 0.8 cm, first attempt, 39 s, no retries** |
+| click touching an obstacle | "no path" × 8 | **snapped 46 cm / 8 cm** to a pose that fits, then drove |
+| escape on floor noise | backed up 5 cm twice for nothing | ignores points inside the body; reads the true 33 cm |
+| nav2 crashes | ~5 in two days, no trace | **0** since the change (libbackward ready if one happens) |
+
+### What we learned
+- **The main remaining blocker is the depth camera marking floor as obstacles.**
+  Map probe (goal 2 area): **12** LiDAR obstacle cells vs **270 camera-only**
+  cells, in a room where the owner says the rover can pass. `ghost_check.py`:
+  73% of lethal cells ahead were camera-only; a fresh `./rover map` removed
+  ~60% of them (stale memory), the rest came back (really seen, or floor
+  noise at range). Two real obstacles confirmed by the owner (left and right,
+  ~0.5 m, with a passable gap between).
+- `./rover camera --floor` needs clear flat floor in front; from the pocket it
+  gave a weak fit (16% on plane) — not yet measured.
+- nav2 bringup can hang on a lost lifecycle service reply under load
+  (controller configured, manager never heard): one more `./rover nav` fixed it.
+- After ANY restart of reach, check it has a pose (it once never got /odom).
+
+### TODO — next session, in order
+1. **Camera tilt**: face the rover at 1.5-2 m of clear bare floor and run
+   `./rover camera --floor`. Drifted > ~0.5° → re-save (the knock when it was
+   lifted is a candidate). This is the cheapest fix for phantom floor marks.
+2. **nvblox floor band vs range**: if the tilt is fine, make the obstacle
+   floor range-dependent the way `depth_obstacles.py` is (2 cm < 1 m,
+   3.5 cm to 1.6 m, 5 cm beyond) or cut `max_integration_distance` where the
+   floor stops measuring clean; re-run the 12-vs-270 probe and `ghost_check.py`.
+3. **"Look again before giving up"** in reach: on "no path" / no snap, face the
+   camera at the blocked area so nvblox clears what it can see past (no timed
+   forgetting — the repo's rule).
+4. Re-drive the session's goals: pocket → far side (goal 2), through the gap,
+   click-on-obstacle. Exit bar: long goals reach first time, 0 Start occupied.
+5. Then **N7 speed governor**, **N8 build-and-go**, **N9 motor effort**.

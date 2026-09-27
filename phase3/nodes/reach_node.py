@@ -106,10 +106,12 @@ class Reach(GP.Pass):
         self.stop_req = False
         self.create_subscription(PoseStamped, '/reach/goal', self._goal, 10)
         # the local costmap MPPI drives by: the escape must see what nav2 sees
-        self.lcm = None
-        self.create_subscription(OccupancyGrid, '/local_costmap/costmap', lambda m: setattr(self, 'lcm', m),
-                                 QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
-                                            reliability=ReliabilityPolicy.RELIABLE))
+        self.lcm = self.gcm = None
+        latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                             reliability=ReliabilityPolicy.RELIABLE)
+        self.create_subscription(OccupancyGrid, '/local_costmap/costmap', lambda m: setattr(self, 'lcm', m), latched)
+        # the planner's own costmap: a snapped goal must be one IT accepts
+        self.create_subscription(OccupancyGrid, '/global_costmap/costmap', lambda m: setattr(self, 'gcm', m), latched)
         self.create_subscription(Empty, '/reach/cancel', lambda _: setattr(self, 'stop_req', True), 10)
         self.get_logger().info('reach up: /reach/goal (RViz 2D Goal Pose)')
 
@@ -230,6 +232,53 @@ class Reach(GP.Pass):
         self.cancel.publish(Empty())
         return 'failed', 'goal_exec timed out'
 
+    # ── snap: a goal on or against furniture -> the nearest pose that fits ───
+    # NAV_PLAN.md N6. People click ON the sofa, or right against it: every
+    # long goal on 2026-09-27 was marked solid in the planner's costmap and
+    # failed 8 attempts of "no path". Now the goal moves to the nearest pose
+    # (same heading) where the outline has SNAP_GAP of clearance, within
+    # SNAP_R, and reach says how far. Unknown floor is left alone (build and
+    # go, N8); nothing that fits within SNAP_R -> the goal is kept as clicked.
+    SNAP_R = 0.50                          # m: search radius
+    SNAP_GAP = 0.03                        # m: real clearance wanted at the goal
+
+    def fit(self, g):
+        """(goal, moved_m, gap_m); goal unchanged when it already fits."""
+        m = self.gcm
+        if m is None:
+            return g, 0.0, float('nan')
+        a = np.array(m.data, dtype=np.int16).reshape(m.info.height, m.info.width)
+        r, ox, oy = m.info.resolution, m.info.origin.position.x, m.info.origin.position.y
+        i0, j0 = int((g[0] - ox) / r), int((g[1] - oy) / r)
+        if not (0 <= i0 < m.info.width and 0 <= j0 < m.info.height) or a[j0, i0] < 0:
+            return g, 0.0, float('nan')     # off the map or unseen: build-and-go's job
+        k = int((self.SNAP_R + 0.6) / r)
+        sub = a[max(0, j0 - k):j0 + k + 1, max(0, i0 - k):i0 + k + 1]
+        jj, ii = np.nonzero(sub >= 100)
+        cells = np.stack([ox + (ii + max(0, i0 - k) + 0.5) * r, oy + (jj + max(0, j0 - k) + 0.5) * r], 1)
+        c, s_ = math.cos(g[2]), math.sin(g[2])
+
+        def gap_at(x, y):
+            d = cells - (x, y)
+            b = np.stack([c * d[:, 0] + s_ * d[:, 1], -s_ * d[:, 0] + c * d[:, 1]], 1)
+            return self.body_gap(b) - self.CELL_SLACK
+
+        g0 = gap_at(g[0], g[1])
+        if g0 >= self.SNAP_GAP:
+            return g, 0.0, g0
+        n = int(self.SNAP_R / r)
+        offs = sorted(((di * r, dj * r) for di in range(-n, n + 1) for dj in range(-n, n + 1)
+                       if 0 < math.hypot(di, dj) * r <= self.SNAP_R), key=lambda o: math.hypot(*o))
+        for dx, dy in offs:
+            x, y = g[0] + dx, g[1] + dy
+            i, j = int((x - ox) / r), int((y - oy) / r)
+            if not (0 <= i < m.info.width and 0 <= j < m.info.height) or a[j, i] < 0 or a[j, i] >= 99:
+                continue
+            gp = gap_at(x, y)
+            if gp >= self.SNAP_GAP:
+                return (x, y, g[2]), math.hypot(dx, dy), gp
+        return g, 0.0, g0
+
     # ── escape: step off the wall the controller parked us against ──────────
     # NAV_PLAN.md N4. MPPI may drive the outline to within footprint_padding
     # (1 cm) of a wall; the lattice planner then refuses that pose as its
@@ -276,10 +325,27 @@ class Reach(GP.Pass):
         the planner refuses what its costmap says, not what the LiDAR says."""
         return min(self.body_gap(pts, dx), self.body_gap(cells, dx) - self.CELL_SLACK)
 
+    @staticmethod
+    def outside_body(b):
+        """Drop points INSIDE the outline: a real obstacle cannot be inside the
+        rover. Drive test 2026-09-28: goal_exec's depth memory (anything 2 cm
+        off the floor) held floor bumps the rover had driven over, the escape
+        read a -11 cm "gap" with nav2's costmap clear for 59 cm, and backed up
+        5 cm twice for nothing. gap_pass drops its own-chassis LiDAR points the
+        same way."""
+        if b is None or not len(b):
+            return b
+        inside = (b[:, 0] < GE_FRONT) & (b[:, 0] > -GE_REAR) & (np.abs(b[:, 1]) < SIDE)
+        return b[~inside]
+
+    def near_now(self, scans):
+        """Obstacle points + costmap cells around the rover, base_link, body excluded."""
+        pts = np.vstack(scans + [self.dobs.points_base(self.pose)]) if scans else None
+        return self.outside_body(pts), self.outside_body(self.costmap_cells())
+
     def escape(self, attempt):
         """One short straight move away from contact. True if it moved."""
-        pts = np.vstack(self.scans + [self.dobs.points_base(self.pose)]) if self.scans else None
-        cells = self.costmap_cells()
+        pts, cells = self.near_now(self.scans)
         g0 = self.gap_all(pts, cells)
         if g0 > self.ESCAPE_NEAR:
             return False
@@ -317,8 +383,8 @@ class Reach(GP.Pass):
                     return 'reached', f'{moved * 100:.1f} cm straight'
                 # the LATEST scan only: the kept ones are in base_link as it was
                 # up to 1 s ago, 5 cm off at this speed
-                pts = np.vstack(self.scans[-1:] + [self.dobs.points_base(self.pose)]) if self.scans else None
-                if self.gap_all(pts, self.costmap_cells()) < g0 - 0.005:
+                pts, cells = self.near_now(self.scans[-1:])
+                if self.gap_all(pts, cells) < g0 - 0.005:
                     return 'failed', f'gap closing after {moved * 100:.1f} cm -- stopped'
                 cmd = Twist()
                 cmd.linear.x = sgn * self.ESCAPE_VX
@@ -348,6 +414,11 @@ class Reach(GP.Pass):
         if g is None:
             self.say(result='failed', why=f'no transform {m.header.frame_id} -> odom')
             return
+        g, moved, gap = self.fit(g)
+        if moved > 0:
+            self.say(phase='snap', moved_cm=round(moved * 100), gap_cm=round(gap * 100, 1),
+                     why='the goal as clicked touches something; nearest pose that fits')
+        snap = (g[0] - (self.goal_odom(m) or g)[0], g[1] - (self.goal_odom(m) or g)[1])
         tried = []
         # A near goal whose docking line was refused goes to nav2 next: the
         # same drive test had a goal 0.76 m behind in open floor refused 7
@@ -357,7 +428,9 @@ class Reach(GP.Pass):
             if self.stop_req or time.time() - t0 > MAX_S:
                 break
             if m.header.frame_id == 'map':
-                g = self.goal_odom(m) or g          # SLAM may have corrected map -> odom
+                gm = self.goal_odom(m)              # SLAM may have corrected map -> odom
+                if gm is not None:                  # (keeping the snap's offset)
+                    g = (gm[0] + snap[0], gm[1] + snap[1], gm[2])
             d = self.dist(g)
             line_refused = False
             if d > EXACT_RANGE or go_nav2:
