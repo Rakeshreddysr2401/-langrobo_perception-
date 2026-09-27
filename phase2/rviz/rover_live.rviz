@@ -221,7 +221,7 @@ Visualization Manager:
       Class: rviz_default_plugins/Map
       Color Scheme: costmap
       Draw Behind: false
-      Enabled: true
+      Enabled: false
       Name: nav2 costmap (near)
       Topic:
         Depth: 1
@@ -229,6 +229,27 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /local_costmap/costmap
+      Use Timestamp: false
+      Value: false
+
+    # ── the room as the owner reads it (phase3/nodes/wall_margin_view.py):
+    # RED = a wall, VIOLET = the 2 cm the rover's BODY keeps from it
+    # (footprint_padding), clear = floor the rover may be on. ON by default
+    # since 2026-09-27; nav2's own view above is drawn for the rover's CENTRE
+    # (a ~23 cm cyan band) and made a rover 15 cm from a wall look trapped.
+    - Alpha: 1
+      Binary representation: false
+      Class: rviz_default_plugins/Map
+      Color Scheme: costmap
+      Draw Behind: false
+      Enabled: true
+      Name: Walls + body margin
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /rover_view/wall_margin
       Use Timestamp: false
       Value: true
 

@@ -232,6 +232,7 @@ controller_server:
       # curve: RPP was reading every cost as 1/3 CLOSER to the obstacle than it
       # is. Setting it to 2.0 is not a tuning choice, it is the value that makes
       # the inverse the actual inverse. Change both together or neither.
+      # = the inflation layers' cost_scaling_factor (2.0 again for the crash test).
       inflation_cost_scaling_factor: 2.0
       # 0.6 was the default and it is longer than the inflation layer's useful
       # range here: min_distance_to_obstacle can never fall below the inscribed
@@ -241,7 +242,9 @@ controller_server:
       # crawl-in-a-corridor half of TODO 40. 0.40 leaves a real 20 cm band
       # between the inscribed radius and full speed, and floors the scaling at
       # 0.20/0.40 = 50%, or 0.09 m/s.
-      cost_scaling_dist: 0.40
+      # 0.30 from 0.40 with footprint_padding 0.02 (2026-09-27): inscribed is
+      # now 0.198, so this is the same ~10 cm slow band, ending sooner.
+      cost_scaling_dist: 0.30
 
       transform_tolerance: 0.2
       use_collision_detection: true
@@ -377,7 +380,15 @@ global_costmap:
       # pivot still slides ~30 cm per 90 deg (LOCALIZATION.md §7) until the
       # closed-loop pivot (SENSOR_FUSION_PLAN.md stage E); ./rover drive plans
       # around that slide in the meantime.
-      footprint_padding: 0.05
+      # 0.02 from 0.05 on 2026-09-27 (owner): "give the robot freedom to go
+      # nearer walls and turn and move confidently". At 5 cm a turn needed
+      # every wall 33.4 cm from centre (the padded corner, hypot(0.232,
+      # 0.240)); in a pocket with the wall 27 cm off the side, Spin aborted
+      # ("Collision Ahead") and RPP stopped on "collision ahead" although the
+      # real corner (26.3 cm) cleared it. Now: 29.1 cm to turn, a gap over
+      # 2 x 0.198 = 0.40 m to plan through. goal_exec.py MARGIN, reach_node.py
+      # MARGIN and wall_margin_view.py are the same 2 cm -- change all four.
+      footprint_padding: 0.02
 
       plugins: [nvblox_layer, lidar_layer, inflation_layer]
       nvblox_layer:
@@ -460,7 +471,21 @@ global_costmap:
         # further and makes it prefer the middle of open floor. This is what
         # actually buys distance from the pink -- footprint_padding only forbids
         # contact, it does not make a route prefer the clear middle of a room.
+        # cost_scaling_factor 10.0, from 2.0, on 2026-09-27 (owner): parked in
+        # a U-shaped pocket with 22 cm to the front wall and 22-25 cm each side
+        # -- room to sit and pivot -- the WHOLE pocket was tinted, because the
+        # 45 cm ramp at 2.0 still had cost ~170 at the rover's centre. At 10
+        # the cost is ~90 at 5 cm past the inscribed band, ~34 at 10 cm, ~12 at
+        # 15 cm: free floor reads white. The body margin is unchanged
+        # (footprint_padding 0.05). Routes no longer prefer the middle of open
+        # floor, so they pass nearer walls -- lower this first if it grazes.
+        # inflation_radius STAYS 0.45: 0.30 (below the padded footprint's
+        # 0.334 m circumscribed radius) was tried the same day and
+        # planner_server segfaulted three times in 15 min, idle, against none
+        # in the 16 min before it. Cause not proven; do not go below 0.334.
         inflation_radius: 0.45
+        # 2.0 again for a crash test (2026-09-27): nav2 segfaulted repeatedly
+        # after 10.0 + footprint_padding 0.02 went in; 30 min on 2.0 to see.
         cost_scaling_factor: 2.0
 
 local_costmap:
@@ -543,7 +568,15 @@ local_costmap:
       # pivot still slides ~30 cm per 90 deg (LOCALIZATION.md §7) until the
       # closed-loop pivot (SENSOR_FUSION_PLAN.md stage E); ./rover drive plans
       # around that slide in the meantime.
-      footprint_padding: 0.05
+      # 0.02 from 0.05 on 2026-09-27 (owner): "give the robot freedom to go
+      # nearer walls and turn and move confidently". At 5 cm a turn needed
+      # every wall 33.4 cm from centre (the padded corner, hypot(0.232,
+      # 0.240)); in a pocket with the wall 27 cm off the side, Spin aborted
+      # ("Collision Ahead") and RPP stopped on "collision ahead" although the
+      # real corner (26.3 cm) cleared it. Now: 29.1 cm to turn, a gap over
+      # 2 x 0.198 = 0.40 m to plan through. goal_exec.py MARGIN, reach_node.py
+      # MARGIN and wall_margin_view.py are the same 2 cm -- change all four.
+      footprint_padding: 0.02
       plugins: [nvblox_layer, lidar_layer, inflation_layer]
       nvblox_layer:
         plugin: nvblox::nav2::NvbloxCostmapLayer
@@ -622,7 +655,21 @@ local_costmap:
         # further and makes it prefer the middle of open floor. This is what
         # actually buys distance from the pink -- footprint_padding only forbids
         # contact, it does not make a route prefer the clear middle of a room.
+        # cost_scaling_factor 10.0, from 2.0, on 2026-09-27 (owner): parked in
+        # a U-shaped pocket with 22 cm to the front wall and 22-25 cm each side
+        # -- room to sit and pivot -- the WHOLE pocket was tinted, because the
+        # 45 cm ramp at 2.0 still had cost ~170 at the rover's centre. At 10
+        # the cost is ~90 at 5 cm past the inscribed band, ~34 at 10 cm, ~12 at
+        # 15 cm: free floor reads white. The body margin is unchanged
+        # (footprint_padding 0.05). Routes no longer prefer the middle of open
+        # floor, so they pass nearer walls -- lower this first if it grazes.
+        # inflation_radius STAYS 0.45: 0.30 (below the padded footprint's
+        # 0.334 m circumscribed radius) was tried the same day and
+        # planner_server segfaulted three times in 15 min, idle, against none
+        # in the 16 min before it. Cause not proven; do not go below 0.334.
         inflation_radius: 0.45
+        # 2.0 again for a crash test (2026-09-27): nav2 segfaulted repeatedly
+        # after 10.0 + footprint_padding 0.02 went in; 30 min on 2.0 to see.
         cost_scaling_factor: 2.0
 
 behavior_server:

@@ -57,7 +57,7 @@ MAX_S = 300.0
 WAIT_S = 3.0
 NAV_TIMEOUT = 120.0
 PASS_D = 0.9           # m: how far a recovery pass crawls
-MARGIN = 0.03
+MARGIN = 0.02          # = goal_exec MARGIN and nav2 footprint_padding (2026-09-27; 0.03 before)
 # At the spot, only the final turn to the goal heading refused ("... in the
 # +84 deg swing"): that IS arrival. For an approach the goal heading faces
 # the object, and the thing in the swing is usually the object itself or the

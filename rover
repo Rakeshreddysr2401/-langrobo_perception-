@@ -578,8 +578,8 @@ nav)
   echo "      Spin recovery and rotate-to-heading are ON since TODO 40 — the"
   echo "      pivot fault (TODO 14) was fixed on 2026-08-22. Recovery order is"
   echo "      clear costmaps → spin +90° → back up 0.30 m → spin −90° → wait."
-  echo "      Footprint 36 x 38 cm + 5 cm padding: the planner needs a gap over"
-  echo "      ~0.46 m in its 5 cm cells (a real 48 cm gap is borderline)."
+  echo "      Footprint 36 x 38 cm + 2 cm padding: the planner needs a gap over"
+  echo "      ~0.40 m; turning in place needs every wall 29 cm from centre."
   # supervised: if any nav2 part dies, nav2 restarts whole (nav2.launch.py);
   # restarts are listed in /tmp/nav_restarts.log
   dexec "bash $SRC3/launch/nav2_supervise.sh > /tmp/nav.log 2>&1"
@@ -587,6 +587,9 @@ nav)
   kill_match 'goal_exec_node[.]py|reach_node[.]py'
   dexec "python3 $SRC3/nodes/goal_exec_node.py > /tmp/goal_exec.log 2>&1"
   dexec "python3 $SRC3/nodes/reach_node.py > /tmp/reach.log 2>&1"
+  # display only: walls red, the 5 cm body margin violet, floor clear (RViz)
+  kill_match 'wall_margin_view[.]py'
+  dexec "python3 $SRC3/nodes/wall_margin_view.py > /tmp/wall_margin_view.log 2>&1"
   sleep 20
   echo
   echo "  GATE nav:"
