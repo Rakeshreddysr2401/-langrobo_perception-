@@ -52,7 +52,9 @@ bt_navigator:
 controller_server:
   ros__parameters:
     use_sim_time: false
-    controller_frequency: 10.0
+    # 20 from 10 with MPPI (NAV_PLAN.md N3): MPPI's model_dt must equal the
+    # control period, and 0.05 s steps are what its 2 s horizon is built on.
+    controller_frequency: 20.0
     odom_topic: /odom
     # Below these the rover is considered stopped. 0.01 matches the firmware's
     # own dead zone in pidStep(), so nav2 and the board agree on "not moving".
@@ -133,133 +135,124 @@ controller_server:
       yaw_goal_tolerance: 0.25
 
     FollowPath:
-      plugin: nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController
-      # Regulated Pure Pursuit follows a path by aiming at a point ahead of it
-      # and arcing toward it. Chosen over DWB because it steers by arcs
-      # naturally rather than sampling rotations this rover cannot execute.
-      desired_linear_vel: 0.18         # teleop proved 0.20 m/s tracks cleanly
-      lookahead_dist: 0.5
-      min_lookahead_dist: 0.3
-      max_lookahead_dist: 0.9
-      use_velocity_scaled_lookahead_dist: true
-
-      # TRUE since 2026-08-22. This was false for as long as the rover could not
-      # pivot: RPP would have stopped and commanded a rotation that never
-      # happened, until the progress checker timed out.
+      # MPPI since 2026-09-27 (NAV_PLAN.md N3). RPP was retired because it has
+      # ONE idea: aim at a point on the path, and pivot first when the path is
+      # more than 34 deg off. Parked with walls 26-27 cm from centre (the
+      # corners swing 26.3 cm), the pivot was refused, and RPP stopped on
+      # "collision ahead" for 8 attempts / 341 s with 2 m of open floor ahead
+      # (reach.log, 2026-09-27 22:36). The way out -- creep forward, then
+      # turn -- was never a move RPP could make.
       #
-      # The pivot fault is fixed and verified on the floor (93% and 96% duty,
-      # counter-rotating, 65 deg/s -- TODO 14), so the reason has expired. And
-      # leaving it false has a real cost, measured on the first autonomous goal:
-      # with heading correctable only by driving an arc, the rover overshot a
-      # 1 m goal to 1.13 m, came back, and hunted around it for 13 seconds of a
-      # 6-second journey, crawling at 0.05 m/s while turning at the full
-      # 1.0 rad/s limit. It was buying heading with forward motion because that
-      # was the only currency it had.
-      use_rotate_to_heading: true
-
-      # Kept well under the 65 deg/s (1.13 rad/s) the rover actually achieved on
-      # the floor, so a commanded in-place rotation is one it can execute.
-      # MEASURED 2026-08-23 by sweeping commanded wz and reading back /odom:
+      # MPPI samples batch_size short trajectories (time_steps x model_dt =
+      # 2 s ahead) every tick, scores each against the critics below using the
+      # REAL outline in the costmap, and blends the best. Forward-then-turn,
+      # arc-while-creeping, turn-in-place: whatever fits is found, not chosen
+      # in advance. The last RPP config is in git: 0d3f7fc:phase3/config/nav2.yaml.
       #
-      #   commanded   measured
-      #     0.15        0.00     <- RPP was stuck here, and it does nothing
-      #     0.30        0.01
-      #     0.50        0.03
-      #     0.80        0.11     <- breakaway: below this the rover does not turn
-      #     1.00        0.21
-      #     2.00        0.59
-      #     3.00        0.86
-      #
-      # Two separate faults. There is a DEADBAND below ~0.8 rad/s where skid
-      # scrub is never broken and the wheels simply sit, and above it commanded
-      # wz still runs about 3.4x optimistic because the firmware converts wz to
-      # wheel speeds using the physical 0.34 m track while the rover actually
-      # rotates about an effective 0.52 m (TODO 13) -- and saturates on top.
-      #
-      # 2.0 commanded gives ~0.59 rad/s (34 deg/s) actual, which is a usable
-      # in-place turn and well inside the 65 deg/s the chassis has done.
-      # 1.5 commanded is ~0.42 rad/s (24 deg/s) actual, which halves every turn:
-      # a half turn goes from 15 s to 7.5 s. It also matches the velocity
-      # smoother's angular cap, so nothing downstream clips it.
-      #
-      # Kept below the 2.0 that was tried and overshot -- at 2.0 a 1 m goal
-      # finished 23.6 cm off with 59 deg of heading error and fell back on the
-      # backup recovery. RPP predicts its arc from the twist it COMMANDS, and
-      # while commanded and actual differ by 3.4x every prediction is wrong, so
-      # a faster commanded turn overshoots faster.
-      #
-      # Previous note, kept because the reasoning still applies:
-      # 2.0 was tried and overshot badly -- 23.6 cm off, 59 deg of heading
-      # change, and nav2 fell back on its backup recovery. RPP predicts the arc
-      # it will sweep from the twist it COMMANDS, and while commanded and actual
-      # differ by 3.4x every one of those predictions is wrong, so a faster
-      # commanded turn just overshoots faster. Until the mapping is corrected
-      # (TODO 22) the controller has to be kept slow enough that its own error
-      # stays small.
-      rotate_to_heading_angular_vel: 1.5
-      rotate_to_heading_min_angle: 0.6
-
-      # 10.0, because RPP clamps its rotate-to-heading output to
-      # curr_speed +/- max_angular_accel * dt, and curr_speed comes from
-      # ODOMETRY. From a standstill the first step is max_angular_accel * 0.1 s.
-      # At 1.5 that was 0.15 rad/s, which is inside the deadband -- so the rover
-      # never moved, curr_speed stayed 0, and the clamp never rose. A deadlock,
-      # and it cost 35 seconds of a 53-second 1.2 m run spent commanding 0.15
-      # and going nowhere. 10.0 makes the first step 1.0 rad/s, clear of the
-      # 0.8 breakaway on the very first tick.
-      max_angular_accel: 10.0
-      allow_reversing: false           # cuVSLAM under-reads reverse by ~6%
-
-      # Slow down near obstacles and on tight curves rather than cornering hard.
-      use_regulated_linear_velocity_scaling: true
-      use_cost_regulated_linear_velocity_scaling: true
-      # 0.6 m was the OTHER half of the crawl. On a 1 m goal it begins slowing
-      # 60 cm out -- most of the journey spent decelerating. 0.25 m still gives
-      # a controlled arrival without turning every short hop into a creep.
-      regulated_linear_scaling_min_radius: 0.6
-      regulated_linear_scaling_min_speed: 0.10
-      min_approach_linear_velocity: 0.05
-      approach_velocity_scaling_dist: 0.25
-
-      # BOTH ADDED 2026-09-11 (TODO 40). RPP's cost regulation INVERTS the
-      # inflation layer's exponential to recover "how far am I from the nearest
-      # obstacle", and it does it with its own copy of the decay constant:
-      #
-      #   regulation_functions.hpp, costConstraint():
-      #     min_distance_to_obstacle = inscribed + ln(253 / pose_cost) / f
-      #     if (min_distance_to_obstacle < cost_scaling_dist)
-      #         vel *= cost_scaling_gain * min_distance_to_obstacle
-      #                                  / cost_scaling_dist
-      #
-      # `f` is this parameter and it defaulted to 3.0, while inflation_layer
-      # below decays at cost_scaling_factor 2.0. Two different constants for one
-      # curve: RPP was reading every cost as 1/3 CLOSER to the obstacle than it
-      # is. Setting it to 2.0 is not a tuning choice, it is the value that makes
-      # the inverse the actual inverse. Change both together or neither.
-      # = the inflation layers' cost_scaling_factor. Change both together.
-      inflation_cost_scaling_factor: 2.0
-      # 0.6 was the default and it is longer than the inflation layer's useful
-      # range here: min_distance_to_obstacle can never fall below the inscribed
-      # radius (0.20), so a 0.6 window meant the rover was ALWAYS inside it and
-      # always scaled -- capping it at 0.20/0.60 = 33% of desired_linear_vel,
-      # i.e. 0.06 m/s, any time a wall was in the costmap at all. That is the
-      # crawl-in-a-corridor half of TODO 40. 0.40 leaves a real 20 cm band
-      # between the inscribed radius and full speed, and floors the scaling at
-      # 0.20/0.40 = 50%, or 0.09 m/s.
-      # 0.30 from 0.40 with footprint_padding 0.02 (2026-09-27): inscribed is
-      # now 0.198, so this is the same ~10 cm slow band, ending sooner.
-      cost_scaling_dist: 0.30
-
+      # EVERY RATE HERE IS A REAL RATE. turn_shaper.py sits between the
+      # velocity smoother and the wheels and converts the real turn rate asked
+      # for into the command this skid-steer needs (deadband ~0.8 commanded,
+      # ~3.4x optimistic above). MPPI's motion model predicts from what it
+      # asks for, so it only works because what it asks for is what happens.
+      plugin: nav2_mppi_controller::MPPIController
+      motion_model: DiffDrive
+      # CPU: the Jetson is at load ~7.5 on 6 cores (OPEN_ISSUES #1). 1000 x 40
+      # is about a third of MPPI's stock load (2000 x 56). Raise only after
+      # measuring the controller holding 20 Hz while driving.
+      batch_size: 1000
+      time_steps: 40
+      model_dt: 0.05                   # = 1 / controller_frequency
+      iteration_count: 1
+      temperature: 0.3
+      gamma: 0.015
+      # limits = velocity_smoother's, so nothing downstream clips a plan MPPI
+      # is relying on. vx_min 0: no reversing (blind behind, below the lidar's
+      # 25 cm plane) -- the same policy RPP had with allow_reversing false.
+      vx_max: 0.25                     # owner, 2026-09-27: "a little faster"
+      vx_min: 0.0
+      vy_max: 0.0
+      wz_max: 0.9                      # real rad/s (~52 deg/s)
+      ax_max: 1.5
+      ax_min: -1.5
+      az_max: 3.5
+      vx_std: 0.2
+      vy_std: 0.0
+      wz_std: 0.5
+      prune_distance: 1.5
       transform_tolerance: 0.2
-      use_collision_detection: true
-      # 1.0 s, from 1.5, on 2026-09-11 (TODO 40). This sweeps the PADDED
-      # footprint forward along the commanded arc and throws NoValidControl on
-      # any lethal cell -- FollowPath aborts, the BT drops into recovery, and
-      # from outside it looks exactly like the rover deciding to stop in a gap.
-      # At 0.18 m/s, 1.5 s projects 27 cm ahead; 1.0 s projects 18 cm, still far
-      # beyond the few centimetres this chassis needs to stop, and it stops the
-      # sweep from clipping a doorway jamb the rover has not reached yet.
-      max_allowed_time_to_collision_up_to_carrot: 1.0
+      enforce_path_inversion: false
+      retry_attempt_limit: 1
+      regenerate_noises: false         # CPU
+      visualize: false                 # true draws the sampled trajectories (CPU)
+      critics: [ConstraintCritic, CostCritic, GoalCritic, GoalAngleCritic,
+                PathAlignCritic, PathFollowCritic, PathAngleCritic,
+                PreferForwardCritic]
+      ConstraintCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 4.0
+      # THE ONE THAT KNOWS THE BODY. consider_footprint: every sampled pose's
+      # full padded outline is checked; a LETHAL cell under it rejects the
+      # trajectory (hard). Inside that, inflation cost is a SOFT price, so a
+      # trajectory hugging a wall loses to one through the middle whenever the
+      # middle exists -- and is still allowed when it does not. That split
+      # (hard = contact + 1 cm, soft = clearance) is what lets it get out of a
+      # pocket it could never have been routed into.
+      CostCritic:
+        enabled: true
+        cost_power: 1
+        # 6.0 from the stock 3.81, with PathAlign 14 -> 8 (drive test
+        # 2026-09-27 23:45): 1.6 m through clutter took 47 s with 51
+        # "Optimizer fail" ticks, and a 2.5 m run parked the outline on the
+        # 1 cm line, where the planner refused it as a start. The lattice's
+        # paths touch obstacle edges in tight places; at 14 MPPI held them.
+        # Clearance now outweighs following the line exactly.
+        cost_weight: 6.0
+        critical_cost: 300.0
+        consider_footprint: true
+        collision_cost: 1000000.0
+        near_collision_cost: 253
+        near_goal_distance: 0.5
+        trajectory_point_step: 2
+        inflation_layer_name: inflation_layer
+      GoalCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 5.0
+        threshold_to_consider: 1.0
+      GoalAngleCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 3.0
+        threshold_to_consider: 0.4
+      PathAlignCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 8.0                 # 14 stock; see CostCritic
+        max_path_occupancy_ratio: 0.05
+        trajectory_point_step: 4
+        threshold_to_consider: 0.4
+        offset_from_furthest: 20
+        use_path_orientations: false
+      PathFollowCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 5.0
+        offset_from_furthest: 5
+        threshold_to_consider: 1.0
+      PathAngleCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 2.0
+        offset_from_furthest: 4
+        threshold_to_consider: 0.4
+        max_angle_to_furthest: 1.0
+        mode: 0                        # forward only (vx_min 0)
+      PreferForwardCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 5.0
+        threshold_to_consider: 0.4
 
 planner_server:
   ros__parameters:
@@ -267,9 +260,56 @@ planner_server:
     expected_planner_frequency: 1.0
     planner_plugins: [GridBased]
     GridBased:
-      plugin: nav2_navfn_planner::NavfnPlanner
+      # SMAC STATE LATTICE since 2026-09-27 (NAV_PLAN.md N2), from NavFn.
+      # NavFn plans for a POINT on an inflated grid: no heading, no shape. It
+      # drew paths that began with a turn the 36 x 38 cm body had no room to
+      # make, and the controller then refused them. The lattice searches
+      # (x, y, heading) with motion primitives this chassis can drive -- arcs of
+      # 0.4 m radius and turns in place -- and collision-checks the FULL
+      # outline at every pose, so a path it returns is one the body fits.
+      #
+      # The primitives: config/lattice_diff_2p5cm_r0p4.json, generated with
+      # nav2's own lattice_primitives/generate_motion_primitives.py (jazzy),
+      # {motion_model: diff, turning_radius: 0.4, grid_resolution: 0.025,
+      #  stopping_threshold: 5, num_of_headings: 16} -> 104 primitives.
+      # grid_resolution MUST equal the global costmap's resolution (0.025);
+      # change the costmap and you regenerate this file.
+      plugin: nav2_smac_planner::SmacPlannerLattice
+      lattice_filepath: /opt/rover3/config/lattice_diff_2p5cm_r0p4.json
       tolerance: 0.25
-      use_astar: true
+      max_iterations: 1000000
+      max_on_approach_iterations: 1000
+      terminal_checking_interval: 5000
+      # the BT replans at 1 Hz; a plan that takes longer than this is dropped
+      max_planning_time: 1.5
+      analytic_expansion_ratio: 3.5
+      analytic_expansion_max_length: 1.5
+      analytic_expansion_max_cost: 200.0
+      analytic_expansion_max_cost_override: false
+      # forward only: blind behind (vx_min 0 in the controller agrees)
+      allow_reverse_expansion: false
+      reverse_penalty: 2.0
+      change_penalty: 0.05
+      non_straight_penalty: 1.05
+      # the soft preference for the middle of free floor (inflation cost).
+      # 3.0 from 2.0 (drive test 2026-09-27): at 2.0 every path from the
+      # pocket ran with the outline touching a lethal cell's edge.
+      cost_penalty: 3.0
+      # turning in place is allowed and priced: the pivot scrubs and slides
+      rotation_penalty: 5.0
+      retrospective_penalty: 0.015
+      # 2.5 cm cells: a 20 m table would be 800 x 800 x 16 headings
+      lookup_table_size: 5.0
+      cache_obstacle_heuristic: false
+      smooth_path: true
+      smoother:
+        max_iterations: 1000
+        w_smooth: 0.3
+        w_data: 0.2
+        tolerance: 1.0e-10
+        do_refinement: true
+        refinement_num: 2
+      debug_visualizations: false
       # TRUE since 2026-08-23, and this is a real trade rather than a tidy-up.
       #
       # A forward-facing camera can never see the floor the rover is standing on,
@@ -286,7 +326,7 @@ planner_server:
       # outside 87 deg, and nothing downward at all.
       #
       # What still protects it: the local costmap and the controller's own
-      # collision check (use_collision_detection, 1.5 s to collision) run during
+      # collision check (MPPI's CostCritic, every sampled pose) run during
       # execution, and nav2 replans as new ground is observed. Those guard the
       # DRIVING; nothing guards the blind spots, which is why autonomous runs
       # still need a human watching.
@@ -392,7 +432,18 @@ global_costmap:
       # real corner (26.3 cm) cleared it. Now: 29.1 cm to turn, a gap over
       # 2 x 0.198 = 0.40 m to plan through. goal_exec.py MARGIN, reach_node.py
       # MARGIN and wall_margin_view.py are the same 2 cm -- change all four.
-      footprint_padding: 0.02
+      # 0.01 from 0.02 on 2026-09-27 evening (NAV_PLAN.md N1), and the MEANING
+      # changed with it: padding is now the HARD contact margin only. Clearance
+      # is bought SOFTLY -- the lattice's cost_penalty and MPPI's CostCritic
+      # price inflation cost -- so routes still keep off walls wherever there is
+      # room, but a rover that ends up close is still allowed to leave.
+      # Measured in the pocket that pinned it (22:40): lethal cells under the
+      # body 0, under body+1 cm 0, under body+2 cm 2. At 0.02 the rover counted
+      # as ALREADY in collision, so every motion and the planner's start pose
+      # were refused; at 0.01 the same spot is free and the way out is legal.
+      # goal_exec.py MARGIN, reach_node.py MARGIN and wall_margin_view.py are
+      # the same 1 cm -- change all four.
+      footprint_padding: 0.01
 
       plugins: [nvblox_layer, lidar_layer, inflation_layer]
       nvblox_layer:
@@ -587,6 +638,26 @@ local_costmap:
       # real corner (26.3 cm) cleared it. Now: 29.1 cm to turn, a gap over
       # 2 x 0.198 = 0.40 m to plan through. goal_exec.py MARGIN, reach_node.py
       # MARGIN and wall_margin_view.py are the same 2 cm -- change all four.
+      # 0.01 from 0.02 on 2026-09-27 evening (NAV_PLAN.md N1), and the MEANING
+      # changed with it: padding is now the HARD contact margin only. Clearance
+      # is bought SOFTLY -- the lattice's cost_penalty and MPPI's CostCritic
+      # price inflation cost -- so routes still keep off walls wherever there is
+      # room, but a rover that ends up close is still allowed to leave.
+      # Measured in the pocket that pinned it (22:40): lethal cells under the
+      # body 0, under body+1 cm 0, under body+2 cm 2. At 0.02 the rover counted
+      # as ALREADY in collision, so every motion and the planner's start pose
+      # were refused; at 0.01 the same spot is free and the way out is legal.
+      # goal_exec.py MARGIN, reach_node.py MARGIN and wall_margin_view.py are
+      # the same 1 cm -- change all four.
+      # LOCAL (MPPI) 0.02, GLOBAL (planner) 0.01 -- a deliberate 1 cm gap
+      # (drive test 2026-09-27 23:55). Both check the outline by rasterising
+      # its EDGES over 2.5 cm cells, so a lethal cell whose centre is up to
+      # ~1.25 cm outside still counts. With both at 0.01, MPPI parked the
+      # rover where the lattice then refused it as a start ("Start
+      # occupied", 8 attempts, 44 s). The controller now always stops at
+      # least 1 cm short of where the planner stops accepting starts.
+      # When MPPI itself is pinned inside 2 cm, reach's escape (goal_exec,
+      # 1 cm) steps it off. reach_node.py ESCAPE_* reads this costmap.
       footprint_padding: 0.02
       plugins: [nvblox_layer, lidar_layer, inflation_layer]
       nvblox_layer:
@@ -722,12 +793,13 @@ behavior_server:
     #
     # 1.5 matches the velocity_smoother's angular cap so nothing downstream
     # clips it (~0.42 rad/s actual, 24 deg/s -- a quarter turn in ~4 s).
-    max_rotational_vel: 1.5
+    # real rad/s since turn_shaper (2026-09-27); it lifts slow turns over the deadband
+    max_rotational_vel: 0.8
     # 1.0, not 0.2. The floor must sit ABOVE the breakaway, because Spin slows
     # as it approaches its target angle: with a low floor the last few degrees
     # are commanded below 0.8 and the rover stops short with the behaviour still
     # running. 1.0 commanded is ~0.21 rad/s actual -- slow, but moving.
-    min_rotational_vel: 1.0
+    min_rotational_vel: 0.3
     # 10.0, same reasoning as the controller's max_angular_accel: the ramp is
     # acc_lim * dt, and at 1.0 rad/s^2 the first 100 ms tick commands 0.1 rad/s,
     # deep in the deadband. 10.0 clears 0.8 on the very first tick.
@@ -750,8 +822,9 @@ velocity_smoother:
     # rad/s^2 accel would have re-imposed the deadlock the controller's own
     # max_angular_accel was raised to escape. 2.5 commanded is about 0.7 rad/s
     # actual (40 deg/s); linear limits are unchanged.
-    max_velocity: [0.20, 0.0, 1.5]
-    min_velocity: [-0.10, 0.0, -1.5]
+    # linear 0.26 for desired 0.25; angular 0.9 is REAL rad/s since turn_shaper
+    max_velocity: [0.26, 0.0, 0.9]
+    min_velocity: [-0.10, 0.0, -0.9]
     max_accel: [1.5, 0.0, 10.0]
     max_decel: [-1.5, 0.0, -10.0]
     odom_topic: /odom

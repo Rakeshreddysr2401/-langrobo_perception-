@@ -578,11 +578,17 @@ nav)
   echo "      Spin recovery and rotate-to-heading are ON since TODO 40 — the"
   echo "      pivot fault (TODO 14) was fixed on 2026-08-22. Recovery order is"
   echo "      clear costmaps → spin +90° → back up 0.30 m → spin −90° → wait."
-  echo "      Footprint 36 x 38 cm + 2 cm padding: the planner needs a gap over"
-  echo "      ~0.40 m; turning in place needs every wall 29 cm from centre."
+  echo "      Planner: Smac State Lattice (plans with the real 36 x 38 cm outline"
+  echo "      and heading); controller: MPPI (tries ~1000 motions a tick). 1 cm"
+  echo "      hard margin, clearance preferred softly -- NAV_PLAN.md."
+  echo "      Check planning without moving: python3 /opt/rover3/tools/plan_check.py"
   # supervised: if any nav2 part dies, nav2 restarts whole (nav2.launch.py);
   # restarts are listed in /tmp/nav_restarts.log
   dexec "bash $SRC3/launch/nav2_supervise.sh > /tmp/nav.log 2>&1"
+  # nav2's smoothed command -> real turn rates on this skid-steer -> /cmd_vel.
+  # Not running = nav2 cannot move the wheels at all (safe).
+  kill_match 'turn_shaper[.]py'
+  dexec "python3 $SRC3/nodes/turn_shaper.py > /tmp/turn_shaper.log 2>&1"
   # goal_exec (exact moves) and reach (RViz goals: retry until there) ride on nav2
   kill_match 'goal_exec_node[.]py|reach_node[.]py'
   dexec "python3 $SRC3/nodes/goal_exec_node.py > /tmp/goal_exec.log 2>&1"

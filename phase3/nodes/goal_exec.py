@@ -86,7 +86,7 @@ import numpy as np
 
 # the measured outline (description/params.yaml; nav2.yaml footprint)
 FRONT, REAR, SIDE = 0.182, 0.178, 0.19
-MARGIN = 0.02                 # the owner's, 2 cm since 2026-09-27 (5 before); = nav2 footprint_padding
+MARGIN = 0.01                 # hard contact margin, 1 cm since 2026-09-27 evening (NAV_PLAN.md N1; 2, 5 before); = nav2 footprint_padding
 
 
 def wrap(a):

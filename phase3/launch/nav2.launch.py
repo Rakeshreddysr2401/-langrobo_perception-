@@ -50,6 +50,15 @@ LIFECYCLE = [
 # Do not change the footprint live: restart nav2.
 STOP_ALL = dict(on_exit=[Shutdown(reason='a nav2 node exited')])
 
+# A STACK TRACE ON EVERY CRASH, since 2026-09-27 (NAV_PLAN.md N1). nav2 has
+# segfaulted (exit -11) at least five times in two days; each time the dump
+# went to the host's apport and was lost, so every "cause" in nav2.yaml is a
+# correlation. backward_ros's libbackward.so installs a signal handler when
+# loaded: the trace of the crashing thread lands in /tmp/nav.log, right
+# before nav2_supervise.sh's restart line. Costs nothing until a crash.
+BACKWARD = '/opt/ros/jazzy/lib/libbackward.so'
+STOP_ALL['additional_env'] = {'LD_PRELOAD': BACKWARD} if os.path.exists(BACKWARD) else {}
+
 
 def generate_launch_description():
     common = {'use_sim_time': False}
@@ -78,8 +87,10 @@ def generate_launch_description():
         # corrupts the very odometry nav2 is steering by.
         Node(package='nav2_velocity_smoother', executable='velocity_smoother',
              name='velocity_smoother', output='screen', **STOP_ALL, parameters=[CONFIG],
+             # -> turn_shaper.py -> /cmd_vel: the smoothed command is in REAL
+             # turn rates; turn_shaper converts them for this skid-steer.
              remappings=[('cmd_vel', 'cmd_vel_nav'),
-                         ('cmd_vel_smoothed', 'cmd_vel')]),
+                         ('cmd_vel_smoothed', 'cmd_vel_turn')]),
         Node(package='nav2_lifecycle_manager', executable='lifecycle_manager',
              name='lifecycle_manager_navigation', output='screen', **STOP_ALL,
              parameters=[{'use_sim_time': False,

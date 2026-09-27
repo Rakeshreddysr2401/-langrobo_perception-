@@ -4,7 +4,7 @@
     /global_costmap/costmap  nav_msgs/OccupancyGrid (nav2, what it plans on)
         -> /rover_view/wall_margin  nav_msgs/OccupancyGrid, for RViz only:
                a wall (nav2 lethal)            98  -> RED    in RViz's costmap colours
-               within MARGIN_M of a wall       55  -> VIOLET (2 cm)
+               within MARGIN_M of a wall       55  -> VIOLET (1 cm)
                everything else                  0  -> clear: the floor shows white
 
 WHY (owner, 2026-09-27). nav2's own costmap is drawn for the rover's CENTRE:
@@ -29,7 +29,7 @@ from nav_msgs.msg import OccupancyGrid
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 
-MARGIN_M = float(os.environ.get("ROVER_WALL_MARGIN_M", "0.02"))   # = footprint_padding
+MARGIN_M = float(os.environ.get("ROVER_WALL_MARGIN_M", "0.01"))   # = footprint_padding (1 cm, NAV_PLAN.md N1)
 WALL, BAND, FREE = 98, 55, 0
 LETHAL = 100          # nav2 publishes lethal (254) as 100 in an OccupancyGrid
 

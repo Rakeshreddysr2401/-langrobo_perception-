@@ -32,6 +32,7 @@ EACH ATTEMPT
 """
 import json
 import math
+import signal
 import sys
 import time
 from pathlib import Path
@@ -42,6 +43,8 @@ from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseStamped, Twist
 from nav2_msgs.action import NavigateToPose
 from nav2_msgs.srv import ClearEntireCostmap
+from nav_msgs.msg import OccupancyGrid
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.action import ActionClient
 from rclpy.time import Time
 from std_msgs.msg import Empty, String
@@ -49,7 +52,7 @@ from std_msgs.msg import Empty, String
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'tools'))
 import gap_pass as GP  # noqa: E402
-from goal_exec import SIDE, wrap  # noqa: E402
+from goal_exec import FRONT as GE_FRONT, REAR as GE_REAR, SIDE, wrap  # noqa: E402
 
 EXACT_RANGE = 1.2      # m: closer than this, goal_exec alone (its MAX_LEG is 1.5)
 MAX_ATTEMPTS = 8
@@ -57,7 +60,7 @@ MAX_S = 300.0
 WAIT_S = 3.0
 NAV_TIMEOUT = 120.0
 PASS_D = 0.9           # m: how far a recovery pass crawls
-MARGIN = 0.02          # = goal_exec MARGIN and nav2 footprint_padding (2026-09-27; 0.03 before)
+MARGIN = 0.01          # = goal_exec MARGIN and nav2 footprint_padding (1 cm hard since 2026-09-27 evening, NAV_PLAN.md N1; 0.02, 0.03 before)
 # At the spot, only the final turn to the goal heading refused ("... in the
 # +84 deg swing"): that IS arrival. For an approach the goal heading faces
 # the object, and the thing in the swing is usually the object itself or the
@@ -102,6 +105,11 @@ class Reach(GP.Pass):
         self.goal_stamp = None
         self.stop_req = False
         self.create_subscription(PoseStamped, '/reach/goal', self._goal, 10)
+        # the local costmap MPPI drives by: the escape must see what nav2 sees
+        self.lcm = None
+        self.create_subscription(OccupancyGrid, '/local_costmap/costmap', lambda m: setattr(self, 'lcm', m),
+                                 QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                                            reliability=ReliabilityPolicy.RELIABLE))
         self.create_subscription(Empty, '/reach/cancel', lambda _: setattr(self, 'stop_req', True), 10)
         self.get_logger().info('reach up: /reach/goal (RViz 2D Goal Pose)')
 
@@ -165,6 +173,7 @@ class Reach(GP.Pass):
         gh = fut.result() if fut.done() else None
         if gh is None or not gh.accepted:
             return 'failed', 'nav2 rejected the goal'
+        self.nav_gh = gh                           # cancelled on shutdown (main)
         res = gh.get_result_async()
         while not res.done():
             self.spin_for(0.1)
@@ -172,6 +181,7 @@ class Reach(GP.Pass):
                 gh.cancel_goal_async()
                 self.spin_for(0.5)
                 return 'cancelled' if self.stop_req else 'failed', 'nav2 timed out'
+        self.nav_gh = None
         st = res.result().status
         if st == GoalStatus.STATUS_SUCCEEDED:
             return 'reached', ''
@@ -185,8 +195,21 @@ class Reach(GP.Pass):
                 text = f.read().decode(errors='ignore')
         except OSError:
             return 'nav2 failed'
-        for key, why in (('collision ahead', 'narrow: nav2 path follower saw collision ahead'),
+        # ROOT CAUSE FIRST (2026-09-27): a planner failure makes the BT spin,
+        # and Spin logs "Collision Ahead" -- matched first, a goal inside an
+        # obstacle was reported "narrow" and reach squeezed at it. So the
+        # planner's own words win, then MPPI's ('fail to compute path': every
+        # sampled motion touched something), then RPP / Spin / BackUp's
+        # 'collision ahead' (lower-cased).
+        text = text.lower()
+        for key, why in (('start occupied', 'narrow: planner says the rover is touching something (start occupied)'),
+                         ('no valid path found', 'no path: planner found none'),
+                         ('failed to create plan', 'no path: planner found none'),
                          ('failed to plan', 'no path: planner found none'),
+                         ('exceeded limit of', 'no path: planner ran out of search'),
+                         ('no valid start or goal', 'narrow: planner says the start or goal touches something'),
+                         ('fail to compute path', 'narrow: nav2 controller found no motion that fits'),
+                         ('collision ahead', 'narrow: nav2 path follower saw collision ahead'),
                          ('patience exceeded', 'stuck: controller patience exceeded')):
             if key in text:
                 return why
@@ -206,6 +229,104 @@ class Reach(GP.Pass):
                     return ('reached' if st['result'] == 'reached' else 'failed'), f"goal_exec {st['result']}: {st['why']}"
         self.cancel.publish(Empty())
         return 'failed', 'goal_exec timed out'
+
+    # ── escape: step off the wall the controller parked us against ──────────
+    # NAV_PLAN.md N4. MPPI may drive the outline to within footprint_padding
+    # (1 cm) of a wall; the lattice planner then refuses that pose as its
+    # START ("Start occupied"), and every retry fails the same way -- drive
+    # test 2026-09-27: 24 cm from the goal, 8 attempts, 82 s. The way out is
+    # a few cm STRAIGHT (a turn sweeps the corners into the wall): forward
+    # first, back only a little (blind behind below the LiDAR plane), and
+    # only a move whose whole sweep keeps at least today's gap.
+    ESCAPE_NEAR = 0.03                     # m: pinned = something this close to the outline
+    ESCAPE_STEPS = (0.05, 0.10, -0.05)     # m along the heading
+
+    @staticmethod
+    def body_gap(pts, dx=0.0):
+        """Signed distance from the outline, moved dx straight ahead, to the
+        nearest point (base_link); negative = inside the body."""
+        if pts is None or not len(pts):
+            return float('inf')
+        x, y = pts[:, 0] - dx, np.abs(pts[:, 1])
+        ox = np.maximum(np.maximum(-GE_REAR - x, x - GE_FRONT), 0.0)
+        oy = np.maximum(y - SIDE, 0.0)
+        out = np.hypot(ox, oy)
+        inside = (ox == 0) & (oy == 0)
+        depth = np.minimum(np.minimum(GE_FRONT - x, x + GE_REAR), SIDE - y)
+        return float(np.min(np.where(inside, -depth, out)))
+
+    CELL_SLACK = 0.018                     # m: a cell's edge is up to half a diagonal from its centre
+
+    def costmap_cells(self):
+        """LETHAL cells of the local costmap within 0.8 m, base_link, N x 2."""
+        m, pose = self.lcm, self.pose
+        if m is None or pose is None:
+            return np.zeros((0, 2))
+        a = np.array(m.data, dtype=np.int16).reshape(m.info.height, m.info.width)
+        j, i = np.nonzero(a >= 100)
+        r = m.info.resolution
+        wx = m.info.origin.position.x + (i + 0.5) * r - pose[0]
+        wy = m.info.origin.position.y + (j + 0.5) * r - pose[1]
+        c, s = math.cos(pose[2]), math.sin(pose[2])
+        b = np.stack([c * wx + s * wy, -s * wx + c * wy], 1)
+        return b[np.hypot(b[:, 0], b[:, 1]) < 0.8]
+
+    def gap_all(self, pts, cells, dx=0.0):
+        """The closer of: raw points, and costmap cells less CELL_SLACK --
+        the planner refuses what its costmap says, not what the LiDAR says."""
+        return min(self.body_gap(pts, dx), self.body_gap(cells, dx) - self.CELL_SLACK)
+
+    def escape(self, attempt):
+        """One short straight move away from contact. True if it moved."""
+        pts = np.vstack(self.scans + [self.dobs.points_base(self.pose)]) if self.scans else None
+        cells = self.costmap_cells()
+        g0 = self.gap_all(pts, cells)
+        if g0 > self.ESCAPE_NEAR:
+            return False
+        best = None
+        for step in self.ESCAPE_STEPS:
+            sweep = min(self.gap_all(pts, cells, s) for s in np.linspace(0.01 * np.sign(step), step, 6))
+            end = self.gap_all(pts, cells, step)
+            if sweep >= g0 - 0.002 and end > g0 + 0.01 and (best is None or end > best[1]):
+                best = (step, end)
+        if best is None:
+            self.say(attempt=attempt, phase='escape', gap_cm=round(g0 * 100, 1), outcome='no straight move opens space')
+            return False
+        step, end = best
+        self.say(attempt=attempt, phase='escape', gap_cm=round(g0 * 100, 1), move_cm=round(step * 100), to_gap_cm=round(end * 100, 1))
+        r, why = self.drive_straight(step, g0)
+        self.say(attempt=attempt, phase='escape', outcome=r, why=why)
+        return r == 'reached'
+
+    ESCAPE_VX = 0.05                       # m/s, goal_exec's pass speed
+
+    def drive_straight(self, step, g0):
+        """Exactly straight, closed on fresh points every tick. NOT goal_exec:
+        its docking turns to line up first when the pose has slid (drive test
+        2026-09-27: a 5 cm reverse became a +30 deg turn, refused by its own
+        swing check). Stops the moment the gap to anything shrinks."""
+        x0, y0, _ = self.pose
+        sgn = 1.0 if step > 0 else -1.0
+        t0 = time.time()
+        try:
+            while time.time() - t0 < abs(step) / self.ESCAPE_VX + 2.0:
+                if self.stop_req:
+                    return 'cancelled', ''
+                moved = math.hypot(self.pose[0] - x0, self.pose[1] - y0)
+                if moved >= abs(step) - 0.005:
+                    return 'reached', f'{moved * 100:.1f} cm straight'
+                # the LATEST scan only: the kept ones are in base_link as it was
+                # up to 1 s ago, 5 cm off at this speed
+                pts = np.vstack(self.scans[-1:] + [self.dobs.points_base(self.pose)]) if self.scans else None
+                if self.gap_all(pts, self.costmap_cells()) < g0 - 0.005:
+                    return 'failed', f'gap closing after {moved * 100:.1f} cm -- stopped'
+                cmd = Twist()
+                cmd.linear.x = sgn * self.ESCAPE_VX
+                self.cmd.publish(cmd)
+                self.spin_for(0.05)
+            return 'failed', 'timed out'
+        finally:
+            self.stop()
 
     def face(self, bearing):
         """Turn in place toward bearing (odom), outline-checked; for the look."""
@@ -288,6 +409,11 @@ class Reach(GP.Pass):
             # ── recover: stop, clear, look, then pass if narrow, else wait ──
             self.stop()
             self.clear_costmaps()
+            # parked against something (MPPI may go to the 1 cm line; the
+            # planner will not start from it): step off first, then retry at
+            # once -- no look, no pass, no wait
+            if self.escape(attempt):
+                continue
             bearing = math.atan2(g[1] - self.pose[1], g[0] - self.pose[0])
             if abs(wrap(bearing - self.pose[2])) > math.radians(35) and self.dist(g) > 0.3:
                 self.face(bearing)
@@ -310,14 +436,36 @@ class Reach(GP.Pass):
 def main():
     rclpy.init()
     n = Reach()
+    # A goal with no pose used to wait here SILENTLY, forever: 2026-09-27 a
+    # reach started during a nav2 restart never received one /odom message
+    # (a fresh process in the same container got 20 Hz), and four RViz goals
+    # vanished with nothing in any log. Now it says so and gives the goal up.
+    NO_POSE_S = 3.0
+    waiting_since = None
+    # A killed reach used to leave its nav2 goal DRIVING with nobody watching
+    # (2026-09-28: restarted mid-goal; nav2 ran on 20 s). SIGTERM (pkill,
+    # ./rover nav) now takes the same way out as Ctrl-C: cancel, then stop.
+    n.nav_gh = None
+    signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
     try:
         while rclpy.ok():
             n.spin_for(0.1)
             if n.pending is not None and n.pose is not None:
-                m, n.pending = n.pending, None
+                m, n.pending, waiting_since = n.pending, None, None
                 n.pursue(m)
+            elif n.pending is not None:
+                waiting_since = waiting_since or time.time()
+                if time.time() - waiting_since > NO_POSE_S:
+                    m, n.pending, waiting_since = n.pending, None, None
+                    n.goal_stamp = f'{m.header.stamp.sec}.{m.header.stamp.nanosec:09d}'
+                    n.get_logger().error('goal dropped: no pose from /odom since reach started -- restart it (./rover nav)')
+                    n.say(result='failed', why='no pose: reach has received no /odom')
     except KeyboardInterrupt:
         pass
+    if n.nav_gh is not None:
+        n.nav_gh.cancel_goal_async()
+        n.spin_for(0.3)
+    n.cancel.publish(Empty())                  # goal_exec, if it was driving for us
     n.stop()
 
 
