@@ -169,7 +169,9 @@ _MAX_DEPTH_M = 6.0        # beyond this the reading is usually noise
 DEPTH_RING_S = 2.0        # depth frames kept this long ...
 DEPTH_RING_DT = 0.09      # ... at most one per this: ~22 x 900 KB
 SNAP_MAX_DT_S = 0.10      # nearest depth frame must be this close to the photo
-SNAPSHOTS = 8             # photos remembered (a VLM call is 10-40 s; one at a time)
+SNAPSHOTS = 24            # photos remembered: the Pi 5 surveys EVERY photo in the
+                          # background (tools/survey.py), after a search's 8 views,
+                          # so the depth must outlive the search (~0.9 MB each)
 SNAP_RETRY_S = 0.6        # TF for the stamp not in yet: retry this long
 
 # Box grounding (see THE OBJECT'S BOX, NOT ONE PIXEL above).
