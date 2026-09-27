@@ -65,6 +65,16 @@ MARGIN = 0.02          # = goal_exec MARGIN and nav2 footprint_padding (2026-09-
 # 3 min and reported the whole trip FAILED with the rover 1 cm from the goal
 # (2026-09-27, "go to the white box"). Reported as reached, with a note.
 AT_GOAL_M = 0.05
+# "There" = nav2's own goal tolerances (nav2.yaml xy 0.10, yaw 0.25). Drive
+# test 2026-09-27: nav2 had a goal 2 m behind the rover 5 cm away in 32 s;
+# the exact finish's docking line was then blocked, the attempt counted as
+# failed, and reach squeezed, waited and retried for 145 s and ended 41 cm
+# off. A goal inside these is reached, whatever the exact finish said.
+ARRIVED_M = 0.10
+ARRIVED_YAW = 0.25
+# after nav2 reports success: the exact finish refused or stuck still leaves
+# the rover where nav2 put it; allow for a few cm of pose noise on top
+NAV2_ARRIVED_M = 0.15
 NAV_LOG = Path('/tmp/nav.log')
 
 
@@ -123,12 +133,17 @@ class Reach(GP.Pass):
     def dist(self, g):
         return math.hypot(g[0] - self.pose[0], g[1] - self.pose[1])
 
+    def arrived(self, g):
+        return self.dist(g) <= ARRIVED_M and abs(wrap(g[2] - self.pose[2])) <= ARRIVED_YAW
+
     def stop(self):
         for _ in range(3):
             self.cmd.publish(Twist())
 
     def clear_costmaps(self):
-        for c in (self.clear_l, self.clear_g):
+        # LOCAL only: nav2 segfaulted seconds after global clears (2026-09-27);
+        # the global costmap clears itself (LiDAR raytracing, nvblox re-read).
+        for c in (self.clear_l,):
             if c.service_is_ready():
                 c.call_async(ClearEntireCostmap.Request())
         self.spin_for(0.5)
@@ -213,21 +228,45 @@ class Reach(GP.Pass):
             self.say(result='failed', why=f'no transform {m.header.frame_id} -> odom')
             return
         tried = []
+        # A near goal whose docking line was refused goes to nav2 next: the
+        # same drive test had a goal 0.76 m behind in open floor refused 7
+        # times on its line (squeeze, wait, same line) and never tried nav2.
+        go_nav2 = False
         for attempt in range(1, MAX_ATTEMPTS + 1):
             if self.stop_req or time.time() - t0 > MAX_S:
                 break
             if m.header.frame_id == 'map':
                 g = self.goal_odom(m) or g          # SLAM may have corrected map -> odom
             d = self.dist(g)
-            if d > EXACT_RANGE:
+            line_refused = False
+            if d > EXACT_RANGE or go_nav2:
                 self.say(attempt=attempt, phase='nav2', dist_m=round(d, 2))
                 r, why = self.run_nav2(g)
                 if r == 'reached':
                     self.say(attempt=attempt, phase='finish', dist_m=round(self.dist(g), 3))
-                    r, why = self.run_goal_exec(g)
+                    r2, why2 = self.run_goal_exec(g)
+                    # nav2 has ARRIVED (its goal checker: 10 cm, 14 deg). The
+                    # exact finish only improves on that; refused or stuck, it
+                    # never undoes it -- drive test 2026-09-27: refused
+                    # finishes re-ran nav2 + squeeze 5 times, 8.3 m driven for
+                    # a 1.5 m route, 181 s, timed out 4 cm from the goal.
+                    if r2 != 'reached' and self.dist(g) <= NAV2_ARRIVED_M:
+                        self.stop()
+                        self.say(result='reached', attempt=attempt, dist_cm=round(self.dist(g) * 100, 1),
+                                 secs=round(time.time() - t0), tried=tried,
+                                 note=f'nav2 arrived; the exact finish did not fit ({why2})')
+                        return
+                    r, why = r2, why2
             else:
                 self.say(attempt=attempt, phase='goal_exec', dist_m=round(d, 2))
                 r, why = self.run_goal_exec(g)
+                line_refused = r == 'failed' and 'refused' in why
+            if r == 'failed' and self.arrived(g):
+                self.stop()
+                self.say(result='reached', attempt=attempt, dist_cm=round(self.dist(g) * 100, 1),
+                         secs=round(time.time() - t0), tried=tried,
+                         note=f'within nav2 tolerance; the exact finish did not fit ({why})')
+                return
             if r == 'reached':
                 self.say(result='reached', attempt=attempt, dist_cm=round(self.dist(g) * 100, 1),
                          secs=round(time.time() - t0), tried=tried)
@@ -241,6 +280,10 @@ class Reach(GP.Pass):
                          note=f'at the spot, but could not turn fully to the goal heading ({why})')
                 return
             tried.append(why)
+            if line_refused and not go_nav2:
+                go_nav2 = True
+                self.say(attempt=attempt, phase='recover', why=why + ' -- nav2 next')
+                continue
             self.say(attempt=attempt, phase='recover', why=why)
             # ── recover: stop, clear, look, then pass if narrow, else wait ──
             self.stop()

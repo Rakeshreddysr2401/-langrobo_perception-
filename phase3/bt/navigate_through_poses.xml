@@ -17,7 +17,11 @@
             </ReactiveSequence>
             <Sequence>
               <WouldAPlannerRecoveryHelp error_code="{compute_path_error_code}"/>
-              <ClearEntireCostmap name="ClearGlobalCostmap-Context" service_name="global_costmap/clear_entirely_global_costmap"/>
+              <!-- no ClearGlobalCostmap here (2026-09-27): three nav2 segfaults were
+                   each seconds after recovery cleared the global costmap (on
+                   every failed plan, up to 2x a second) and started a Spin.
+                   The global costmap needs no clearing: its LiDAR layer
+                   raytraces stale marks away and nvblox's is re-read live. -->
             </Sequence>
           </RecoveryNode>
         </RateController>
@@ -39,7 +43,7 @@
           <RoundRobin name="RecoveryActions">
             <Sequence name="ClearingActions">
               <ClearEntireCostmap name="ClearLocalCostmap-Subtree" service_name="local_costmap/clear_entirely_local_costmap"/>
-              <ClearEntireCostmap name="ClearGlobalCostmap-Subtree" service_name="global_costmap/clear_entirely_global_costmap"/>
+              <!-- local only: see the ClearGlobalCostmap note above -->
             </Sequence>
             <!-- SPIN IS BACK, and it is the FIRST thing tried after clearing.
                  TODO 40. It was removed on the grounds that this rover cannot

@@ -59,7 +59,11 @@ controller_server:
     min_x_velocity_threshold: 0.01
     min_y_velocity_threshold: 0.5      # differential drive: y is never commanded
     min_theta_velocity_threshold: 0.05
-    failure_tolerance: 0.3
+    # 2.0 from 0.3 (drive test 2026-09-27): RPP's "collision ahead" from a
+    # noise cell on the outline's edge lasts a moment, but 0.3 s aborted
+    # FollowPath at once into clear/spin/backup/wait -- 24-36 aborts on goals
+    # that then went straight through. The rover is stopped meanwhile.
+    failure_tolerance: 2.0
     progress_checker_plugin: progress_checker
     goal_checker_plugins: [general_goal_checker]
     controller_plugins: [FollowPath]
@@ -232,7 +236,7 @@ controller_server:
       # curve: RPP was reading every cost as 1/3 CLOSER to the obstacle than it
       # is. Setting it to 2.0 is not a tuning choice, it is the value that makes
       # the inverse the actual inverse. Change both together or neither.
-      # = the inflation layers' cost_scaling_factor (2.0 again for the crash test).
+      # = the inflation layers' cost_scaling_factor. Change both together.
       inflation_cost_scaling_factor: 2.0
       # 0.6 was the default and it is longer than the inflation layer's useful
       # range here: min_distance_to_obstacle can never fall below the inscribed
@@ -483,9 +487,16 @@ global_costmap:
         # 0.334 m circumscribed radius) was tried the same day and
         # planner_server segfaulted three times in 15 min, idle, against none
         # in the 16 min before it. Cause not proven; do not go below 0.334.
-        inflation_radius: 0.45
-        # 2.0 again for a crash test (2026-09-27): nav2 segfaulted repeatedly
-        # after 10.0 + footprint_padding 0.02 went in; 30 min on 2.0 to see.
+        # 0.80 from 0.45 (2026-09-27, drive test): with the cost ending 45 cm
+        # out, routes ran along that edge -- body ~25 cm from a wall, where this
+        # rover cannot turn (its corners swing 29 cm about an off-centre pivot).
+        # Every goal needing a turn then hit RPP "collision ahead" and Spin
+        # "Collision Ahead" (3 of 3 goals timed out, 172-312 warnings each).
+        # Spread to 0.80 at 2.0, routes keep to the middle of any space up to
+        # ~1.6 m wide (owner, same day: "the line is right of centre").
+        inflation_radius: 0.80
+        # 2.0: 10.0 was tried and nav2 then segfaulted; 30 min back on 2.0
+        # (with drive tests in it) had no crash.
         cost_scaling_factor: 2.0
 
 local_costmap:
@@ -667,9 +678,16 @@ local_costmap:
         # 0.334 m circumscribed radius) was tried the same day and
         # planner_server segfaulted three times in 15 min, idle, against none
         # in the 16 min before it. Cause not proven; do not go below 0.334.
-        inflation_radius: 0.45
-        # 2.0 again for a crash test (2026-09-27): nav2 segfaulted repeatedly
-        # after 10.0 + footprint_padding 0.02 went in; 30 min on 2.0 to see.
+        # 0.80 from 0.45 (2026-09-27, drive test): with the cost ending 45 cm
+        # out, routes ran along that edge -- body ~25 cm from a wall, where this
+        # rover cannot turn (its corners swing 29 cm about an off-centre pivot).
+        # Every goal needing a turn then hit RPP "collision ahead" and Spin
+        # "Collision Ahead" (3 of 3 goals timed out, 172-312 warnings each).
+        # Spread to 0.80 at 2.0, routes keep to the middle of any space up to
+        # ~1.6 m wide (owner, same day: "the line is right of centre").
+        inflation_radius: 0.80
+        # 2.0: 10.0 was tried and nav2 then segfaulted; 30 min back on 2.0
+        # (with drive tests in it) had no crash.
         cost_scaling_factor: 2.0
 
 behavior_server:

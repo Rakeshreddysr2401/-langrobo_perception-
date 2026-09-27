@@ -66,6 +66,11 @@ from goal_exec import GoalExec, wrap  # noqa: E402
 PIVOT_FILE = Path('/logs/goal_exec_pivot.json')
 SD_MAX_CM = 3.0
 DEPTH_STALE_S = 1.0             # pass mode stops without a camera update this recent
+# ...and WAITS for one, giving up only after this long. Drive test 2026-09-27:
+# on the loaded Jetson (camera driver ~85% of a core) depth stalled for 1-1.4 s
+# mid-pass, and every pass through a gap the rover fits was cancelled on the
+# spot -- 6 in a few minutes. Stopped, the rover is not passing blind.
+DEPTH_GIVEUP_S = 5.0
 SCAN_STALE_S = 0.5              # no scan this recent: the checks would run on a frozen view
 PAUSE_S = 5.0
 DEPTH_WARM_S = 2.0              # after a goal arrives, wait this long at most for a first depth view
@@ -108,6 +113,7 @@ class GoalExecNode(Node):
         self.pass_ = None
         self.dobs = DepthObstacles(self, self.buf, lambda: self.pose, active=False)   # only during a goal
         self.warm_until = 0.0
+        self.depth_wait_since = None
         self.get_logger().info(f'goal_exec up; pivot prior {prior}')
 
     # ── inputs ──────────────────────────────────────────────────────────────
@@ -166,6 +172,7 @@ class GoalExecNode(Node):
         self.ex.set_goal(g, pass_=pass_, turn_only=turn_only)
         self.dobs.set_active(True)
         self.warm_until = time.time() + DEPTH_WARM_S
+        self.depth_wait_since = None
         self.paused_since = None
         self.get_logger().info(f'{"turn" if turn_only else "goal"} ({g[0]:.3f}, {g[1]:.3f}, '
                                f'{math.degrees(g[2]):.1f} deg) in odom from {m.header.frame_id}')
@@ -227,10 +234,22 @@ class GoalExecNode(Node):
             return
         if self.ex.pass_ and self.dobs.age() > DEPTH_STALE_S:
             # a pass is judged on the camera as much as the LiDAR (a stool's
-            # legs are camera-only): no fresh camera view, no pass
-            self.ex.cancel(f'depth camera view {self.dobs.age():.1f} s old: not passing blind')
-            self._finish()
+            # legs are camera-only): no fresh camera view, no MOVING -- stop
+            # and wait for one; give up only if it does not come
+            if self.dobs.age() > DEPTH_GIVEUP_S:
+                self.ex.cancel(f'depth camera view {self.dobs.age():.1f} s old: not passing blind')
+                self._finish()
+                return
+            self._stop()
+            self.depth_wait_since = self.depth_wait_since or time.time()
+            self._report(extra={'paused': f'depth camera view {self.dobs.age():.1f} s old: waiting'})
             return
+        if self.depth_wait_since:
+            # the wait is not a stall: move the executor's no-progress clock on by it
+            waited = time.time() - self.depth_wait_since
+            self.depth_wait_since = None
+            if hasattr(self.ex, 'best_t'):
+                self.ex.best_t += waited
         pts = self.pts
         dp = self.dobs.points_base(self.pose)
         if len(dp):
