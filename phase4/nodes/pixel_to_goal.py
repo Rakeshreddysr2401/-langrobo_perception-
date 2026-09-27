@@ -173,6 +173,14 @@ SNAPSHOTS = 24            # photos remembered: the Pi 5 surveys EVERY photo in t
                           # background (tools/survey.py), after a search's 8 views,
                           # so the depth must outlive the search (~0.9 MB each)
 SNAP_RETRY_S = 0.6        # TF for the stamp not in yet: retry this long
+# A photo inside a depth-stream gap (the D555 stalls under CPU load: 1.8 s in a
+# quiet minute, 7.1 s on 2026-09-27 -- 3 of 15 photo holds failed, so "go near
+# it" had nothing to place the object with). The camera's pose AT THE PHOTO is
+# kept, and the first depth frame after the gap is used IF the camera has not
+# moved since: the same view, so the same depth. Moved -> refused, not guessed.
+SNAP_GAP_WAIT_S = 12.0    # wait this long for depth to resume
+SNAP_STILL_M = 0.02       # camera moved less than this ...
+SNAP_STILL_RAD = math.radians(1.0)   # ... and turned less than this: same view
 
 # Box grounding (see THE OBJECT'S BOX, NOT ONE PIXEL above).
 BOX_PAD_Y = 45            # px added above and below: the VLM's measured y error
@@ -301,8 +309,26 @@ class PixelToGoal(Node):
             self._ring.popleft()
 
     # ── photo-time snapshots ────────────────────────────────────────────────
-    def _make_snapshot(self, stamp_ns: int) -> tuple:
-        """(snapshot, '') or (None, reason). reason 'tf_not_yet' is retryable."""
+    def _cam_tf_at(self, stamp_ns: int) -> tuple:
+        """(transform, '') or (None, reason); 'tf_not_yet' is retryable."""
+        try:
+            return self._tf_buffer.lookup_transform(
+                'odom', self._camera_info.header.frame_id, Time(nanoseconds=stamp_ns)), ''
+        except Exception as e:
+            name = type(e).__name__
+            return None, ('tf_not_yet' if 'Extrapolation' in name else f'tf_failed:{name}')
+
+    def _store_snapshot(self, stamp_ns: int, depth, cam_tf, dt_s: float) -> dict:
+        snap = {'depth': depth, 'cam_tf': cam_tf, 'dt_ms': round(dt_s * 1000, 1)}
+        self._snaps[stamp_ns] = snap
+        while len(self._snaps) > SNAPSHOTS:
+            self._snaps.popitem(last=False)
+        return snap
+
+    def _make_snapshot(self, stamp_ns: int, gap_tf=None) -> tuple:
+        """(snapshot, '') or (None, reason). Retryable reasons: 'tf_not_yet',
+        and 'waiting_depth' when gap_tf (the camera pose at the photo) is given
+        and the depth stream has not resumed yet. See SNAP_GAP_WAIT_S."""
         info = self._camera_info
         if info is None:
             return None, 'no_camera_info'
@@ -310,21 +336,31 @@ class PixelToGoal(Node):
             return None, 'no_depth_frame'
         near_ns, depth = min(self._ring, key=lambda f: abs(f[0] - stamp_ns))
         dt = abs(near_ns - stamp_ns) / 1e9
-        if dt > SNAP_MAX_DT_S:
-            # older than the ring: gone. Otherwise the depth stream had a gap there.
-            return None, ('snapshot_expired' if stamp_ns < self._ring[0][0]
-                          else f'no_depth_near_stamp:{dt * 1000:.0f}ms')
-        try:
-            cam_tf = self._tf_buffer.lookup_transform(
-                'odom', info.header.frame_id, Time(nanoseconds=stamp_ns))
-        except Exception as e:
-            name = type(e).__name__
-            return None, ('tf_not_yet' if 'Extrapolation' in name else f'tf_failed:{name}')
-        snap = {'depth': depth, 'cam_tf': cam_tf, 'dt_ms': round(dt * 1000, 1)}
-        self._snaps[stamp_ns] = snap
-        while len(self._snaps) > SNAPSHOTS:
-            self._snaps.popitem(last=False)
-        return snap, ''
+        if dt <= SNAP_MAX_DT_S:
+            cam_tf, why = self._cam_tf_at(stamp_ns)
+            if cam_tf is None:
+                return None, why
+            return self._store_snapshot(stamp_ns, depth, cam_tf, dt), ''
+        if stamp_ns < self._ring[0][0] and gap_tf is None:
+            return None, 'snapshot_expired'          # older than the ring: gone
+        if gap_tf is None:
+            return None, f'no_depth_near_stamp:{dt * 1000:.0f}ms'
+        # A gap at the photo: the first depth frame after it, if the camera
+        # has not moved since the photo (same view -> same depth).
+        later = [f for f in self._ring if f[0] > stamp_ns]
+        if not later:
+            return None, 'waiting_depth'
+        d_ns, d_depth = later[0]
+        then_tf, why = self._cam_tf_at(d_ns)
+        if then_tf is None:
+            return None, ('waiting_depth' if why == 'tf_not_yet' else why)
+        a, b = gap_tf.transform, then_tf.transform
+        moved = math.hypot(b.translation.x - a.translation.x, b.translation.y - a.translation.y)
+        turned = abs(math.atan2(math.sin(_yaw_from_quat(b.rotation) - _yaw_from_quat(a.rotation)),
+                                math.cos(_yaw_from_quat(b.rotation) - _yaw_from_quat(a.rotation))))
+        if moved > SNAP_STILL_M or turned > SNAP_STILL_RAD:
+            return None, f'moved_before_depth:{moved * 100:.0f}cm'
+        return self._store_snapshot(stamp_ns, d_depth, gap_tf, (d_ns - stamp_ns) / 1e9), ''
 
     def _on_snapshot(self, msg: PointStamped) -> None:
         stamp_ns = msg.header.stamp.sec * 1_000_000_000 + msg.header.stamp.nanosec
@@ -334,18 +370,31 @@ class PixelToGoal(Node):
         if snap is not None:
             self.get_logger().info(f'snapshot {stamp_ns}: depth {snap["dt_ms"]} ms from the photo')
         elif why == 'tf_not_yet':
-            self._snap_pending.append((stamp_ns, time.monotonic()))
+            self._snap_pending.append((stamp_ns, time.monotonic(), None))
+        elif why.startswith('no_depth_near_stamp'):
+            # a depth gap at the photo: keep the camera pose NOW (TF holds it
+            # 10 s) and wait for depth to resume -- see SNAP_GAP_WAIT_S
+            gap_tf, tf_why = self._cam_tf_at(stamp_ns)
+            if gap_tf is None:
+                self.get_logger().warning(f'snapshot {stamp_ns}: {why}, and no pose ({tf_why})')
+            else:
+                self.get_logger().info(f'snapshot {stamp_ns}: {why} -- waiting for depth (camera must stay still)')
+                self._snap_pending.append((stamp_ns, time.monotonic(), gap_tf))
         else:
             self.get_logger().warning(f'snapshot {stamp_ns}: {why}')
 
     def _retry_snapshots(self) -> None:
         keep = []
-        for stamp_ns, t0 in self._snap_pending:
-            snap, why = self._make_snapshot(stamp_ns)
+        for stamp_ns, t0, gap_tf in self._snap_pending:
+            snap, why = self._make_snapshot(stamp_ns, gap_tf)
+            age = time.monotonic() - t0
             if snap is not None:
-                self.get_logger().info(f'snapshot {stamp_ns}: depth {snap["dt_ms"]} ms from the photo (retried)')
-            elif why == 'tf_not_yet' and time.monotonic() - t0 < SNAP_RETRY_S:
-                keep.append((stamp_ns, t0))
+                how = 'after a depth gap, camera still' if gap_tf is not None else 'retried'
+                self.get_logger().info(f'snapshot {stamp_ns}: depth {snap["dt_ms"]} ms from the photo ({how})')
+            elif why == 'tf_not_yet' and age < SNAP_RETRY_S:
+                keep.append((stamp_ns, t0, gap_tf))
+            elif why == 'waiting_depth' and age < SNAP_GAP_WAIT_S:
+                keep.append((stamp_ns, t0, gap_tf))
             else:
                 self.get_logger().warning(f'snapshot {stamp_ns}: {why}')
         self._snap_pending = keep
