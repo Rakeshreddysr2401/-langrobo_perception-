@@ -78,6 +78,14 @@ ARRIVED_YAW = 0.25
 # after nav2 reports success: the exact finish refused or stuck still leaves
 # the rover where nav2 put it; allow for a few cm of pose noise on top
 NAV2_ARRIVED_M = 0.15
+# nav2 landed this close: finish with a turn on the spot, not goal_exec's
+# docking line (which backs up to a pre-goal first). = nav2's xy goal
+# tolerance, so after a nav2 route the finish is ALWAYS turn-only: drive test
+# 2026-09-28, nav2 landed 3.9 / 7 / 8 cm off three times and each docking
+# finish backed into clutter and was refused. The price: a long route ends
+# within ~10 cm, not ~1 cm. Short goals (<= EXACT_RANGE), which go to
+# goal_exec from the start, keep its 1 cm docking.
+FINISH_NEAR = 0.10
 NAV_LOG = Path('/tmp/nav.log')
 
 
@@ -98,6 +106,7 @@ class Reach(GP.Pass):
         super().__init__('reach', depth_active=False)   # depth only while pursuing a goal
         self.nav = ActionClient(self, NavigateToPose, 'navigate_to_pose')
         self.ge_goal = self.create_publisher(PoseStamped, '/goal_exec/goal', 10)
+        self.ge_turn = self.create_publisher(PoseStamped, '/goal_exec/turn', 10)
         self.pub_status = self.create_publisher(String, '/reach/status', 10)
         self.clear_l = self.create_client(ClearEntireCostmap, '/local_costmap/clear_entirely_local_costmap')
         self.clear_g = self.create_client(ClearEntireCostmap, '/global_costmap/clear_entirely_global_costmap')
@@ -394,6 +403,22 @@ class Reach(GP.Pass):
         finally:
             self.stop()
 
+    def run_goal_exec_turn(self, heading):
+        """goal_exec TURN-ONLY: face heading where the rover stands, no drive."""
+        self.status.clear()
+        self.ge_turn.publish(pose_msg('odom', self.pose[0], self.pose[1], heading))
+        t0 = time.time()
+        while time.time() - t0 < 30:
+            self.spin_for(0.1)
+            if self.stop_req:
+                self.cancel.publish(Empty())
+                return 'cancelled', ''
+            for st in self.status:
+                if st.get('state') == 'done':
+                    return ('reached' if st['result'] == 'reached' else 'failed'), f"goal_exec {st['result']}: {st['why']}"
+        self.cancel.publish(Empty())
+        return 'failed', 'goal_exec turn timed out'
+
     def face(self, bearing):
         """Turn in place toward bearing (odom), outline-checked; for the look."""
         GP.look_to(self, bearing)
@@ -441,7 +466,18 @@ class Reach(GP.Pass):
                 r, why = self.run_nav2(g)
                 if r == 'reached':
                     self.say(attempt=attempt, phase='finish', dist_m=round(self.dist(g), 3))
-                    r2, why2 = self.run_goal_exec(g)
+                    # Within FINISH_NEAR a full docking finish does more harm
+                    # than good: goal_exec lines up by backing to a pre-goal
+                    # 35 cm out, which in clutter hits something (2026-09-28:
+                    # nav2 left it 3.9 cm off, the finish backed 25 cm and was
+                    # refused, and the goal took two more attempts). There,
+                    # turn on the spot to the goal heading -- or nothing.
+                    if self.dist(g) <= FINISH_NEAR:
+                        yerr = abs(wrap(g[2] - self.pose[2]))
+                        r2, why2 = (('reached', 'heading already within 3 deg') if yerr <= math.radians(3)
+                                    else self.run_goal_exec_turn(g[2]))
+                    else:
+                        r2, why2 = self.run_goal_exec(g)
                     # nav2 has ARRIVED (its goal checker: 10 cm, 14 deg). The
                     # exact finish only improves on that; refused or stuck, it
                     # never undoes it -- drive test 2026-09-27: refused
