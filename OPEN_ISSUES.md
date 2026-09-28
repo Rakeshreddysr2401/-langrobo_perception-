@@ -29,6 +29,13 @@ Each needs one look on the floor after deploy; the "check" column says what.
 | Depth gap + TF lag dropped the photo (Jetson) | pixel_to_goal now also waits for the photo's camera pose when TF lags the stamp (both come from the same CPU load), then the still-camera rule of c4a5ee5 | `grep 'after a depth gap' /tmp/pixel_to_goal.log` |
 | A gyro stall silenced `/fusion/status` too (Jetson, #2) | status keeps coming from the LiDAR callback with `gyro_alive: false`; **goal_exec refuses to move on it** ("gyro stalled: the pose is frozen") — it used to refuse only because status went silent; `health.py` says so | `./rover status` during the next stall: pose ✗ "the gyro has stopped" |
 
+From the floor-test record (TODO / commit history; the robot's own logs were not reachable):
+
+| what | fix | check on the rover |
+|---|---|---|
+| **The photo survey used a slot the documented server does not have** (Pi 5) | every doc said `--parallel 3` (slots 0-2); the survey pins slot 3, so on such a server each survey call failed, counted only as an error, and object memory stayed empty. The survey now shares local_agent's slot when the server is smaller (boot log warns); docs and `fleet.sh check` say `--parallel 4 --swa-full` | Pi 5 boot log: no "photo survey has no slot"; `/status` → `photo_survey.errors` stays 0 |
+| **MANUAL flipped mid-move did not stop the brain** (Pi 5; 2026-09-27 a "look around" turn went ~120° across a MANUAL→AUTO flip) | the switch was checked only when a tool started; a scan/search kept turning against teleop's zeros and a reach retried for minutes. agent_node now watches the switch (2 Hz) and on the edge into MANUAL cancels the drive and interrupts the tool, as a new utterance does | "look around", flip MANUAL after the first turn: it stops and says so |
+
 New: `GET :8090/status` on the Pi 5 carries `photo_survey` (photos, objects,
 errors, queue) and `objects_remembered`; `fleet.sh check` prints them.
 
