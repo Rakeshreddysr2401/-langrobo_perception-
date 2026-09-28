@@ -375,7 +375,11 @@ class PixelToGoal(Node):
             # a depth gap at the photo: keep the camera pose NOW (TF holds it
             # 10 s) and wait for depth to resume -- see SNAP_GAP_WAIT_S
             gap_tf, tf_why = self._cam_tf_at(stamp_ns)
-            if gap_tf is None:
+            if gap_tf is None and tf_why == 'tf_not_yet':
+                # TF lags too (same CPU load that stalled depth): retry for
+                # the pose; _retry_snapshots picks it up once it is in
+                self._snap_pending.append((stamp_ns, time.monotonic(), None))
+            elif gap_tf is None:
                 self.get_logger().warning(f'snapshot {stamp_ns}: {why}, and no pose ({tf_why})')
             else:
                 self.get_logger().info(f'snapshot {stamp_ns}: {why} -- waiting for depth (camera must stay still)')
@@ -395,6 +399,13 @@ class PixelToGoal(Node):
                 keep.append((stamp_ns, t0, gap_tf))
             elif why == 'waiting_depth' and age < SNAP_GAP_WAIT_S:
                 keep.append((stamp_ns, t0, gap_tf))
+            elif why.startswith('no_depth_near_stamp') and gap_tf is None and age < SNAP_GAP_WAIT_S:
+                # a depth gap whose camera pose was not in TF yet: take it now
+                gap_tf, tf_why = self._cam_tf_at(stamp_ns)
+                if gap_tf is not None or tf_why == 'tf_not_yet':
+                    keep.append((stamp_ns, t0, gap_tf))
+                else:
+                    self.get_logger().warning(f'snapshot {stamp_ns}: {why}, and no pose ({tf_why})')
             else:
                 self.get_logger().warning(f'snapshot {stamp_ns}: {why}')
         self._snap_pending = keep
