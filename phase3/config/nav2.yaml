@@ -38,7 +38,13 @@ bt_navigator:
     robot_base_frame: base_link
     odom_topic: /odom
     bt_loop_duration: 10
-    default_server_timeout: 20
+    # 1000 ms from 20 (2026-09-28). The BT gives each action server this long
+    # to ACKNOWLEDGE a request; on the loaded Jetson (load ~10) the planner,
+    # busy in a search, answered late, and the BT failed the whole goal:
+    # "Timed out while waiting for action server to acknowledge goal request
+    # for compute_path_to_pose" -> Goal failed. Not a missing route: a slow
+    # reply. It only bounds the wait; nothing waits when the server is quick.
+    default_server_timeout: 1000
     # The default tree with the recovery round-robin reordered, TODO 40:
     #   clear costmaps -> Spin +90 -> BackUp 0.30 -> Spin -90 -> Wait
     # Spin FIRST, because this rover is blind behind itself and reversing was
@@ -326,7 +332,15 @@ planner_server:
       retrospective_penalty: 0.015
       # 2.5 cm cells: a 20 m table would be 800 x 800 x 16 headings
       lookup_table_size: 5.0
-      cache_obstacle_heuristic: false
+      # TRUE (2026-09-28): the BT replans the SAME goal every second, and each
+      # search started its obstacle heuristic from scratch. Measured on the
+      # loaded Jetson (load ~10): 1.0 m ahead planned in 65 ms, but 1.5-2.0 m
+      # in open floor failed after 0.95-1.6 s -- the 1.5 s max_planning_time,
+      # which this nav2 reports as "no valid path found" (the owner: "it has
+      # super enough space"). planner_server was the top CPU user at 80%.
+      # The cached heuristic only guides the search, so a changed map still
+      # gets a valid plan.
+      cache_obstacle_heuristic: true
       smooth_path: true
       smoother:
         max_iterations: 1000
@@ -369,8 +383,13 @@ global_costmap:
       update_frequency: 2.0
       publish_frequency: 1.0
       rolling_window: true             # no map frame, so the costmap follows
-      width: 12                        # the rover rather than covering a fixed
-      height: 12                       # world
+      # 8 m from 12 (2026-09-28): the lattice searches (x, y, 16 headings,
+      # both directions) over this whole window, and at 2.5 cm 12 m was 3.7 M
+      # states -- too many for 1.5 s on a CPU-bound Jetson. 8 m is 44% of the
+      # area and still reaches any goal within 4 m; reach's approach-and-look
+      # steps further goals in.
+      width: 8                         # the rover rather than covering a fixed
+      height: 8                        # world
       resolution: 0.025                # matches the nvblox voxel size (0.05 until 2026-09-26)
       track_unknown_space: true
       # Publish the WHOLE costmap every cycle, not just incremental updates.

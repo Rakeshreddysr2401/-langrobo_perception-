@@ -219,6 +219,7 @@ class Reach(GP.Pass):
         # 'collision ahead' (lower-cased).
         text = text.lower()
         for key, why in (('start occupied', 'narrow: planner says the rover is touching something (start occupied)'),
+                         ('timed out while waiting for action server', 'busy: a nav2 server answered too late (Jetson overloaded)'),
                          ('no valid path found', 'no path: planner found none'),
                          ('failed to create plan', 'no path: planner found none'),
                          ('failed to plan', 'no path: planner found none'),
@@ -226,7 +227,8 @@ class Reach(GP.Pass):
                          ('no valid start or goal', 'narrow: planner says the start or goal touches something'),
                          ('fail to compute path', 'narrow: nav2 controller found no motion that fits'),
                          ('collision ahead', 'narrow: nav2 path follower saw collision ahead'),
-                         ('patience exceeded', 'stuck: controller patience exceeded')):
+                         ('patience exceeded', 'stuck: controller patience exceeded'),
+                         ('failed to make progress', 'stuck: the controller made no progress')):
             if key in text:
                 return why
         return 'nav2 failed'
