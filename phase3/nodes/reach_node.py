@@ -515,6 +515,9 @@ def main():
     # vanished with nothing in any log. Now it says so and gives the goal up.
     NO_POSE_S = 3.0
     waiting_since = None
+    # Say so at STARTUP too, not only when a goal arrives: `./rover logs reach`
+    # is then the whole check after a restart (STARTUP.md, "reach has no pose").
+    started, warned = time.time(), False
     # A killed reach used to leave its nav2 goal DRIVING with nobody watching
     # (2026-09-28: restarted mid-goal; nav2 ran on 20 s). SIGTERM (pkill,
     # ./rover nav) now takes the same way out as Ctrl-C: cancel, then stop.
@@ -523,6 +526,12 @@ def main():
     try:
         while rclpy.ok():
             n.spin_for(0.1)
+            if started is not None and n.pose is not None:
+                n.get_logger().info(f'pose OK: /odom arriving ({time.time() - started:.1f} s after start)')
+                started = None
+            elif started is not None and not warned and time.time() - started > 5.0:
+                warned = True
+                n.get_logger().error('NO POSE: no /odom in 5 s since start -- goals will be dropped; restart reach (./rover nav)')
             if n.pending is not None and n.pose is not None:
                 m, n.pending, waiting_since = n.pending, None, None
                 n.pursue(m)

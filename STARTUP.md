@@ -58,6 +58,18 @@ docker exec rover bash -lc 'unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES
   ros2 topic echo /voice/debug_vad --field data'
 ```
 
+**The Jetson can come back under another name.** After a power cycle its
+avahi (mDNS) may find `rakhi-jetson.local` still claimed on the network and
+rename itself `rakhi-jetson-2.local`, `-3`, … (seen 2026-09-28). The Jetson is
+fine, but everything that calls it by name — `fleet.sh`, the Pi 5's ssh — sees
+`jetson: unreachable`. Find it by address (192.168.1.15) and give it its name
+back:
+
+```bash
+ssh rakhi24@192.168.1.15 'sudo systemctl restart avahi-daemon'
+getent hosts rakhi-jetson.local          # from the Pi 5: 192.168.1.15 again
+```
+
 Two more traps worth knowing before you start:
 
 - **The D555 answers ping while completely dead.** It is a PoE network device
@@ -99,6 +111,20 @@ SLAM=false ./rover pose   # + cuVSLAM, gyro — VO >=10 Hz, gyro >=50 Hz
 ./rover detect      # + YOLO -> odom objects — publishing, target hunt listening
 ./rover view        # RViz on the laptop
 ```
+
+**One layer failed in `./rover up`? Continue by hand — do not re-run `up`.**
+`up` restarts the container, which restarts the camera you may just have got
+working. Fix the failed layer, run it alone, then the rest in the order above
+(with `SLAM=false` on pose), then `./rover view` for RViz. From the Pi 5,
+`fleet.sh check` then proves the whole chain.
+
+**The nav layer's compiled plugin.** `./rover nav` loads the rover's own
+costmap plugin (`footprint_clear`, NAV_PLAN.md) from
+`phase3/plugins/ws/install`. That is built once, inside the image, by
+`phase3/plugins/build.sh` (~20 s), and again only after its source changes;
+nav2_supervise.sh warns in `./rover logs nav` if it is missing. After a nav
+restart check two things: `./rover logs nav` has `Initialized plugin
+"footprint_clear"`, and `./rover logs reach` has `pose OK`.
 
 **`SLAM=false` on pose, and only one owner of `map -> odom`.** cuVSLAM
 publishes `map -> odom` whenever its loop closure is on, which is `./rover
@@ -166,6 +192,10 @@ rate gate ever sees it. See [docs/archive/TODO.md](docs/archive/TODO.md) §31.
 | layer | what it means | what to do — physically |
 |---|---|---|
 | `camera` | the D555's on-camera DDS server is dead | **unplug its PoE cable ~5 s and replug.** No software restart recovers this |
+| `camera`, right after a replug | the D555 is still booting — it takes **~60 s** after power, and `./rover up` waits only 40 s | wait a minute, then `./rover camera` alone (2026-09-28: failed in `up`, passed at 30 Hz a minute later) |
+| `slam` | `✗ cuVSLAM is already publishing map -> odom` | pose was started without `SLAM=false`. `SLAM=false ./rover pose`, `./rover fused`, `./rover slam` |
+| `nav` | the gate shows both costmaps at **0.0 Hz** and nav.log stops after `Configured MPPI Controller` | nav2's lifecycle manager lost a service reply under load (2026-09-28). Run `./rover nav` again |
+| `nav` (reach) | `./rover logs reach` shows `NO POSE` | reach started without ever receiving `/odom` and would drop every goal (it did once, 2026-09-27). `./rover nav` again, then look for `pose OK` |
 | `pose` | camera is up but cuVSLAM is not tracking | needs texture. Do not start it facing a bare wall with the emitter off |
 | `fused` | prints `✗ DIVERGED` | `./rover pose` **then** `./rover fused`. `fused` alone restarts fusion and NOT cuvslam, so the divergence survives |
 | `map` | refuses to start | that is deliberate — the pose is dishonest. Fix the pose first, see above |
