@@ -36,7 +36,6 @@ import sys
 import time
 from pathlib import Path
 
-import numpy as np
 import rclpy
 from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseStamped, Twist
@@ -49,7 +48,7 @@ from std_msgs.msg import Empty, String
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'tools'))
 import gap_pass as GP  # noqa: E402
-from goal_exec import SIDE, wrap  # noqa: E402
+from goal_exec import wrap  # noqa: E402
 
 EXACT_RANGE = 1.2      # m: closer than this, goal_exec alone (its MAX_LEG is 1.5)
 MAX_ATTEMPTS = 8
