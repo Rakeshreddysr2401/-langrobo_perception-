@@ -502,8 +502,25 @@ global_costmap:
         extra_padding: 0.02            # past the padded outline (edge rasterisation)
         heading_sweep: 0.19635         # +-11.25 deg: half the lattice's 16-heading bin
       nvblox_layer:
-        plugin: nvblox::nav2::NvbloxCostmapLayer
+        # nav2's STOCK StaticLayer on nvblox's occupancy grid, from nvblox's
+        # own NvbloxCostmapLayer (2026-09-28). The first crash trace ever
+        # kept (libbackward, logs/nav_crashes/20260928-163852.txt) put every
+        # "planner_server segfaulted" of the last weeks in that plugin:
+        #   NvbloxCostmapLayer::updateCosts -> lookupInSlice  (SIGSEGV)
+        # in the costmap update thread -- blamed before, without a trace, on
+        # padding, inflation and costmap clears. /nvblox_node/static_occupancy
+        # _grid is the same map (odom, 2.5 cm, binary 0 / 100 / -1: 9394
+        # lethal vs the plugin's 8934 over a larger area), so what the
+        # planner sees is unchanged; only the crashing code is gone.
+        plugin: nav2_costmap_2d::StaticLayer
         enabled: true
+        map_topic: /nvblox_node/static_occupancy_grid
+        map_subscribe_transient_local: false   # nvblox publishes it volatile
+        subscribe_to_updates: false
+        trinary_costmap: true
+        lethal_cost_threshold: 100
+        unknown_cost_value: -1
+        # (the old plugin's settings, inert now:)
         nvblox_map_slice_topic: /nvblox_node/static_map_slice
         # BINARY, and this is the setting that made nav2 able to plan at all.
         #
@@ -716,8 +733,25 @@ local_costmap:
       footprint_padding: 0.02
       plugins: [nvblox_layer, lidar_layer, inflation_layer]
       nvblox_layer:
-        plugin: nvblox::nav2::NvbloxCostmapLayer
+        # nav2's STOCK StaticLayer on nvblox's occupancy grid, from nvblox's
+        # own NvbloxCostmapLayer (2026-09-28). The first crash trace ever
+        # kept (libbackward, logs/nav_crashes/20260928-163852.txt) put every
+        # "planner_server segfaulted" of the last weeks in that plugin:
+        #   NvbloxCostmapLayer::updateCosts -> lookupInSlice  (SIGSEGV)
+        # in the costmap update thread -- blamed before, without a trace, on
+        # padding, inflation and costmap clears. /nvblox_node/static_occupancy
+        # _grid is the same map (odom, 2.5 cm, binary 0 / 100 / -1: 9394
+        # lethal vs the plugin's 8934 over a larger area), so what the
+        # planner sees is unchanged; only the crashing code is gone.
+        plugin: nav2_costmap_2d::StaticLayer
         enabled: true
+        map_topic: /nvblox_node/static_occupancy_grid
+        map_subscribe_transient_local: false   # nvblox publishes it volatile
+        subscribe_to_updates: false
+        trinary_costmap: true
+        lethal_cost_threshold: 100
+        unknown_cost_value: -1
+        # (the old plugin's settings, inert now:)
         nvblox_map_slice_topic: /nvblox_node/static_map_slice
         # BINARY, and this is the setting that made nav2 able to plan at all.
         #
