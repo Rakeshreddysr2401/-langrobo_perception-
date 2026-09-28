@@ -41,7 +41,7 @@ import numpy as np
 import rclpy
 from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseStamped, Twist
-from nav2_msgs.action import NavigateToPose
+from nav2_msgs.action import ComputePathToPose, NavigateToPose
 from nav2_msgs.srv import ClearEntireCostmap
 from nav_msgs.msg import OccupancyGrid
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
@@ -105,6 +105,7 @@ class Reach(GP.Pass):
     def __init__(self):
         super().__init__('reach', depth_active=False)   # depth only while pursuing a goal
         self.nav = ActionClient(self, NavigateToPose, 'navigate_to_pose')
+        self.planner = ActionClient(self, ComputePathToPose, 'compute_path_to_pose')
         self.ge_goal = self.create_publisher(PoseStamped, '/goal_exec/goal', 10)
         self.ge_turn = self.create_publisher(PoseStamped, '/goal_exec/turn', 10)
         self.pub_status = self.create_publisher(String, '/reach/status', 10)
@@ -191,7 +192,11 @@ class Reach(GP.Pass):
             if self.stop_req or time.time() - t0 > NAV_TIMEOUT:
                 gh.cancel_goal_async()
                 self.spin_for(0.5)
-                return 'cancelled' if self.stop_req else 'failed', 'nav2 timed out'
+                # say WHY it ran out of time: a far goal whose route kept
+                # closing timed out as "nav2 timed out", which hid the "no
+                # path" that approach-and-look answers (2026-09-28)
+                return ('cancelled', 'nav2 timed out') if self.stop_req else \
+                    ('failed', f'nav2 timed out ({self.nav_reason()})')
         self.nav_gh = None
         st = res.result().status
         if st == GoalStatus.STATUS_SUCCEEDED:
@@ -419,6 +424,69 @@ class Reach(GP.Pass):
         self.cancel.publish(Empty())
         return 'failed', 'goal_exec turn timed out'
 
+    # ── approach and look: no route to the goal -> get as near as a route goes,
+    # face it, let the camera map it, plan again (NAV_PLAN.md N8) ─────────────
+    # Drive test 2026-09-28 (a far goal "through a critical area"): the route
+    # closed as the camera saw more, and reach could only recover on the spot.
+    # The owner: "it needs to go near and see the way". A route that the map
+    # has not seen yet is found by going to where it can be seen.
+    APPROACH_BACK = (0.5, 0.9, 1.3, 1.8, 2.4)   # m short of the goal, nearest first
+    APPROACH_GAIN = 0.30                       # m closer each round, or stop
+    LOOK_S = 2.5                               # s facing the goal for nvblox
+
+    def plan_ok(self, g):
+        """Does the planner have a route to g (odom)? Planning only, no motion."""
+        if not self.planner.wait_for_server(timeout_sec=2):
+            return False
+        goal = ComputePathToPose.Goal()
+        goal.goal = pose_msg('odom', *g)
+        goal.use_start = False
+        f = self.planner.send_goal_async(goal)
+        t0 = time.time()
+        while not f.done() and time.time() - t0 < 5:
+            self.spin_for(0.05)
+        if not f.done() or not f.result().accepted:
+            return False
+        r = f.result().get_result_async()
+        while not r.done() and time.time() - t0 < 10:
+            self.spin_for(0.05)
+        return r.done() and len(r.result().result.path.poses) > 0
+
+    def approach_and_look(self, attempt, g):
+        """True if it got meaningfully nearer and looked (retry the goal now)."""
+        d0 = self.dist(g)
+        best = getattr(self, 'approach_best', float('inf'))
+        if d0 < 0.8 or d0 > best - self.APPROACH_GAIN / 2:
+            return False                        # close already, or the last round did not gain
+        bearing = math.atan2(g[1] - self.pose[1], g[0] - self.pose[0])
+        ux, uy = math.cos(bearing), math.sin(bearing)
+        target = None
+        for back in self.APPROACH_BACK:
+            if back > d0 - self.APPROACH_GAIN:
+                break
+            cand, _, gap = self.fit((g[0] - back * ux, g[1] - back * uy, bearing))
+            if gap == gap and gap < self.SNAP_GAP:   # (nan = unseen floor: let the planner judge)
+                continue
+            if self.plan_ok(cand):
+                target = (cand, back)
+                break
+        if target is None:
+            self.say(attempt=attempt, phase='approach', outcome='no reachable point toward the goal')
+            return False
+        (tx, ty, tth), back = target
+        self.say(attempt=attempt, phase='approach', short_of_goal_m=back,
+                 dist_m=round(math.hypot(tx - self.pose[0], ty - self.pose[1]), 2))
+        r, why = self.run_nav2((tx, ty, tth))
+        self.approach_best = min(best, self.dist(g))
+        if self.stop_req:
+            return False
+        # look: face the goal and hold still so the camera maps the way
+        self.face(math.atan2(g[1] - self.pose[1], g[0] - self.pose[0]))
+        self.spin_for(self.LOOK_S)
+        gained = d0 - self.dist(g)
+        self.say(attempt=attempt, phase='approach', outcome=r, gained_m=round(gained, 2), why=why)
+        return gained >= self.APPROACH_GAIN
+
     def face(self, bearing):
         """Turn in place toward bearing (odom), outline-checked; for the look."""
         GP.look_to(self, bearing)
@@ -441,6 +509,7 @@ class Reach(GP.Pass):
         if g is None:
             self.say(result='failed', why=f'no transform {m.header.frame_id} -> odom')
             return
+        self.approach_best = float('inf')
         g, moved, gap = self.fit(g)
         if moved > 0:
             self.say(phase='snap', moved_cm=round(moved * 100), gap_cm=round(gap * 100, 1),
@@ -527,6 +596,9 @@ class Reach(GP.Pass):
             # planner will not start from it): step off first, then retry at
             # once -- no look, no pass, no wait
             if self.escape(attempt):
+                continue
+            # no route to the goal: go as near as a route goes, look, retry
+            if 'no path' in why and self.approach_and_look(attempt, g):
                 continue
             bearing = math.atan2(g[1] - self.pose[1], g[0] - self.pose[0])
             if abs(wrap(bearing - self.pose[2])) > math.radians(35) and self.dist(g) > 0.3:
