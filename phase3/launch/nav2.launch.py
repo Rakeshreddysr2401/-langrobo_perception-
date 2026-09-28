@@ -36,6 +36,7 @@ LIFECYCLE = [
     'behavior_server',
     'bt_navigator',
     'velocity_smoother',
+    'collision_monitor',
 ]
 
 
@@ -90,7 +91,19 @@ def generate_launch_description():
              # -> turn_shaper.py -> /cmd_vel: the smoothed command is in REAL
              # turn rates; turn_shaper converts them for this skid-steer.
              remappings=[('cmd_vel', 'cmd_vel_nav'),
-                         ('cmd_vel_smoothed', 'cmd_vel_turn')]),
+                         ('cmd_vel_smoothed', 'cmd_vel_smoothed')]),
+        # THE LAST LINE, independent of the map (SENSOR_FUSION_PLAN M5,
+        # NAV_PLAN N7, 2026-09-28): cmd_vel_smoothed -> collision_monitor ->
+        # cmd_vel_turn -> turn_shaper -> /cmd_vel. "approach" caps the speed so
+        # the rover's real outline, moved along the CURRENT command (turns and
+        # reversing included), stays >= time_before_collision from any LiDAR
+        # point. Open floor: full speed. A wall ahead: it slows, smoothly, by
+        # itself. It reads /scan directly, so a costmap that is wrong or late
+        # cannot make the rover fast into something the LiDAR can see.
+        # goal_exec and reach's escape publish /cmd_vel directly and keep
+        # their own swept checks.
+        Node(package='nav2_collision_monitor', executable='collision_monitor',
+             name='collision_monitor', output='screen', **STOP_ALL, parameters=[CONFIG]),
         Node(package='nav2_lifecycle_manager', executable='lifecycle_manager',
              name='lifecycle_manager_navigation', output='screen', **STOP_ALL,
              parameters=[{'use_sim_time': False,

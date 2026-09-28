@@ -175,7 +175,10 @@ controller_server:
       # limits = velocity_smoother's, so nothing downstream clips a plan MPPI
       # is relying on. vx_min 0: no reversing (blind behind, below the lidar's
       # 25 cm plane) -- the same policy RPP had with allow_reversing false.
-      vx_max: 0.25                     # owner, 2026-09-27: "a little faster"
+      # 0.35 from 0.25 (2026-09-28): fast where it is open. Near anything the
+      # collision monitor (approach, 1.0 s) and CostCritic slow it; wheels top
+      # out at 0.86.
+      vx_max: 0.35
       # -0.10 from 0 (2026-09-28), with the lattice's reverse primitives: the
       # smoother already allowed it (min_velocity -0.10). PreferForwardCritic
       # keeps reversing for when the path asks for it.
@@ -856,9 +859,53 @@ velocity_smoother:
     # max_angular_accel was raised to escape. 2.5 commanded is about 0.7 rad/s
     # actual (40 deg/s); linear limits are unchanged.
     # linear 0.26 for desired 0.25; angular 0.9 is REAL rad/s since turn_shaper
-    max_velocity: [0.26, 0.0, 0.9]
+    # 0.36 linear from 0.26 (2026-09-28, with the collision monitor): the
+    # speed is now capped by clearance, not by a flat limit -- see
+    # collision_monitor below. MPPI vx_max is 0.35.
+    max_velocity: [0.36, 0.0, 0.9]
     min_velocity: [-0.10, 0.0, -0.9]
     max_accel: [1.5, 0.0, 10.0]
     max_decel: [-1.5, 0.0, -10.0]
     odom_topic: /odom
     odom_duration: 0.1
+
+collision_monitor:
+  ros__parameters:
+    use_sim_time: false
+    base_frame_id: base_link
+    odom_frame_id: odom
+    cmd_vel_in_topic: cmd_vel_smoothed
+    cmd_vel_out_topic: cmd_vel_turn     # -> turn_shaper.py -> /cmd_vel (real rates in)
+    state_topic: collision_monitor_state
+    transform_tolerance: 0.2
+    source_timeout: 1.0                 # no /scan for 1 s -> stop
+    base_shift_correction: true
+    stop_pub_timeout: 2.0
+    enable_stamped_cmd_vel: false
+    polygons: [Approach]
+    Approach:
+      # The body + 1 cm (the hard contact margin), NOT the local costmap's
+      # padded footprint: squeezing out of a pocket must stay possible, and
+      # MPPI already keeps its 2 cm. approach simulates the command it is
+      # given, so it slows a motion TOWARD something and leaves one away from
+      # it alone -- EXCEPT at real contact: LiDAR points already inside this
+      # outline give a collision time of 0 and every nav2 command stops.
+      # reach's escape then backs off on /cmd_vel directly (its own check).
+      type: polygon
+      points: "[[0.192, 0.200], [0.192, -0.200], [-0.188, -0.200], [-0.188, 0.200]]"
+      action_type: approach
+      # 1.0 s: at 0.35 m/s the outline keeps 35 cm of warning; at MPPI's
+      # 0.05 m/s pocket crawl, 5 cm -- so it never blocks tight manoeuvring.
+      time_before_collision: 1.0
+      simulation_time_step: 0.05
+      min_points: 3                     # one stray LiDAR return is not a wall
+      visualize: true
+      polygon_pub_topic: collision_monitor/approach
+      enabled: true
+    observation_sources: [scan]
+    scan:
+      type: scan
+      topic: /scan
+      min_height: 0.0
+      max_height: 0.30
+      enabled: true
