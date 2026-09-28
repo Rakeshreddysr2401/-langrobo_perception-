@@ -149,6 +149,14 @@ rate_of(){
   rexec "timeout 12 ros2 topic hz $1 --window 20 2>/dev/null | awk '/average rate/{r=\$3} END{print r+0}'" 2>/dev/null || echo 0
 }
 
+# teleop's MANUAL mode streams zeros over every command. Its mode page is on
+# the Pi 5; teleop not running is not MANUAL, and must not end this script --
+# a bare mode=$(curl ...) under `set -e` exited silently (curl's 7) when it
+# was down, the same trap as OPEN_ISSUES #9.
+refuse_if_manual(){ # [message]
+  local mode; mode=$(timeout 5 curl -s "http://$PI5_HOST:8091/mode" 2>/dev/null || true)
+  case "$mode" in *'"manual": true'*) die "${1:-teleop is in MANUAL. Tap AUTO.}" ;; esac
+}
 assert_rate(){ # topic  min_hz  label
   local hz; hz=$(rate_of "$1")
   local ok; ok=$(awk -v a="$hz" -v b="$2" 'BEGIN{print (a>=b)?1:0}')
@@ -249,7 +257,7 @@ camera)
   for a in 1 2 3 4 5 6; do
     rexec "ros2 param set /camera/camera0 depth_module.emitter_enabled false; \
            ros2 param set /camera/camera0 depth_module.laser_power 0.0" >/dev/null 2>&1 || true
-    em=$(rexec "ros2 param get /camera/camera0 depth_module.emitter_enabled" 2>/dev/null | tail -1)
+    em=$(rexec "ros2 param get /camera/camera0 depth_module.emitter_enabled" 2>/dev/null | tail -1 || true)
     case "$em" in *False*) break ;; esac
     [ "$a" -lt 6 ] && { echo "      emitter still on, control channel not ready — retry $a/5"; sleep 5; }
   done
@@ -387,8 +395,7 @@ drive)
     assert_rate /scan 8 "laser scan"  || die "no /scan — run ./rover lidar"
     assert_rate /odom 15 "fused odom" || die "no /odom — run ./rover fused"
     assert_rate /map 0.3 "slam map"   || die "no map frame — run ./rover slam"
-    mode=$(timeout 5 curl -s http://192.168.1.16:8091/mode 2>/dev/null)
-    case "$mode" in *'"manual": true'*) die "teleop is in MANUAL — it streams zeros over every command. Tap AUTO." ;; esac
+    refuse_if_manual "teleop is in MANUAL — it streams zeros over every command. Tap AUTO."
     echo "  THIS DRIVES THE ROVER. Watch it; the LiDAR is blind below 21 cm."
   fi
   rexec "$(pivot_env) python3 $SRC3/nodes/pivot_goto.py $*"
@@ -859,7 +866,7 @@ view)
   # spawns Xwayland.
   xw=$(timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$ip" 'pgrep -a Xwayland 2>/dev/null | head -1' 2>/dev/null)
   if [ -n "$xw" ]; then
-    disp=$(echo "$xw" | grep -oE ' :[0-9]+' | head -1 | tr -d ' ')
+    disp=$(echo "$xw" | grep -oE ' :[0-9]+' | head -1 | tr -d ' ' || true)
     auth=$(echo "$xw" | sed -nE 's/.* -auth ([^ ]+).*/\1/p')
   else
     probe=$(timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$ip" '
@@ -921,7 +928,7 @@ view)
   for t in /robot_description /scan /map /fusion/path; do
     c=$(timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$ip" \
         "source /opt/ros/jazzy/setup.bash; export ROS_DOMAIN_ID=0; unset ROS_DISCOVERY_SERVER; \
-         timeout 6 ros2 topic info $t 2>/dev/null | grep -oP 'Subscription count: \K[0-9]+'" 2>/dev/null)
+         timeout 6 ros2 topic info $t 2>/dev/null | grep -oP 'Subscription count: \K[0-9]+'" 2>/dev/null || true)
     printf "      %-42s %s\n" "$t" "${c:-0}"
   done
   ;;
@@ -933,8 +940,7 @@ view)
 reach)
   need_container
   shift
-  mode=$(timeout 5 curl -s http://192.168.1.16:8091/mode 2>/dev/null)
-  case "$mode" in *'"manual": true'*) die "teleop is in MANUAL. Tap AUTO." ;; esac
+  refuse_if_manual
   docker exec "$NAME" pgrep -f '[r]each_node.py' >/dev/null 2>&1 || die "reach_node not running — ./rover nav"
   ttyflag=""; [ -t 0 ] && ttyflag="-it"
   docker exec $ttyflag "$NAME" bash -lc "$ENVSET python3 -u $SRC3/tools/reach.py $(printf '%q ' "$@")"
@@ -949,8 +955,7 @@ pass)
   shift
   assert_rate /odom 15 "fused odom" || die "no pose — ./rover fused first"
   assert_rate /scan 8 "laser scan"  || die "no /scan — ./rover lidar first"
-  mode=$(timeout 5 curl -s http://192.168.1.16:8091/mode 2>/dev/null)
-  case "$mode" in *'"manual": true'*) die "teleop is in MANUAL. Tap AUTO." ;; esac
+  refuse_if_manual
   # (re)start goal_exec: it must be running the code with pass mode and depth
   kill_match 'goal_exec_node[.]py'
   dexec "python3 $SRC3/nodes/goal_exec_node.py > /tmp/goal_exec.log 2>&1"; sleep 4
@@ -966,8 +971,7 @@ navto)
   shift
   assert_rate /odom 15 "fused odom" || die "no pose — ./rover fused first"
   assert_rate /scan 8 "laser scan"  || die "no /scan — ./rover lidar first"
-  mode=$(timeout 5 curl -s http://192.168.1.16:8091/mode 2>/dev/null)
-  case "$mode" in *'"manual": true'*) die "teleop is in MANUAL. Tap AUTO." ;; esac
+  refuse_if_manual
   if ! docker exec "$NAME" pgrep -f '[g]oal_exec_node.py' >/dev/null 2>&1; then
     dexec "python3 $SRC3/nodes/goal_exec_node.py > /tmp/goal_exec.log 2>&1"; sleep 3
   fi
@@ -982,8 +986,7 @@ navto)
 response)
   need_container
   assert_rate /odom 15 "fused odom" || die "no pose — ./rover fused first"
-  mode=$(timeout 5 curl -s http://192.168.1.16:8091/mode 2>/dev/null)
-  case "$mode" in *'"manual": true'*) die "teleop is in MANUAL. Tap AUTO." ;; esac
+  refuse_if_manual
   echo "  THIS MOVES THE ROVER (turns in place, short arcs). Watch it."
   ttyflag=""; [ -t 0 ] && ttyflag="-it"
   shift
@@ -1001,8 +1004,7 @@ goto)
   shift
   assert_rate /odom 15 "fused odom" || die "no pose — ./rover fused first"
   assert_rate /scan 8 "laser scan"  || die "no /scan — ./rover lidar first"
-  mode=$(timeout 5 curl -s http://192.168.1.16:8091/mode 2>/dev/null)
-  case "$mode" in *'"manual": true'*) die "teleop is in MANUAL — it streams zeros over every command. Tap AUTO." ;; esac
+  refuse_if_manual "teleop is in MANUAL — it streams zeros over every command. Tap AUTO."
   if ! docker exec "$NAME" pgrep -f '[g]oal_exec_node.py' >/dev/null 2>&1; then
     echo "[goto] starting goal_exec (learned pivot: /logs/goal_exec_pivot.json)"
     dexec "python3 $SRC3/nodes/goal_exec_node.py > /tmp/goal_exec.log 2>&1"
@@ -1030,7 +1032,7 @@ grade)
   need_container
   shift
   if [ $# -eq 0 ]; then
-    last=$(ls -1d "$REPO"/logs/bags/*/ 2>/dev/null | tail -1)
+    last=$(ls -1d "$REPO"/logs/bags/*/ 2>/dev/null | tail -1 || true)
     [ -n "$last" ] || die "no runs in logs/bags -- ./rover record first"
     set -- "$(basename "$last")"
   fi
@@ -1086,7 +1088,7 @@ status)
   if docker exec "$NAME" pgrep -f '[r]each_node.py' >/dev/null 2>&1; then v="OK"; else v="--"; fi
   printf '  %-9s %-40s %6s  %5s %s\n' reach "reach_node (RViz 2D Goal Pose)" "" "" "$v"
   nr=$(docker exec "$NAME" bash -lc 'wc -l < /tmp/nav_restarts.log 2>/dev/null || echo 0' 2>/dev/null)
-  last=$(docker exec "$NAME" bash -lc 'tail -1 /tmp/nav_restarts.log 2>/dev/null' 2>/dev/null)
+  last=$(docker exec "$NAME" bash -lc 'tail -1 /tmp/nav_restarts.log 2>/dev/null' 2>/dev/null || true)
   printf '  %-9s %-40s %6s  %5s %s\n' nav "nav2 restarts by the supervisor" "${nr:-0}" "" "$([ "${nr:-0}" = 0 ] && echo OK || echo "SEE: $last")"
 
   # cuVSLAM can be publishing at 30 Hz and still be lying. It has diverged three
