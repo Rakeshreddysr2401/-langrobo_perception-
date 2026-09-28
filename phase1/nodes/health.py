@@ -53,6 +53,10 @@ def main():
         return 1
 
     rc = 0
+    if not s.get('gyro_alive', True):
+        print('  pose      ✗ the gyro has stopped (it rides the D555 link): /odom and TF are frozen.')
+        print('              Check: ros2 topic hz /gyro/base; ./rover pose restarts it')
+        return 1
     lidar_ok = [g.get('lidar_ok') for g in got]
     sd, sdd = s.get('sd_cm'), s.get('sd_deg')
     if not any(lidar_ok):

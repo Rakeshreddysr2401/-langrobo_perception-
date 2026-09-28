@@ -209,6 +209,7 @@ it; `./rover drive` plans around it. See [LOCALIZATION.md](LOCALIZATION.md).
 | many teleports, `landmarks` healthy | genuinely unexplained. Speed is NOT the answer — 89 cm/s with 0 teleports on 2026-08-22. See TODO §3 |
 | `wheels` row wildly wrong in turns | expected — skid-steer scrub. The gyro owns heading |
 | `FUSED` worse than an input | a real bug. This has happened twice; see docs/archive/PHASE1.md §7 |
+| `/odom` frozen, goal_exec refuses "gyro stalled: the pose is frozen", status says "the gyro has stopped" | the D555 link stalled (the gyro rides it — OPEN_ISSUES #2). `ros2 topic hz /gyro/base`; usually resumes by itself within seconds; if not, `./rover pose` |
 
 ### The map
 
