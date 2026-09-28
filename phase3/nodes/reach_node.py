@@ -400,7 +400,9 @@ class Reach(GP.Pass):
 
     # ── one goal, until reached ─────────────────────────────────────────────
     def pursue(self, m):
-        self.dobs.set_active(True)
+        # Depth is subscribed only while RECOVERING (escape / look / pass use
+        # it; nav2 and goal_exec do not): ~30% of a core for the whole drive
+        # before (2026-09-28, load 9 on 6 cores, MPPI starved to 8.7 Hz).
         try:
             self._pursue(m)
         finally:
@@ -425,6 +427,7 @@ class Reach(GP.Pass):
         # times on its line (squeeze, wait, same line) and never tried nav2.
         go_nav2 = False
         for attempt in range(1, MAX_ATTEMPTS + 1):
+            self.dobs.set_active(False)             # driving: nav2 / goal_exec need none
             if self.stop_req or time.time() - t0 > MAX_S:
                 break
             if m.header.frame_id == 'map':
@@ -481,7 +484,9 @@ class Reach(GP.Pass):
             self.say(attempt=attempt, phase='recover', why=why)
             # ── recover: stop, clear, look, then pass if narrow, else wait ──
             self.stop()
-            self.clear_costmaps()
+            self.dobs.set_active(True)              # recovering: fresh depth first
+            self.clear_costmaps()                   # (spins 0.5 s)
+            self.spin_for(1.0)
             # parked against something (MPPI may go to the 1 cm line; the
             # planner will not start from it): step off first, then retry at
             # once -- no look, no pass, no wait

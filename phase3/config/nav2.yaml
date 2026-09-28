@@ -52,9 +52,13 @@ bt_navigator:
 controller_server:
   ros__parameters:
     use_sim_time: false
-    # 20 from 10 with MPPI (NAV_PLAN.md N3): MPPI's model_dt must equal the
-    # control period, and 0.05 s steps are what its 2 s horizon is built on.
-    controller_frequency: 20.0
+    # 10 Hz (NAV_PLAN.md N3). It was 20, and on 2026-09-28 the Jetson (load
+    # 9 on 6 cores, OPEN_ISSUES #1) held MPPI at 8.7 Hz: "Control loop missed
+    # its desired rate" 8x, the plan's 0.05 s steps no longer matched the real
+    # period, and MPPI commanded ~0 for 40 s ("Failed to make progress") on a
+    # 1.6 m goal. At <= 0.25 m/s a command every 0.1 s moves 2.5 cm -- ample --
+    # and half the rate is half the CPU. model_dt must equal the period.
+    controller_frequency: 10.0
     odom_topic: /odom
     # Below these the rover is considered stopped. 0.01 matches the firmware's
     # own dead zone in pidStep(), so nav2 and the board agree on "not moving".
@@ -160,8 +164,11 @@ controller_server:
       # is about a third of MPPI's stock load (2000 x 56). Raise only after
       # measuring the controller holding 20 Hz while driving.
       batch_size: 1000
-      time_steps: 40
-      model_dt: 0.05                   # = 1 / controller_frequency
+      # 30 x 0.1 s = 3 s ahead (was 40 x 0.05 = 2 s): at 0.25 m/s that is
+      # 75 cm -- far enough to see round a corner of a room, and it lets a
+      # forward-then-turn escape out of a pocket be scored as ONE trajectory
+      time_steps: 30
+      model_dt: 0.1                    # = 1 / controller_frequency
       iteration_count: 1
       temperature: 0.3
       gamma: 0.015

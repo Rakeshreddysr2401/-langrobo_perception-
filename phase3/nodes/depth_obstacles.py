@@ -90,7 +90,10 @@ class DepthObstacles:
         self.updated = 0.0               # time of the last completed update
         self.first_img = 0.0
         self.cam_src = None
-        node.create_subscription(CameraInfo, INFO, self._info, qos_profile_sensor_data)
+        # ONE message is all it needs (the intrinsics never change), then it
+        # unsubscribes: at 30 Hz this was ~30 Python wake-ups a second in each
+        # of reach and goal_exec, forever (2026-09-28 CPU diet, OPEN_ISSUES #1).
+        self.info_sub = node.create_subscription(CameraInfo, INFO, self._info, qos_profile_sensor_data)
         # RAW: the camera sends 30 Hz; decoding every frame in Python starved
         # the node under load (0 frames in 12 s while the recorder ran,
         # 2026-09-26). Only the RATE_HZ frames used are deserialized.
@@ -120,6 +123,9 @@ class DepthObstacles:
     def _info(self, m):
         if self.K is None:
             self.K = np.array(m.k).reshape(3, 3)
+        if self.info_sub is not None:
+            self.node.destroy_subscription(self.info_sub)
+            self.info_sub = None
 
     def _raw(self, data):
         if time.time() - self.last_t < 1.0 / RATE_HZ or self.K is None:
