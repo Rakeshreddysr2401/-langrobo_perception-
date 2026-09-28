@@ -176,7 +176,10 @@ controller_server:
       # is relying on. vx_min 0: no reversing (blind behind, below the lidar's
       # 25 cm plane) -- the same policy RPP had with allow_reversing false.
       vx_max: 0.25                     # owner, 2026-09-27: "a little faster"
-      vx_min: 0.0
+      # -0.10 from 0 (2026-09-28), with the lattice's reverse primitives: the
+      # smoother already allowed it (min_velocity -0.10). PreferForwardCritic
+      # keeps reversing for when the path asks for it.
+      vx_min: -0.10
       vy_max: 0.0
       wz_max: 0.9                      # real rad/s (~52 deg/s)
       ax_max: 1.5
@@ -187,7 +190,11 @@ controller_server:
       wz_std: 0.5
       prune_distance: 1.5
       transform_tolerance: 0.2
-      enforce_path_inversion: false
+      # true with reverse paths: at a cusp MPPI stops, then follows the next
+      # segment, instead of blending "forward" and "back" into a stall
+      enforce_path_inversion: true
+      inversion_xy_tolerance: 0.2
+      inversion_yaw_tolerance: 0.4
       retry_attempt_limit: 1
       regenerate_noises: false         # CPU
       visualize: false                 # true draws the sampled trajectories (CPU)
@@ -240,7 +247,7 @@ controller_server:
         trajectory_point_step: 4
         threshold_to_consider: 0.4
         offset_from_furthest: 20
-        use_path_orientations: false
+        use_path_orientations: true      # reverse segments carry their heading
       PathFollowCritic:
         enabled: true
         cost_power: 1
@@ -254,7 +261,7 @@ controller_server:
         offset_from_furthest: 4
         threshold_to_consider: 0.4
         max_angle_to_furthest: 1.0
-        mode: 0                        # forward only (vx_min 0)
+        mode: 2                        # follow the path's own direction (it may reverse)
       PreferForwardCritic:
         enabled: true
         cost_power: 1
@@ -293,9 +300,18 @@ planner_server:
       analytic_expansion_max_length: 1.5
       analytic_expansion_max_cost: 200.0
       analytic_expansion_max_cost_override: false
-      # forward only: blind behind (vx_min 0 in the controller agrees)
-      allow_reverse_expansion: false
-      reverse_penalty: 2.0
+      # REVERSE ALLOWED, and priced (2026-09-28). This nav2's "Start occupied"
+      # means the search stopped after ONE iteration: none of the 104
+      # primitives out of the start fits (smac_planner_lattice.cpp). With
+      # forward-only primitives, a rover nosed into a tight spot has no legal
+      # first move at all -- 3 of 6 attempts on one goal, the escape's blind
+      # 5 cm nudge the only way out. Backing out is the move a driver makes.
+      # reverse_penalty 3.0 keeps it for when forward is truly worse; the
+      # LiDAR's 360 deg plane is in the costmap behind; MPPI caps it at
+      # vx_min -0.10 and checks every sample against the real outline. What
+      # stays invisible: low things (< 25 cm) behind that the camera never saw.
+      allow_reverse_expansion: true
+      reverse_penalty: 3.0
       change_penalty: 0.05
       non_straight_penalty: 1.05
       # the soft preference for the middle of free floor (inflation cost).
