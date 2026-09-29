@@ -20,6 +20,8 @@ THE ROVER CAN TURN IN PLACE -- THE DOCSTRING THAT SAID OTHERWISE WAS STALE
     nav2.yaml carries the rotational limits it needs to clear the scrub
     breakaway. Read nav2.yaml before changing any rotation value here.
 """
+import os
+
 from launch import LaunchDescription
 from launch.actions import Shutdown
 from launch_ros.actions import Node
