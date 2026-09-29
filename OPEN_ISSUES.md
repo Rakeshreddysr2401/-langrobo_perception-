@@ -36,6 +36,17 @@ From the floor-test record (TODO / commit history; the robot's own logs were not
 | **The photo survey used a slot the documented server does not have** (Pi 5) | every doc said `--parallel 3` (slots 0-2); the survey pins slot 3, so on such a server each survey call failed, counted only as an error, and object memory stayed empty. **2026-09-29:** slot 3 is the vision-TOOL slot for every one-shot photo prompt (search views, locate, survey) -- `_vlm_locate` used to run on local_agent's slot 1 and overwrite the vision conversation's cached photos up to 8 times per search; on a smaller server the survey is off rather than evicting an agent; docs and `fleet.sh check` say `--parallel 4 --swa-full` | Pi 5 boot log: "vision-tool slot 3"; `/status` → `photo_survey.enabled` true, `errors` 0 |
 | **MANUAL flipped mid-move did not stop the brain** (Pi 5; 2026-09-27 a "look around" turn went ~120° across a MANUAL→AUTO flip) | the switch was checked only when a tool started; a scan/search kept turning against teleop's zeros and a reach retried for minutes. agent_node now watches the switch (2 Hz) and on the edge into MANUAL cancels the drive and interrupts the tool, as a new utterance does | "look around", flip MANUAL after the first turn: it stops and says so |
 
+Second review, 2026-09-29:
+
+| what | fix | check on the rover |
+|---|---|---|
+| **Any Telegram member could drive the robot** (Pi 5, security) | `CAP_MOVE` was defined and never checked; family and guests could send it anywhere. Every motion tool now refuses a sender without it; "stop" stays open to all. Tool schemas unchanged (the KV cache is untouched) | from a family account: "go forward" is refused, "stop" works |
+| **MANUAL did not cancel reach or goal_exec** (teleop) | it cancelled nav2 goals only; goal_exec kept commanding against teleop's zeros (the rover jerks) and reach retried for minutes. MANUAL now also publishes `/reach/cancel` and `/goal_exec/cancel`. **Redeploy:** copy `phase1/teleop/teleop_web.py` to `~/langrobo_teleop/` on the Pi 5, then `pkill -f teleop_web.py` (phase1/teleop/README.md) | `./rover goto 0.5 0` then flip MANUAL: stops at once |
+| Saved places lost on a power cut mid-save (Pi 5) | `locations.json` is written atomically | — |
+
+Checked and fine: the ESP32's 500 ms /cmd_vel watchdog; goal_exec and gap-pass
+simulator suites (both SUITE PASS).
+
 New: `GET :8090/status` on the Pi 5 carries `photo_survey` (photos, objects,
 errors, queue) and `objects_remembered`; `fleet.sh check` prints them.
 

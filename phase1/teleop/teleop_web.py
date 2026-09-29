@@ -35,6 +35,7 @@ from urllib.parse import urlparse, parse_qs
 import rclpy
 from action_msgs.srv import CancelGoal
 from geometry_msgs.msg import Twist
+from std_msgs.msg import Empty
 
 PORT = 8091
 PUB_HZ = 10.0          # publish rate while MANUAL (feeds the 500 ms ESP32 watchdog)
@@ -281,10 +282,18 @@ def main():
     node = rclpy.create_node('teleop_web')
     pub = node.create_publisher(Twist, '/cmd_vel', 10)
     cancel_clients = [node.create_client(CancelGoal, s) for s in NAV_CANCEL_SERVICES]
+    # The rover's own movers, which nav2's cancel does not reach: reach_node
+    # (the brain's and RViz's goals) and goal_exec (exact moves, ./rover goto).
+    # Without these, MANUAL's zeros and goal_exec's commands fought over
+    # /cmd_vel at ~10 Hz each and the rover jerked; reach retried against the
+    # zeros for up to 5 min.
+    stop_pubs = [node.create_publisher(Empty, t, 10) for t in ('/reach/cancel', '/goal_exec/cancel')]
 
     def tick():
         if CANCEL_NAV.is_set():          # taking manual control -> hard-cancel nav2
             CANCEL_NAV.clear()
+            for p in stop_pubs:
+                p.publish(Empty())
             sent = [s for c, s in zip(cancel_clients, NAV_CANCEL_SERVICES)
                     if c.service_is_ready() and (c.call_async(CancelGoal.Request()) or True)]
             node.get_logger().info(
