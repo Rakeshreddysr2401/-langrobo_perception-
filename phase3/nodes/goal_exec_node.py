@@ -273,6 +273,10 @@ class GoalExecNode(Node):
         s = self.fstatus
         if s is None or time.time() - self.fstatus_t > 2.5:
             return 'no /fusion/status'
+        if not s.get('gyro_alive', True):
+            # fusion2 still reports while the gyro is stalled, but /odom is
+            # frozen: never drive on it
+            return 'gyro stalled: the pose is frozen'
         if not s.get('lidar_ok', False):
             return 'LiDAR odometry unhealthy'
         if float(s.get('sd_cm', 0.0)) > SD_MAX_CM:

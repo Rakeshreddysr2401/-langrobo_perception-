@@ -73,6 +73,7 @@ class Fusion2Node(Node):
         # saved location only if it was measured under the same epoch.
         self.origin_epoch = round(time.time(), 3)
         self.vo_z, self.vo_last, self.wheel_last, self.lidar_last = 0.0, 0.0, 0.0, 0.0
+        self.gyro_last, self.status_last = 0.0, 0.0
         self._acc_prev = {}
         self.create_subscription(Imu, '/gyro/base', self._gyro, qos_profile_sensor_data)
         self.create_subscription(Quaternion, '/wheel_ticks', self._ticks, qos_profile_sensor_data)
@@ -96,6 +97,7 @@ class Fusion2Node(Node):
         return self.get_clock().now().nanoseconds * 1e-9
 
     def _gyro(self, m):
+        self.gyro_last = time.time()
         self.f.on_gyro(stamp_s(m.header), m.angular_velocity.z)
         self.n_gyro += 1
         if self.n_gyro % 10 == 0:
@@ -126,6 +128,12 @@ class Fusion2Node(Node):
 
     def _lidar(self, m):
         self.lidar_last = time.time()
+        # The gyro rides the camera's link (LOCALIZATION_GAPS G12) and stalled
+        # for 9 s on 2026-09-26. The POSE honestly stops with it (above), but
+        # the status must not: keep it coming from here, gyro_alive false, so
+        # health / the Pi 5 can say why the pose froze.
+        if self.lidar_last - self.gyro_last > 1.0 and self.lidar_last - self.status_last > 1.0:
+            self._status()
         p = m.pose.pose
         c = m.pose.covariance
         ok = c[0] < 0.5                       # the node publishes 1.0 for a failed fit
@@ -166,6 +174,7 @@ class Fusion2Node(Node):
         if self.f.t is None:
             return
         now = time.time()
+        self.status_last = now
         # VO acceptance over the last second: a healthy cuVSLAM is mostly
         # accepted; a diverged one is mostly rejected (the gate protects the
         # pose either way, this just reports it)
@@ -176,7 +185,7 @@ class Fusion2Node(Node):
         self.pub_status.publish(String(data=json.dumps({
             'estimator': 'fusion2',
             'origin_epoch': self.origin_epoch,
-            'gyro_alive': True,                      # this runs from the gyro callback
+            'gyro_alive': now - self.gyro_last < 1.0,
             'lidar_alive': now - self.lidar_last < 1.0,
             'lidar_ok': bool(self.f.flags['lidar_ok']),
             'vo_alive': now - self.vo_last < 1.0,

@@ -20,9 +20,6 @@ THE ROVER CAN TURN IN PLACE -- THE DOCSTRING THAT SAID OTHERWISE WAS STALE
     nav2.yaml carries the rotational limits it needs to clear the scrub
     breakaway. Read nav2.yaml before changing any rotation value here.
 """
-import os
-
-from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import Shutdown
 from launch_ros.actions import Node
@@ -62,7 +59,6 @@ STOP_ALL['additional_env'] = {'LD_PRELOAD': BACKWARD} if os.path.exists(BACKWARD
 
 
 def generate_launch_description():
-    common = {'use_sim_time': False}
     nodes = [
         Node(package='nav2_controller', executable='controller_server',
              name='controller_server', output='screen', **STOP_ALL, parameters=[CONFIG],
