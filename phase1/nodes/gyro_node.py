@@ -18,6 +18,7 @@ The topic name differs between RealSense driver versions and modules, so this
 node discovers it: it looks for any sensor_msgs/Imu topic under the camera
 namespace rather than hard-coding one.
 """
+import os
 import numpy as np
 import rclpy
 from rclpy.node import Node
@@ -72,11 +73,29 @@ class GyroNode(Node):
         self.n += 1
 
 
+def _spin(node):
+    """Spin on rclpy's EventsExecutor (see phase4/nodes/pixel_to_goal.py _spin):
+    the stock executor rebuilds its wait set for every message, and this node
+    takes the D555 IMU at ~200 Hz -- py-spy found other rover nodes spending 77-86% of their
+    time there (2026-10-02). Callbacks still run one at a time.
+    ROVER_EXECUTOR=single restores rclpy.spin."""
+    if os.environ.get("ROVER_EXECUTOR", "events") != "events":
+        rclpy.spin(node)
+        return
+    from rclpy.experimental import EventsExecutor
+    ex = EventsExecutor()
+    ex.add_node(node)
+    try:
+        ex.spin()
+    finally:
+        ex.shutdown()
+
+
 def main():
     rclpy.init()
     node = GyroNode()
     try:
-        rclpy.spin(node)
+        _spin(node)
     except KeyboardInterrupt:
         pass
     finally:

@@ -23,6 +23,7 @@ passing the scan stamp is what makes the late fix land correctly.
 A /lidar/odom whose covariance is the failed-fit value (1 m) is a failed fit.
 """
 import json
+import os
 import math
 import sys
 import time
@@ -214,11 +215,29 @@ class Fusion2Node(Node):
         self.pub_path.publish(self.path)
 
 
+def _spin(node):
+    """Spin on rclpy's EventsExecutor (see phase4/nodes/pixel_to_goal.py _spin):
+    the stock executor rebuilds its wait set for every message, and this node
+    takes the gyro at ~200 Hz plus wheels, VO and LiDAR -- py-spy found other rover nodes spending 77-86% of their
+    time there (2026-10-02). Callbacks still run one at a time.
+    ROVER_EXECUTOR=single restores rclpy.spin."""
+    if os.environ.get("ROVER_EXECUTOR", "events") != "events":
+        rclpy.spin(node)
+        return
+    from rclpy.experimental import EventsExecutor
+    ex = EventsExecutor()
+    ex.add_node(node)
+    try:
+        ex.spin()
+    finally:
+        ex.shutdown()
+
+
 def main():
     rclpy.init()
     n = Fusion2Node()
     try:
-        rclpy.spin(n)
+        _spin(n)
     except KeyboardInterrupt:
         pass
     n.destroy_node()

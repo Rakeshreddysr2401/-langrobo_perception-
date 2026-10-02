@@ -20,6 +20,7 @@ COVARIANCE, from the fit rather than a constant:
     consumer treats it as the guess it is.
 """
 import json
+import os
 import math
 import sys
 import time
@@ -132,11 +133,29 @@ class LidarOdomNode(Node):
             'pose': [round(self.lo.x, 4), round(self.lo.y, 4), round(math.degrees(self.lo.th), 2)]})))
 
 
+def _spin(node):
+    """Spin on rclpy's EventsExecutor (see phase4/nodes/pixel_to_goal.py _spin):
+    the stock executor rebuilds its wait set for every message, and this node
+    takes /scan at 10 Hz and the gyro at ~200 Hz -- py-spy found other rover nodes spending 77-86% of their
+    time there (2026-10-02). Callbacks still run one at a time.
+    ROVER_EXECUTOR=single restores rclpy.spin."""
+    if os.environ.get("ROVER_EXECUTOR", "events") != "events":
+        rclpy.spin(node)
+        return
+    from rclpy.experimental import EventsExecutor
+    ex = EventsExecutor()
+    ex.add_node(node)
+    try:
+        ex.spin()
+    finally:
+        ex.shutdown()
+
+
 def main():
     rclpy.init()
     n = LidarOdomNode()
     try:
-        rclpy.spin(n)
+        _spin(n)
     except KeyboardInterrupt:
         pass
     n.destroy_node()
