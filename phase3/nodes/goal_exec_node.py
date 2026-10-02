@@ -61,7 +61,8 @@ from std_msgs.msg import Empty, String
 from tf2_ros import Buffer, TransformListener
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from depth_obstacles import MIN_HITS, DepthObstacles  # noqa: E402
+from depth_obstacles import MIN_HITS  # noqa: E402
+from fused_obstacles import make_obstacles  # noqa: E402
 from goal_exec import GoalExec, wrap  # noqa: E402
 
 PIVOT_FILE = Path('/logs/goal_exec_pivot.json')
@@ -112,7 +113,7 @@ class GoalExecNode(Node):
         self.tfl = TransformListener(self.buf, self)
         self.mount = None
         self.pass_ = None
-        self.dobs = DepthObstacles(self, self.buf, lambda: self.pose, active=False)   # only during a goal
+        self.dobs = make_obstacles(self, self.buf, lambda: self.pose, active=False)   # only during a goal
         self.warm_until = 0.0
         self.depth_wait_since = None
         self.get_logger().info(f'goal_exec up; pivot prior {prior}')

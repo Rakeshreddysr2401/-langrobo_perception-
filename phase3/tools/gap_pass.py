@@ -51,7 +51,7 @@ from visualization_msgs.msg import Marker, MarkerArray
 from tf2_ros import Buffer, TransformListener
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'nodes'))
-from depth_obstacles import DepthObstacles  # noqa: E402
+from fused_obstacles import make_obstacles  # noqa: E402
 from geometry_msgs.msg import Twist  # noqa: E402
 from goal_exec import FRONT, REAR, SIDE, GoalExec, wrap  # noqa: E402
 
@@ -168,7 +168,7 @@ class Pass(Node):
         # latched, so RViz shows the last measurement whenever it looks
         self.pub_mk = self.create_publisher(MarkerArray, '/gap_pass/markers', QoSProfile(
             depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
-        self.dobs = DepthObstacles(self, self.buf, lambda: self.pose, active=depth_active)
+        self.dobs = make_obstacles(self, self.buf, lambda: self.pose, active=depth_active)
         self.mount = None
         self.scans = []
         self.pose_t = self.scan_t = 0.0
@@ -314,7 +314,7 @@ def attempt(n, D, margin, dry):
     pts = np.vstack(n.scans + [n.dobs.points_base(n.pose)])
     g, cands = find_gap(pts, D, margin)
     need = 2 * (SIDE + margin)
-    print(f'  points: LiDAR {sum(len(s) for s in n.scans)} over {len(n.scans)} scans, depth {len(n.dobs.points_base(n.pose))} (1 cm, rover height)')
+    print(f'  points: LiDAR {sum(len(s) for s in n.scans)} over {len(n.scans)} scans, camera map {len(n.dobs.points_base(n.pose))}')
     if g is None:
         print(f'  no gap ahead: no line bounded on both sides passes within {NEAR * 100:.0f} cm of the rover')
         return 'none', None
