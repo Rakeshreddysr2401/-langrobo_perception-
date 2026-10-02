@@ -488,7 +488,16 @@ global_costmap:
       # were refused; at 0.01 the same spot is free and the way out is legal.
       # goal_exec.py MARGIN, reach_node.py MARGIN and wall_margin_view.py are
       # the same 1 cm -- change all four.
-      footprint_padding: 0.01
+      # 0.04 from 0.01 on 2026-10-03 (45 cm S-gap, owner watching): at 1 cm
+      # the planner routed through with the outline 0.8 cm from the chair leg,
+      # and MPPI's swerve at the mouth (53 deg in 4 s; this skid-steer slides
+      # 6-16 cm a turn) touched it in all three runs. The planner now routes
+      # only where the body keeps 4 cm; a tighter gap is "no path", and reach
+      # looks and crawls it STRAIGHT on goal_exec's pass (2 cm, raw points).
+      # The start-pose refusal that drove this down to 1 cm is footprint_clear's
+      # job now (below). goal_exec / reach MARGIN stay 1 cm: contact margins of
+      # exact moves, not route clearance. Open-floor goals still plan (5-26 cm).
+      footprint_padding: 0.04
 
       # footprint_clear AFTER the obstacle layers, BEFORE inflation (NAV_PLAN.md
       # N6): the cells under the rover's own outline are free -- it is standing

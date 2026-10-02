@@ -630,9 +630,13 @@ class Reach(GP.Pass):
             self.clear_costmaps()                   # (spins 0.5 s)
             self.spin_for(1.0)
             # parked against something (MPPI may go to the 1 cm line; the
-            # planner will not start from it): step off first, then retry at
-            # once -- no look, no pass, no wait
-            if self.escape(attempt):
+            # planner will not start from it): step off first. Then retry at
+            # once -- unless nav2 could not fit or found no route: then retrying
+            # it from 5 cm back is the same move again (2026-10-03: escape +
+            # nav2 five times at the gap mouth, touching the chair leg each
+            # time). Those go on to look and a straight pass.
+            jammed = why.startswith('narrow') or 'stuck' in why or 'no path' in why
+            if self.escape(attempt) and not jammed:
                 continue
             # no route to the goal: look both ways and try a straight pass from
             # HERE first; only if no line fits, go as near as a route goes
