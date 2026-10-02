@@ -39,6 +39,7 @@ FILTERS
 """
 import json
 import math
+import os
 import struct
 import time
 from pathlib import Path
@@ -78,7 +79,8 @@ EDGE = 0.05                     # m of depth spread that marks a flying pixel
 # a node flooded by 30 Hz images and /tf could go 15 s+ without receiving it
 # from /tf_static -- and without it the camera is blind (./rover pass refused
 # on "0 frames", 2026-09-26). Saved on every live lookup, used after TF_WAIT.
-CAM_CACHE = Path('/logs/calib/depth_cam_tf.json')
+# ROVER_STATE_DIR (default /logs): a second instance -- the twin's, on its own ROS domain -- keeps its own state
+CAM_CACHE = Path(os.environ.get('ROVER_STATE_DIR', '/logs')) / 'calib' / 'depth_cam_tf.json'
 TF_WAIT = 3.0                   # s
 
 

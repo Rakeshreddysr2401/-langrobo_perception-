@@ -65,7 +65,8 @@ from depth_obstacles import MIN_HITS  # noqa: E402
 from fused_obstacles import make_obstacles  # noqa: E402
 from goal_exec import GoalExec, wrap  # noqa: E402
 
-PIVOT_FILE = Path('/logs/goal_exec_pivot.json')
+# ROVER_STATE_DIR (default /logs): a second instance -- the twin's, on its own ROS domain -- keeps its own state
+PIVOT_FILE = Path(os.environ.get('ROVER_STATE_DIR', '/logs')) / 'goal_exec_pivot.json'
 SD_MAX_CM = 3.0
 DEPTH_STALE_S = 1.0             # pass mode stops without a camera update this recent
 # ...and WAITS for one, giving up only after this long. Drive test 2026-09-27:

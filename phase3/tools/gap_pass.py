@@ -59,7 +59,8 @@ BACK = 0.20            # m, the pre-goal: this far behind the rover's spot on th
 VX = 0.05              # m/s through the gap
 RETRIES = 2            # re-measure after 'blocked ahead' at most this often
 LOOK_DEG = 25.0
-PIVOT_FILE = Path('/logs/goal_exec_pivot.json')
+# ROVER_STATE_DIR (default /logs): a second instance -- the twin's, on its own ROS domain -- keeps its own state
+PIVOT_FILE = Path(os.environ.get('ROVER_STATE_DIR', '/logs')) / 'goal_exec_pivot.json'
 HALF_VIEW = 0.60       # m, a strip must lie within this of the line's origin
 NEAR = 0.25            # m, the gap's line must pass this close to the rover
 
