@@ -583,11 +583,33 @@ class PixelToGoal(Node):
                              "bearing_deg": round(math.degrees(math.atan2(left, forward)), 1)})
 
 
+def _spin(node):
+    """Spin on rclpy's EventsExecutor, not rclpy.spin's single-threaded one.
+
+    Measured 2026-10-02 with py-spy, rover idle: this node spent 77-86% of its
+    time in rclpy's own wait-set bookkeeping (executors.py
+    _wait_for_ready_callbacks), not in its callbacks -- the stock Python
+    executor rebuilds the wait set for every message, and this node gets depth,
+    camera_info and /tf (~68 Hz) messages all the time. EventsExecutor (Jazzy,
+    rclpy.experimental) dispatches from events instead. Callbacks still run one
+    at a time, as before. ROVER_EXECUTOR=single restores rclpy.spin."""
+    if os.environ.get("ROVER_EXECUTOR", "events") != "events":
+        rclpy.spin(node)
+        return
+    from rclpy.experimental import EventsExecutor
+    ex = EventsExecutor()
+    ex.add_node(node)
+    try:
+        ex.spin()
+    finally:
+        ex.shutdown()
+
+
 def main():
     rclpy.init()
     node = PixelToGoal()
     try:
-        rclpy.spin(node)
+        _spin(node)
     finally:
         node.destroy_node()
         rclpy.shutdown()
