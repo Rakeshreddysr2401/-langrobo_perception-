@@ -32,6 +32,7 @@ THEN
 """
 import json
 import math
+import os
 import sys
 import time
 from pathlib import Path
@@ -145,6 +146,16 @@ def corridor_markers(stamp, pose, g, D, margin, ok):
 class Pass(Node):
     def __init__(self, name='gap_pass', depth_active=True):
         super().__init__(name)
+        # One EventsExecutor for this node, which spin_for steps. rclpy.spin_once
+        # rebuilt the stock executor's wait set every 50 ms: idle, reach (this
+        # class) spent 80% of its time there (py-spy, 2026-10-02). Callbacks still
+        # run one at a time, inside spin_for, as before. ROVER_EXECUTOR=single
+        # restores rclpy.spin_once.
+        self._ex = None
+        if os.environ.get("ROVER_EXECUTOR", "events") == "events":
+            from rclpy.experimental import EventsExecutor
+            self._ex = EventsExecutor()
+            self._ex.add_node(self)
         self.pose, self.scan_pts, self.status = None, None, []
         self.buf = Buffer()
         self.tfl = TransformListener(self.buf, self)
@@ -186,7 +197,10 @@ class Pass(Node):
     def spin_for(self, s):
         end = time.time() + s
         while time.time() < end:
-            rclpy.spin_once(self, timeout_sec=0.05)
+            if self._ex is not None:
+                self._ex.spin_once(timeout_sec=0.05)
+            else:
+                rclpy.spin_once(self, timeout_sec=0.05)
 
 
 def _ex():
