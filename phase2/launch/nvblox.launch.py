@@ -91,7 +91,7 @@ def generate_launch_description():
                 # Things under ~5 cm (a flat cable) stay invisible to the map;
                 # the axle is 4.1 cm up, so about 1.5-2 cm is what it can
                 # climb. Heights are in the odom frame: z = 0 is the floor.
-                'static_mapper.esdf_slice_min_height': 0.05,
+                'static_mapper.esdf_slice_min_height': 0.03,
                 'static_mapper.esdf_slice_max_height': 0.27,
                 'static_mapper.esdf_slice_height': 0.16,
 
@@ -155,7 +155,8 @@ def generate_launch_description():
                 'update_esdf_rate_hz': 5.0,
             }],
             remappings=[
-                ('camera_0/depth/image', '/camera/camera0/depth/image_rect_raw'),
+                # only frames taken while not turning (phase2/nodes/depth_gate.py)
+                ('camera_0/depth/image', '/camera/camera0/depth/image_still'),
                 ('camera_0/depth/camera_info', '/camera/camera0/depth/camera_info'),
             ],
         ),

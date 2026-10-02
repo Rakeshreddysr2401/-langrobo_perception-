@@ -39,6 +39,7 @@ FILTERS
 """
 import json
 import math
+import struct
 import time
 from pathlib import Path
 
@@ -47,6 +48,15 @@ from rclpy.qos import qos_profile_sensor_data
 from rclpy.serialization import deserialize_message
 from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo, Image
+
+# the turn gate is shared with nvblox's depth_gate (phase2/nodes/turn_gate.py):
+# /opt/rover2/nodes in the container, ../../phase2/nodes on the host
+for _d in (Path('/opt/rover2/nodes'), Path(__file__).resolve().parent.parent.parent / 'phase2' / 'nodes'):
+    if (_d / 'turn_gate.py').exists():
+        import sys as _sys
+        _sys.path.insert(0, str(_d))
+        break
+from turn_gate import TurnGate  # noqa: E402
 
 DEPTH = '/camera/camera0/depth/image_rect_raw'
 INFO = '/camera/camera0/depth/camera_info'
@@ -94,6 +104,12 @@ class DepthObstacles:
         self.updated = 0.0               # time of the last completed update
         self.first_img = 0.0
         self.cam_src = None
+        # a frame taken mid-turn lands degrees off (turn_gate.py); a frame
+        # placed with the pose at ARRIVAL, not at its stamp, lands where the
+        # rover had got to 0.1-0.2 s later: 2-3 cm at 0.2 m/s straight, and
+        # degrees in a turn (2026-10-03). Both are dropped / fixed here.
+        self.gate = TurnGate(node, active=False)   # listens only while depth does (set_active)
+        self.no_pose_at_stamp = 0
         # ONE message is all it needs (the intrinsics never change), then it
         # unsubscribes: at 30 Hz this was ~30 Python wake-ups a second in each
         # of reach and goal_exec, forever (2026-09-28 CPU diet, OPEN_ISSUES #1).
@@ -118,11 +134,13 @@ class DepthObstacles:
         the brain could not measure an object it had just found. The memory
         is kept while inactive; it just is not updated."""
         if on and self.sub is None:
+            self.gate.set_active(True)
             self.sub = self.node.create_subscription(Image, DEPTH, self._raw, qos_profile_sensor_data,
                                                      raw=True)
         elif not on and self.sub is not None:
             self.node.destroy_subscription(self.sub)
             self.sub = None
+            self.gate.set_active(False)
 
     def _info(self, m):
         if self.K is None:
@@ -134,7 +152,24 @@ class DepthObstacles:
     def _raw(self, data):
         if time.time() - self.last_t < 1.0 / RATE_HZ or self.K is None:
             return
+        # the stamp straight out of the CDR (encapsulation, int32 sec, uint32
+        # nanosec): a frame taken mid-turn is not even decoded
+        sec, nsec = struct.unpack_from('<iI', data, 4)
+        if not self.gate.still(sec + nsec * 1e-9):
+            return
         self._depth(deserialize_message(data, Image))
+
+    def _pose_at(self, stamp):
+        """odom -> base_link at the frame's own time; None if the TF history
+        does not reach it (the frame is skipped, the next one is used)."""
+        try:
+            tr = self.buf.lookup_transform('odom', 'base_link', Time.from_msg(stamp)).transform
+        except Exception:
+            self.no_pose_at_stamp += 1
+            return None
+        q = tr.rotation
+        return (tr.translation.x, tr.translation.y,
+                math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z)))
 
     def age(self):
         """Seconds since the view was last updated (inf: never)."""
@@ -142,7 +177,7 @@ class DepthObstacles:
 
     def _depth(self, m):
         now = time.time()
-        pose = self.get_pose()
+        pose = self._pose_at(m.header.stamp)
         if pose is None:
             return
         if self.cam is None or self.cam_src == 'cache':

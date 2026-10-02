@@ -60,6 +60,12 @@ MAX_S = 300.0
 WAIT_S = 3.0
 NAV_TIMEOUT = 120.0
 PASS_D = 0.9           # m: how far a recovery pass crawls
+# On "no path" the pass is measured from where the rover STANDS, before any
+# approach: longest first, so the crawl ends past the tight bit, not in it
+# (2026-10-03, 45 cm S-gap: approach drove nav2 into the gap mouth, MPPI
+# turned in it and touched the low chair leg; from 35 cm back the straight
+# line was 51 cm wide -- room, 44 needed).
+PASS_D_FAR = (1.8, 1.3, 0.9)
 MARGIN = 0.01          # = goal_exec MARGIN and nav2 footprint_padding (1 cm hard since 2026-09-27 evening, NAV_PLAN.md N1; 0.02, 0.03 before)
 # A PASS keeps 2 cm a side, not MARGIN: goal_exec refuses a pass request under
 # 0.02 m (its blind-ish creep past an edge at 5 cm/s), and reach sent MARGIN
@@ -494,6 +500,30 @@ class Reach(GP.Pass):
         self.say(attempt=attempt, phase='approach', outcome=r, gained_m=round(gained, 2), why=why)
         return gained >= self.APPROACH_GAIN
 
+    def look_and_pass_far(self, attempt, g):
+        """Face the goal, look both ways (outline-checked), then measure a
+        straight pass from here, longest first and never past the goal; crawl
+        the first that fits. Returns the pass outcome ('reached', 'tight',
+        'none', 'blocked', 'failed', 'cancelled')."""
+        bearing = math.atan2(g[1] - self.pose[1], g[0] - self.pose[0])
+        if abs(wrap(bearing - self.pose[2])) > math.radians(35):
+            self.face(bearing)
+        GP.look(self, GP.LOOK_DEG)
+        out = 'none'
+        for D in PASS_D_FAR:
+            if self.stop_req:
+                return 'cancelled'
+            D = min(D, self.dist(g))
+            out, _ = GP.attempt(self, D, PASS_MARGIN, dry=True)
+            self.say(attempt=attempt, phase='pass_far', D=round(D, 2), measured=out)
+            if out == 'dry':
+                break
+        if out != 'dry':
+            return out
+        out, _ = GP.attempt(self, D, PASS_MARGIN, dry=False)
+        self.say(attempt=attempt, phase='pass_far', D=round(D, 2), outcome=out)
+        return out
+
     def face(self, bearing):
         """Turn in place toward bearing (odom), outline-checked; for the look."""
         GP.look_to(self, bearing)
@@ -604,14 +634,25 @@ class Reach(GP.Pass):
             # once -- no look, no pass, no wait
             if self.escape(attempt):
                 continue
-            # no route to the goal: go as near as a route goes, look, retry
-            if 'no path' in why and self.approach_and_look(attempt, g):
-                continue
+            # no route to the goal: look both ways and try a straight pass from
+            # HERE first; only if no line fits, go as near as a route goes
+            looked = False
+            if 'no path' in why:
+                out = self.look_and_pass_far(attempt, g)
+                if out == 'reached':
+                    continue
+                if out == 'cancelled' or self.stop_req:
+                    break
+                looked = True
+                # moved partway ('failed'/'blocked'): wait, then re-plan from there
+                if out not in ('failed', 'blocked') and self.approach_and_look(attempt, g):
+                    continue
             bearing = math.atan2(g[1] - self.pose[1], g[0] - self.pose[0])
-            if abs(wrap(bearing - self.pose[2])) > math.radians(35) and self.dist(g) > 0.3:
-                self.face(bearing)
-            GP.look(self, GP.LOOK_DEG)
-            narrow = why.startswith('narrow') or 'obstacle' in why or 'stuck' in why or 'no path' in why
+            if not looked:
+                if abs(wrap(bearing - self.pose[2])) > math.radians(35) and self.dist(g) > 0.3:
+                    self.face(bearing)
+                GP.look(self, GP.LOOK_DEG)
+            narrow = why.startswith('narrow') or 'obstacle' in why or 'stuck' in why
             if narrow:
                 D = min(PASS_D, max(0.4, self.dist(g)))
                 self.say(attempt=attempt, phase='pass', D=round(D, 2))

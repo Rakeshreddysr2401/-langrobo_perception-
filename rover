@@ -550,6 +550,10 @@ map)
     smear the map permanently. Fix it first:  ./rover pose  THEN  ./rover fused
     (./rover fused alone restarts fusion and NOT cuvslam, so divergence survives)"
   kill_match 'nvblox_node'
+  # depth frames reach nvblox only while the rover is not turning: frames
+  # painted mid-turn smeared every object 3-10 cm (phase2/nodes/turn_gate.py)
+  kill_match 'depth_gate[.]py'
+  dexec "python3 $SRC2/nodes/depth_gate.py > /tmp/depth_gate.log 2>&1"
   echo "[map] nvblox — depth + the FUSED pose -> TSDF mesh and a 2D floor slice"
   echo "      built on /odom, not raw cuvslam: nvblox writes depth wherever the"
   echo "      pose claims the robot is, so a teleport smears the map permanently."
