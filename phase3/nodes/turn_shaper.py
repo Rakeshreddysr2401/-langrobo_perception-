@@ -24,7 +24,6 @@ STALE_S: nothing sent (the firmware stops on its own 0.5 s timeout).
 """
 import json
 import math
-import time
 from pathlib import Path
 
 import numpy as np

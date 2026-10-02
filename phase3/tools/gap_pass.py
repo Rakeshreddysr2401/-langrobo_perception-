@@ -362,7 +362,6 @@ def attempt(n, D, margin, dry):
     x, y, th = n.pose
     phi = th + g['phi']
     u = np.array([math.cos(phi), math.sin(phi)])
-    nrm = np.array([-u[1], u[0]])
     base_u = np.array([math.cos(g['phi']), math.sin(g['phi'])])
     base_n = np.array([-base_u[1], base_u[0]])
     origin_b = g['c'] * base_n                    # line point nearest the rover, base_link

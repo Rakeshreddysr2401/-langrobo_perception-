@@ -1,0 +1,65 @@
+process has died [pid 122494, exit code -11
+
+[controller_server-1] [INFO] [1790613365.390459191] [local_costmap.local_costmap]: Message Filter dropping message: frame 'laser' at time 1790613365.071 for reason 'the timestamp on the message is earlier than all the data in the transform cache'
+[planner_server-2] [INFO] [1790613365.391077512] [global_costmap.global_costmap]: Message Filter dropping message: frame 'laser' at time 1790613365.071 for reason 'the timestamp on the message is earlier than all the data in the transform cache'
+[planner_server-2] Stack trace (most recent call last) in thread 122887:
+[planner_server-2] #8    Object "/usr/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1", at 0xffffffffffffffff, in 
+[planner_server-2] #7    Source "../sysdeps/unix/sysv/linux/aarch64/clone3.S", line 76, in thread_start [0xffff8effbb4b]
+[planner_server-2] #6    Source "./nptl/pthread_create.c", line 447, in start_thread [0xffff8ef9595b]
+[planner_server-2] #5    Object "/usr/lib/aarch64-linux-gnu/libstdc++.so.6.0.33", at 0xffff8f1f1adf, in 
+[planner_server-2] #4    Object "/opt/ros/jazzy/lib/libnav2_costmap_2d_core.so", at 0xffff8ed49ae7, in nav2_costmap_2d::Costmap2DROS::mapUpdateLoop(double)
+[planner_server-2] #3    Object "/opt/ros/jazzy/lib/libnav2_costmap_2d_core.so", at 0xffff8ed495bf, in nav2_costmap_2d::Costmap2DROS::updateMap()
+[planner_server-2] #2    Object "/opt/ros/jazzy/lib/libnav2_costmap_2d_core.so", at 0xffff8ed42607, in nav2_costmap_2d::LayeredCostmap::updateMap(double, double, double)
+[planner_server-2] #1    Object "/opt/ros/jazzy/lib/libnvblox_nav2.so", at 0xffff66f7844b, in nvblox::nav2::NvbloxCostmapLayer::updateCosts(nav2_costmap_2d::Costmap2D&, int, int, int, int)
+[planner_server-2] #0    Object "/opt/ros/jazzy/lib/libnvblox_nav2.so", at 0xffff66f77500, in nvblox::nav2::NvbloxCostmapLayer::lookupInSlice(Eigen::Matrix<float, 2, 1, 0, 2, 1> const&, float*)
+[planner_server-2] Segmentation fault (Address not mapped to object [0xaaab0ecc9f9c])
+[ERROR] [planner_server-2]: process has died [pid 122494, exit code -11, cmd '/opt/ros/jazzy/lib/nav2_planner/planner_server --ros-args -r __node:=planner_server --params-file /opt/rover3/config/nav2.yaml'].
+[INFO] [launch]: process[planner_server-2] was required: shutting down launched system
+[INFO] [lifecycle_manager-7]: sending signal 'SIGINT' to process[lifecycle_manager-7]
+[INFO] [collision_monitor-6]: sending signal 'SIGINT' to process[collision_monitor-6]
+[INFO] [velocity_smoother-5]: sending signal 'SIGINT' to process[velocity_smoother-5]
+[INFO] [bt_navigator-4]: sending signal 'SIGINT' to process[bt_navigator-4]
+[INFO] [behavior_server-3]: sending signal 'SIGINT' to process[behavior_server-3]
+[INFO] [controller_server-1]: sending signal 'SIGINT' to process[controller_server-1]
+[lifecycle_manager-7] [INFO] [1790613530.011769682] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[lifecycle_manager-7] [INFO] [1790613530.011961175] [lifecycle_manager_navigation]: Running Nav2 LifecycleManager rcl preshutdown (lifecycle_manager_navigation)
+[lifecycle_manager-7] [INFO] [1790613530.012038553] [lifecycle_manager_navigation]: [34m[1mTerminating bond timer...[0m[0m
+[collision_monitor-6] [INFO] [1790613530.013294140] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[collision_monitor-6] [INFO] [1790613530.013428255] [collision_monitor]: Running Nav2 LifecycleNode rcl preshutdown (collision_monitor)
+[collision_monitor-6] [INFO] [1790613530.013567331] [collision_monitor]: Deactivating
+[collision_monitor-6] [INFO] [1790613530.013609092] [collision_monitor]: Destroying bond (collision_monitor) to lifecycle manager.
+[velocity_smoother-5] [INFO] [1790613530.019137628] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[velocity_smoother-5] [INFO] [1790613530.019346402] [velocity_smoother]: Running Nav2 LifecycleNode rcl preshutdown (velocity_smoother)
+[velocity_smoother-5] [INFO] [1790613530.019495558] [velocity_smoother]: Deactivating
+[velocity_smoother-5] [INFO] [1790613530.019544167] [velocity_smoother]: Destroying bond (velocity_smoother) to lifecycle manager.
+[bt_navigator-4] [INFO] [1790613530.022187440] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[bt_navigator-4] [INFO] [1790613530.022351285] [bt_navigator]: Running Nav2 LifecycleNode rcl preshutdown (bt_navigator)
+[bt_navigator-4] [INFO] [1790613530.022489176] [bt_navigator]: Deactivating
+[bt_navigator-4] [INFO] [1790613530.022546234] [bt_navigator]: Destroying bond (bt_navigator) to lifecycle manager.
+[collision_monitor-6] [INFO] [1790613530.024254537] [collision_monitor]: Cleaning up
+[collision_monitor-6] [INFO] [1790613530.024340523] [collision_monitor]: [Approach]: Destroying Polygon
+[collision_monitor-6] [INFO] [1790613530.024369516] [collision_monitor]: [scan]: Destroying Scan
+[behavior_server-3] [INFO] [1790613530.030389393] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[behavior_server-3] [INFO] [1790613530.030605559] [behavior_server]: Running Nav2 LifecycleNode rcl preshutdown (behavior_server)
+[behavior_server-3] [INFO] [1790613530.030762140] [behavior_server]: Deactivating
+[behavior_server-3] [INFO] [1790613530.030820637] [behavior_server]: Destroying bond (behavior_server) to lifecycle manager.
+[velocity_smoother-5] [INFO] [1790613530.031556113] [velocity_smoother]: Cleaning up
+[velocity_smoother-5] [INFO] [1790613530.031641588] [velocity_smoother]: Destroying bond (velocity_smoother) to lifecycle manager.
+[controller_server-1] [INFO] [1790613530.041122136] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[controller_server-1] [INFO] [1790613530.041314014] [controller_server]: Running Nav2 LifecycleNode rcl preshutdown (controller_server)
+[controller_server-1] [INFO] [1790613530.041466434] [controller_server]: Deactivating
+[controller_server-1] [INFO] [1790613530.041519299] [MPPIController]: Deactivated MPPI Controller: FollowPath
+[controller_server-1] [INFO] [1790613530.041560324] [local_costmap.local_costmap]: Deactivating
+[bt_navigator-4] [INFO] [1790613530.053802357] [bt_navigator]: Cleaning up
+[controller_server-1] [INFO] [1790613530.058020361] [controller_server]: Destroying bond (controller_server) to lifecycle manager.
+[behavior_server-3] [INFO] [1790613530.061650156] [behavior_server]: Cleaning up
+[controller_server-1] [INFO] [1790613530.078681760] [controller_server]: Cleaning up
+[controller_server-1] [INFO] [1790613530.078902662] [MPPIController]: Cleaned up MPPI Controller: FollowPath
+[controller_server-1] [INFO] [1790613530.079097772] [local_costmap.local_costmap]: Cleaning up
+[velocity_smoother-5] [INFO] [1790613530.109419533] [velocity_smoother]: Destroying
+[collision_monitor-6] [INFO] [1790613530.118975827] [collision_monitor]: Destroying bond (collision_monitor) to lifecycle manager.
+[behavior_server-3] [INFO] [1790613530.147325022] [behavior_server]: Destroying bond (behavior_server) to lifecycle manager.
+[collision_monitor-6] [INFO] [1790613530.228293519] [collision_monitor]: Destroying
+[behavior_server-3] [INFO] [1790613530.431915562] [behavior_server]: Destroying
+[INFO] [velocity_smoother-5]: process has finished cleanly [pid 122498]
+[INFO] [launch]: process[velocity_smoother-5] was required: shutting down launched system

@@ -17,12 +17,14 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from sensor_msgs.msg import Image
+from std_msgs.msg import Header
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from turn_gate import TurnGate  # noqa: E402
 
 SRC = '/camera/camera0/depth/image_rect_raw'
 DST = '/camera/camera0/depth/image_still'
+PASSED = '/depth_gate/passed'     # one small Header per frame passed: "nvblox got a view" (fused_obstacles.py)
 REPORT_S = 30.0
 
 
@@ -34,6 +36,7 @@ class DepthGate(Node):
         # mid-reassembly (depth_obstacles.py, 2026-09-26)
         qos = QoSProfile(depth=5, reliability=ReliabilityPolicy.BEST_EFFORT)
         self.pub = self.create_publisher(Image, DST, qos)
+        self.pub_passed = self.create_publisher(Header, PASSED, 10)
         self.create_subscription(Image, SRC, self._raw, qos_profile_sensor_data, raw=True)
         self.t_report = time.time()
         self.get_logger().info(f'depth gate up: {SRC} -> {DST} while |wz| <= {self.gate.wz_max} rad/s')
@@ -42,6 +45,9 @@ class DepthGate(Node):
         sec, nsec = struct.unpack_from('<iI', data, 4)
         if self.gate.still(sec + nsec * 1e-9):
             self.pub.publish(data)
+            h = Header()
+            h.stamp.sec, h.stamp.nanosec = sec, nsec
+            self.pub_passed.publish(h)
         if time.time() - self.t_report > REPORT_S:
             self.t_report = time.time()
             self.get_logger().info(f'depth gate: {self.gate.counts()}')

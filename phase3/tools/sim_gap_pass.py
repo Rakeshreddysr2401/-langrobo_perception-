@@ -21,7 +21,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'nodes'))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from goal_exec import FRONT, REAR, SIDE, GoalExec, R, wrap  # noqa: E402
+from goal_exec import FRONT, REAR, SIDE, GoalExec, R  # noqa: E402
 from sim_goal_exec import DT, Rover, box, scan  # noqa: E402
 
 MARGIN, VX = 0.03, 0.05

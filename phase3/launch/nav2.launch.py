@@ -16,9 +16,11 @@ THE ROVER CAN TURN IN PLACE -- THE DOCSTRING THAT SAID OTHERWISE WAS STALE
     It could not, when this file was written (TODO 14), and everything that
     rotates was disabled on those grounds. TODO 14 was fixed and verified on the
     floor on 2026-08-22 at 65 deg/s. The controller was relaxed then; the
-    RECOVERIES were not, and TODO 40 is the bill for that -- Spin is back, and
-    nav2.yaml carries the rotational limits it needs to clear the scrub
-    breakaway. Read nav2.yaml before changing any rotation value here.
+    RECOVERIES were not, and TODO 40 is the bill for that -- Spin came back,
+    and nav2.yaml carries the rotational limits it needs to clear the scrub
+    breakaway. (2026-10-03: Spin is out of the BT recoveries again -- a blind
+    spin in a 45 cm gap swung the outline into a chair leg; reach's looks are
+    outline-checked instead. bt/navigate_to_pose.xml says why.) Read nav2.yaml before changing any rotation value here.
 """
 import os
 

@@ -73,8 +73,8 @@ def generate_launch_description():
                 #   LiDAR puck top   26.1 cm  <- the highest point of the rover
                 #   table            29   cm  <- still clears it
                 #
-                #   0 - 5 cm    skipped: one 5 cm voxel, the floor itself.
-                #   5 - 27 cm   the OBSTACLE band. A 6-8 cm remote, shoe or box
+                #   0 - 3 cm    skipped: the floor itself (voxels are 2.5 cm).
+                #   3 - 27 cm   the OBSTACLE band. A 6-8 cm remote, shoe or box
                 #               is in it; so is anything the puck would hit.
                 #   above 27 cm ignored. The rover drives under it.
                 #
@@ -91,6 +91,10 @@ def generate_launch_description():
                 # Things under ~5 cm (a flat cable) stay invisible to the map;
                 # the axle is 4.1 cm up, so about 1.5-2 cm is what it can
                 # climb. Heights are in the odom frame: z = 0 is the floor.
+                # 3 cm, from 5, on 2026-10-03: with 2.5 cm voxels the 5 cm line
+                # half-filled the top voxel of a ~7 cm chair leg and marked ~6 cells
+                # of it; at 3 cm its tip and edge are marked. Measured with the
+                # turn gate on (depth_gate.py) -- turn smear had made both worse.
                 'static_mapper.esdf_slice_min_height': 0.03,
                 'static_mapper.esdf_slice_max_height': 0.27,
                 'static_mapper.esdf_slice_height': 0.16,

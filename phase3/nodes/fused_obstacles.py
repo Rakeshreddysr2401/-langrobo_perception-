@@ -18,9 +18,11 @@ gap's straight line, 44.5 cm. It is also the owner's idea of a robot that
 
 Each occupied cell (2.5 cm) is its four corners, so no cell reads smaller
 than it is. Points deep inside the rover outline are ignored (the rover is
-standing there; same rule as DepthObstacles.points_base). Fresh = a grid in
-the last FRESH_S AND the depth camera alive (its camera_info): a map that
-stopped updating because the camera died must not read as a fresh view.
+standing there; same rule as DepthObstacles.points_base). Fresh = a grid
+recently AND a depth frame recently handed to nvblox (depth_gate's
+/depth_gate/passed): the grid keeps publishing when the camera or the gate
+has died, and a frozen map must not read as a fresh view. While the rover
+turns the gate passes nothing, so the view ages -- as it should.
 """
 import math
 import os
@@ -28,11 +30,11 @@ import time
 
 import numpy as np
 from nav_msgs.msg import OccupancyGrid
-from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
-from sensor_msgs.msg import CameraInfo
+from rclpy.qos import QoSProfile, ReliabilityPolicy
+from std_msgs.msg import Header
 
 GRID = '/nvblox_node/static_occupancy_grid'
-INFO = '/camera/camera0/depth/camera_info'
+PASSED = '/depth_gate/passed'    # depth_gate.py: a frame went to nvblox
 RANGE = 2.5                      # m around the rover
 OCC = 50                         # occupancy >= this is an obstacle (nvblox: 0 / 100 / -1)
 OWN_FRONT, OWN_REAR, OWN_SIDE = 0.202, 0.198, 0.21
@@ -57,7 +59,7 @@ class FusedObstacles:
         self.cells = np.zeros((0, 2))     # occupied cell centres, odom
         self.res = 0.025
         self.updated = 0.0                # time of the last grid
-        self.info_t = 0.0                 # time of the last camera_info (camera alive)
+        self.info_t = 0.0                 # time a depth frame last went to nvblox
         self.frames = 0
         self.sub = self.info_sub = None
         self.set_active(active)
@@ -66,7 +68,7 @@ class FusedObstacles:
         if on and self.sub is None:
             self.sub = self.node.create_subscription(
                 OccupancyGrid, GRID, self._grid, QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE))
-            self.info_sub = self.node.create_subscription(CameraInfo, INFO, self._info, qos_profile_sensor_data)
+            self.info_sub = self.node.create_subscription(Header, PASSED, self._info, 10)
         elif not on and self.sub is not None:
             self.node.destroy_subscription(self.sub)
             self.node.destroy_subscription(self.info_sub)

@@ -567,7 +567,9 @@ map)
   # nvblox_msgs/DistanceMapSlice, while the nav_msgs/OccupancyGrid RViz and
   # nav2 want is this one.
   assert_rate /nvblox_node/static_occupancy_grid 1 "2D occupancy grid" || true
-  assert_rate "/nvblox_node/back_projected_depth/camera0_depth_optical_frame" 5 "depth integrated" || true
+  # frames the turn gate handed to nvblox (depth_gate.py); back_projected_depth is a
+  # debug picture at its own pace and read 3 Hz while nvblox integrated 9.7 (save_rates)
+  assert_rate /depth_gate/passed 5 "depth to the map" || true
   echo
   echo "  How much is mapped:"
   rexec "python3 $SRC2/tools/map_stats.py" 2>/dev/null | sed -n "/grid/,/occupied/p" | sed "s/^/    /"
@@ -1081,7 +1083,7 @@ status)
       "map:/nvblox_node/static_occupancy_grid:1" \
       "nav:/global_costmap/costmap:0.5" \
       "nav:/local_costmap/costmap:1" \
-      "map:/nvblox_node/back_projected_depth/camera0_depth_optical_frame:4" \
+      "map:/depth_gate/passed:5" \
       "exec:/goal_exec/obstacles:1" \
       "vlm:/camera/color/image_raw/compressed:2"; do
     l=${row%%:*}; rest=${row#*:}; t=${rest%:*}; want=${rest##*:}

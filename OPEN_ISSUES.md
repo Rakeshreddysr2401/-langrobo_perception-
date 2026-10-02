@@ -1,4 +1,35 @@
-# Open issues — where things stand, 2026-10-02
+# Open issues — where things stand, 2026-10-03
+
+## 2026-10-03 — close quarters (narrow-gap tests with the owner)
+
+Test: a 45 cm gap, spray bottle one side, a ~7 cm chair leg the other (an
+S-gap); the rover touched the leg in all three runs. Root causes and fixes,
+all committed on `rover-v1.1.7` (33fd348, 146361c, 15029cd, 11ee9b7 + the
+review commit after it):
+
+| what | fix | status |
+|---|---|---|
+| Nav2 Spin swung the outline blind in the gap | Spin out of both BT recoveries | in |
+| reach's pass refused since 09-27 (sent 1 cm, goal_exec needs 2) | `PASS_MARGIN = 0.02` | in |
+| Turn smear: objects mapped again 3-10 cm beside themselves | `phase2/nodes/turn_gate.py` + `depth_gate.py`: depth to nvblox only after 0.8 s with no turn; depth memory places frames at their stamp | measured (central-view smear 17 -> 5 cells at 6-10 cm) |
+| Chair leg barely in the map | nvblox slice 5 -> 3 cm | measured (leg ~6 cells -> tip + edge) |
+| Planner routed with 0.8 cm to the leg | global `footprint_padding` 0.04 | plan-checked; 45 cm gap = no path |
+| Live depth reads mid-air points in front of white walls (emitter off for cuVSLAM) | exact moves use `phase3/nodes/fused_obstacles.py` (nvblox fused map); `ROVER_OBSTACLES=depth` reverts | live turns OK; tests `phase3/tools/test_obstacle_sources.py` |
+| reach drove into the gap mouth / looped escape + nav2 | on no path or a jam: look, straight pass first (1.8 / 1.3 / 0.9 m) | floor run at 60 cm next |
+
+**Open:**
+- A 45 cm gap is below what can be promised: the fused map is 2.5 cm cells,
+  the pass needs 38 + 2 x 2 cm, and it reads 41 cm. sim_gap_pass agrees
+  (46 cm is the boundary). For 45: a sharper near view -- tilt the D555 down
+  15-20 deg, or a low front webcam + a floor/not-floor model (owner has a
+  Logitech webcam), or learned stereo (Isaac ROS ESS; not in the image).
+- footprint_clear (global) clears 2 cm past the now 4 cm padding: the
+  planner does not see anything within ~6 cm of the rover's outline.
+- After moving obstacles, restart the map layer (`./rover map`): the static
+  map has no decay, so the old positions stay until seen free.
+- depth_gate costs ~17% of one core (Python relay of raw frames); a C++
+  relay if CPU gets tight.
+
 
 ## 2026-10-02 (Pi 5 brain, floor-tested with the owner)
 

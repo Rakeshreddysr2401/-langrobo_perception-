@@ -30,8 +30,9 @@ from sensor_msgs.msg import Imu
 
 GYRO = '/gyro/base'
 WZ_MAX = 0.15          # rad/s (8.6 deg/s): MPPI's gentle steering passes, a turn in place does not
-BEFORE_S = 0.80        # s of no turn before the frame: the turn, AND the lidar fix that corrects its slide after it
+BEFORE_S = 0.20        # s before the frame's stamp: the turn that just ended still counts
 STALE_S = 0.5          # s without a gyro sample = no gyro
+STARTUP_S = 3.0        # s after a start in which an empty history is discovery, not a dead gyro
 
 
 def stamp_s(h):
@@ -63,6 +64,9 @@ class TurnGate:
         """True: keep the frame stamped t (s). False: it was taken in a turn."""
         if t < self.since + BEFORE_S:
             self.dropped += 1                           # just started: no history to clear it
+            return False
+        if not self.hist and t < self.since + STARTUP_S:
+            self.dropped += 1                           # the gyro subscription is still connecting
             return False
         if not self.hist or self.hist[-1][0] < t - STALE_S:
             if not self.warned:
