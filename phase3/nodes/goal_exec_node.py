@@ -43,6 +43,7 @@ so do not run a nav2 goal at the same time. Teleop MANUAL overrides it.
 """
 import json
 import math
+import os
 import sys
 import time
 from pathlib import Path
@@ -324,11 +325,28 @@ class GoalExecNode(Node):
             self.pub_status.publish(String(data=json.dumps(d)))
 
 
+def _spin(node):
+    """Spin on rclpy's EventsExecutor (see phase4/nodes/pixel_to_goal.py _spin):
+    idle, this node spent 77% of its time in the stock executor's wait-set
+    bookkeeping (py-spy, 2026-10-02) -- /odom, /scan, depth and /tf all the time.
+    Callbacks still run one at a time. ROVER_EXECUTOR=single restores rclpy.spin."""
+    if os.environ.get("ROVER_EXECUTOR", "events") != "events":
+        rclpy.spin(node)
+        return
+    from rclpy.experimental import EventsExecutor
+    ex = EventsExecutor()
+    ex.add_node(node)
+    try:
+        ex.spin()
+    finally:
+        ex.shutdown()
+
+
 def main():
     rclpy.init()
     n = GoalExecNode()
     try:
-        rclpy.spin(n)
+        _spin(n)
     except KeyboardInterrupt:
         pass
     n._stop()
