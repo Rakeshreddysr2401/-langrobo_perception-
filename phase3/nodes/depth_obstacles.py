@@ -57,9 +57,10 @@ STRIDE = 3                      # px
 RATE_HZ = 5.0
 RANGE = 2.5                     # m, depth used and memory kept
 MEM_S = 120.0
-# The rover's own outline in base_link (= goal_exec_node._scan's LiDAR self-filter):
-# a remembered point inside it is stale -- the rover stands there (points_base).
+# The rover's own outline in base_link (= goal_exec_node._scan's LiDAR self-filter),
+# and how far inside it a remembered point must be to be called stale (points_base).
 OWN_FRONT, OWN_REAR, OWN_SIDE = 0.202, 0.198, 0.21
+OWN_INSET = 0.05
 MIN_HITS = 2
 SEE_THROUGH = 0.04              # m beyond a voxel that proves it gone
 EDGE = 0.05                     # m of depth spread that marks a flying pixel
@@ -256,7 +257,15 @@ class DepthObstacles:
         2026-10-02 at a door, every turn and drive refused for ~85 s with
         "something 0.01-0.02 m away" (measured from base_link's centre: inside
         the body), though the owner could see free space. The outline is the one
-        goal_exec_node._scan drops from the LiDAR as "the rover itself"."""
+        goal_exec_node._scan drops from the LiDAR as "the rover itself".
+
+        Only DEEP inside: OWN_INSET (5 cm) in from every edge. The first version
+        forgot every point inside the outline, and a real obstacle a turn slides
+        the outline 1-2 cm onto (a low chair foot beside a 45 cm gap, under the
+        LiDAR and out of the camera's view -- only this memory knew it) was
+        forgotten at the moment it mattered, and the rover turned into it
+        (2026-10-03). The door phantoms were 1-2 cm from the CENTRE; real contact
+        shows at the edge, and must keep blocking."""
         pose = pose if pose is not None else self.get_pose()
         full = self.mem
         if pose is None or not len(full):
@@ -264,7 +273,8 @@ class DepthObstacles:
         c, s = math.cos(pose[2]), math.sin(pose[2])
         q = full[:, :2] - np.array(pose[:2])
         b = np.stack([c * q[:, 0] + s * q[:, 1], -s * q[:, 0] + c * q[:, 1]], 1)
-        own = (b[:, 0] < OWN_FRONT) & (b[:, 0] > -OWN_REAR) & (np.abs(b[:, 1]) < OWN_SIDE)
+        own = ((b[:, 0] < OWN_FRONT - OWN_INSET) & (b[:, 0] > -OWN_REAR + OWN_INSET)
+               & (np.abs(b[:, 1]) < OWN_SIDE - OWN_INSET))
         if own.any():
             self.mem = full[~own]
         return b[(~own) & (full[:, 4] >= MIN_HITS)]

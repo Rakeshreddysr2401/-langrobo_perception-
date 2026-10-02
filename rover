@@ -582,9 +582,9 @@ nav)
   kill_match 'nav2_|lifecycle_manager|controller_server|planner_server|bt_navigator|behavior_server|velocity_smoother'
   echo "[nav] nav2 — plan a route on the nvblox map and drive it"
   echo "      frame is odom, not map: this navigates within one session."
-  echo "      Spin recovery and rotate-to-heading are ON since TODO 40 — the"
-  echo "      pivot fault (TODO 14) was fixed on 2026-08-22. Recovery order is"
-  echo "      clear costmaps → spin +90° → back up 0.30 m → spin −90° → wait."
+  echo "      Nav2 recovery order: clear costmaps → back up 0.30 m → wait. No Spin"
+  echo "      (2026-10-03): it swung the outline blind in a 45 cm gap; reach"
+  echo "      does outline-checked looks/turns instead (goal_exec)."
   echo "      Planner: Smac State Lattice (plans with the real 36 x 38 cm outline"
   echo "      and heading); controller: MPPI (tries ~1000 motions a tick). 1 cm"
   echo "      hard margin, clearance preferred softly -- NAV_PLAN.md."

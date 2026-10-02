@@ -41,6 +41,14 @@
         <ReactiveFallback name="RecoveryFallback">
           <GoalUpdated/>
           <RoundRobin name="RecoveryActions">
+            <!-- NO SPIN (2026-10-03). It came back on 2026-09-11 (comment
+                 below) because a turn shows the forward-only camera new ground.
+                 reach (2026-09-26, after it) now owns that: every goal goes
+                 through reach, whose "look" turns through goal_exec, checked
+                 against the rover's outline AND its learned pivot slide
+                 (6-16 cm per turn on this skid-steer). Nav2's Spin checks
+                 neither: in a 45 cm gap it spun at 1.0 rad/s with 1 cm of
+                 clearance and hit the obstacle beside it (owner saw it). -->
             <Sequence name="ClearingActions">
               <ClearEntireCostmap name="ClearLocalCostmap-Subtree" service_name="local_costmap/clear_entirely_local_costmap"/>
               <!-- local only: see the ClearGlobalCostmap note above -->
@@ -65,9 +73,7 @@
                  that is about 4 s. behavior_server's rotational limits must
                  stay above the 0.8 rad/s breakaway or Spin commands a rotation
                  that never happens - see nav2.yaml. -->
-            <Spin spin_dist="1.57" error_code_id="{spin_error_code}"/>
             <BackUp backup_dist="0.30" backup_speed="0.10" error_code_id="{backup_code_id}"/>
-            <Spin spin_dist="-1.57" error_code_id="{spin_error_code}"/>
             <Wait wait_duration="5.0"/>
           </RoundRobin>
         </ReactiveFallback>

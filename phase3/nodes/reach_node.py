@@ -61,6 +61,11 @@ WAIT_S = 3.0
 NAV_TIMEOUT = 120.0
 PASS_D = 0.9           # m: how far a recovery pass crawls
 MARGIN = 0.01          # = goal_exec MARGIN and nav2 footprint_padding (1 cm hard since 2026-09-27 evening, NAV_PLAN.md N1; 0.02, 0.03 before)
+# A PASS keeps 2 cm a side, not MARGIN: goal_exec refuses a pass request under
+# 0.02 m (its blind-ish creep past an edge at 5 cm/s), and reach sent MARGIN
+# (1 cm since 2026-09-27) -- so from then on EVERY pass was refused, "a pass
+# needs margin >= 0.02 m" (45 cm gap, 2026-10-03). 38 cm rover + 2 x 2 = 42 cm.
+PASS_MARGIN = 0.02
 # At the spot, only the final turn to the goal heading refused ("... in the
 # +84 deg swing"): that IS arrival. For an approach the goal heading faces
 # the object, and the thing in the swing is usually the object itself or the
@@ -610,7 +615,7 @@ class Reach(GP.Pass):
             if narrow:
                 D = min(PASS_D, max(0.4, self.dist(g)))
                 self.say(attempt=attempt, phase='pass', D=round(D, 2))
-                out, _ = GP.attempt(self, D, MARGIN, dry=False)
+                out, _ = GP.attempt(self, D, PASS_MARGIN, dry=False)
                 self.say(attempt=attempt, phase='pass', outcome=out)
                 if out == 'reached':
                     continue                        # through the tight bit: try the goal again
