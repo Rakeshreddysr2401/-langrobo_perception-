@@ -215,6 +215,20 @@ HTML = """<!doctype html>
 
   // sync mode on load (multiple phones stay consistent)
   fetch('/mode').then(r => r.json()).then(j => applyMode(j.manual)).catch(() => applyMode(false));
+
+  // ...and keep in step after that. The mode can change without this page:
+  // another phone, the brain's own tests (POST /mode), a page left open on a
+  // phone that slept. A label that only updated on load could show AUTO
+  // while the rover was in MANUAL (seen 2026-10-01) -- so a tap meant as
+  // "take control" could not be trusted to do what it said. Re-read every
+  // 2 s while visible, and at once when the phone wakes; re-render only on a
+  // real change, so a held drive button's status is not overwritten.
+  function syncMode() {
+    fetch('/mode').then(r => r.json())
+      .then(j => { if (j.manual !== manual) applyMode(j.manual); }).catch(() => {});
+  }
+  setInterval(() => { if (!document.hidden) syncMode(); }, 2000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) syncMode(); });
 </script>
 </body>
 </html>
@@ -255,7 +269,14 @@ class Handler(BaseHTTPRequestHandler):
     def _mode(self):
         q = parse_qs(urlparse(self.path).query)
         if 'manual' in q:
+            was = MODE.manual
             MODE.manual = (q['manual'][0] == 'on')
+            if MODE.manual != was:
+                # Both directions, with who: only MANUAL used to be logged (as
+                # the nav2 cancel), so an unexpected switch to AUTO -- the one
+                # that lets the robot move -- left no trace (2026-10-01).
+                print(f"teleop mode -> {'MANUAL' if MODE.manual else 'AUTO'} "
+                      f"(from {self.client_address[0]})", flush=True)
             if MODE.manual:
                 CANCEL_NAV.set()      # taking control -> cancel any active nav2 goal
             else:
