@@ -134,6 +134,16 @@ class GoalExec:
     STALL_S = 6.0
     CONTACT = 0.012       # m   pass mode: this close to the outline stops the leg
     BLOCK_STEPS = 2       # consecutive blocked steps that stop a turn or leg mid-motion
+    # TURN-AND-SHUFFLE (2026-10-03, owner: "where it can't rotate 90 deg but
+    # can up to 70, it needs to move and rotate"): a blocked turn is not
+    # refused while a short straight move -- before it, or between the largest
+    # safe part of it and the rest -- makes it fit. Forward first (the camera
+    # looks that way), smallest move first; every piece checked as a turn or
+    # leg is. Then it re-plans from where it really is (the moves slide too).
+    SHUFFLE = (0.05, -0.05, 0.10, -0.10, 0.15, -0.15, 0.20, -0.20)   # m
+    PART_STEP = math.radians(5)
+    PART_MIN = math.radians(10)
+    MAX_MANEUVERS = 3     # per goal; then refuse as before
 
     def __init__(self, P_prior=None):
         # the learned pivot, per turn direction. A prior (the node saves what
@@ -157,6 +167,8 @@ class GoalExec:
         self.backing = False
         self.turn_only = False
         self.settle_until = -1e9
+        self.maneuvers = 0
+        self._msteps = []
 
     # ── the learned slide ───────────────────────────────────────────────────
     def learn_pivot(self, p0, p1):
@@ -205,6 +217,49 @@ class GoalExec:
                 d = float(np.min(np.hypot(pts[hit, 0], pts[hit, 1])))
                 return False, f'something {d:.2f} m away is in the {math.degrees(a):+.0f} deg swing'
         return True, ''
+
+    def _after_turn(self, pts, s):
+        """Points (base_link) as seen after a turn of s about the learned pivot."""
+        t = (np.eye(2) - R(s)) @ self.P[1 if s > 0 else -1]
+        return (pts - t) @ R(s)
+
+    def maneuver(self, pts, a):
+        """A turn of `a` is blocked: the least driving that makes it fit.
+        [drive d], then the turn; or [turn s (the largest safe part), drive d],
+        then the rest. Returns those steps -- ('turn', rad) / ('drive', m) --
+        or None. The final turn is not a step: _plan makes it, re-checked."""
+        if pts is None or not len(pts):
+            return None
+        sgn = 1.0 if a > 0 else -1.0
+        parts = [0.0] + [sgn * x for x in np.arange(abs(a) - self.PART_STEP, self.PART_MIN - 1e-9, -self.PART_STEP)]
+        best = None
+        for s in parts:
+            if s:
+                if not self.turn_clear(pts, s)[0]:
+                    continue
+                q = self._after_turn(pts, s)
+            else:
+                q = pts
+            for d in self.SHUFFLE:
+                if best is not None and abs(d) >= best[0]:
+                    break
+                if self.drive_clear(q, d)[0] and self.turn_clear(q - np.array([d, 0.0]), a - s)[0]:
+                    best = (abs(d), ([('turn', s)] if s else []) + [('drive', d)])
+                    break
+        return best[1] if best else None
+
+    def _next_mstep(self, t, pose):
+        if not self._msteps:
+            self.state = 'plan'                  # the rest of the turn, re-planned from here
+            return 0.0, 0.0
+        kind, v = self._msteps.pop(0)
+        if kind == 'turn':
+            self._start_turn(t, pose, wrap(pose[2] + v), 'mstep')
+        else:
+            self._start_leg(t, pose, pose[:2] + v * np.array([math.cos(pose[2]), math.sin(pose[2])]),
+                            rev=v < 0, hold=None)
+            self.after_leg = 'mstep'
+        return 0.0, 0.0
 
     def drive_clear(self, pts, dist):
         if pts is None or len(pts) == 0:
@@ -271,6 +326,7 @@ class GoalExec:
         self.goal = np.array(goal, dtype=float)
         self.u = np.array([math.cos(self.goal[2]), math.sin(self.goal[2])])   # the goal line
         self.tries = 0
+        self.maneuvers, self._msteps = 0, []
         self.settle_until = -1e9                 # a new goal owes nothing to the last one's turn
         self.result, self.why = None, ''
         self.state = 'plan'
@@ -279,6 +335,8 @@ class GoalExec:
         self.state, self.result, self.why = 'done', 'cancelled', why
 
     def _finish(self, result, why=''):
+        if self.maneuvers:
+            why += f' -- after {self.maneuvers} turn-and-shuffle'
         self.state, self.result, self.why = 'done', result, why
 
     def line_coords(self, pose):
@@ -325,6 +383,10 @@ class GoalExec:
             self._plan(t, pose)
             if self.state in ('done', 'plan'):
                 return 0.0, 0.0
+        if self.state == 'mpause':
+            if t < self.settle_until:
+                return 0.0, 0.0                  # stopped mid-turn: let it stop rolling
+            return self._next_mstep(t, pose)
         if self.state == 'turn':
             return self._turn(t, pose, pts)
         if self.state == 'drive':
@@ -391,15 +453,34 @@ class GoalExec:
         if not self._checked:
             ok, why = self.turn_clear(pts, e)
             if not ok:
-                self._finish('refused', why)
-                return 0.0, 0.0
+                steps = self.maneuver(pts, e) if self.maneuvers < self.MAX_MANEUVERS else None
+                if not steps:
+                    self._finish('refused', why + ('' if self.maneuvers >= self.MAX_MANEUVERS
+                                                   else '; no turn-and-shuffle fits either'))
+                    return 0.0, 0.0
+                self.maneuvers += 1
+                self._msteps = steps
+                self.log.append((t, 'turn-and-shuffle', [(k, round(math.degrees(v), 1) if k == 'turn' else round(v, 2))
+                                                         for k, v in steps]))
+                return self._next_mstep(t, pose)
             self._checked = True
             self._blocked = 0
         else:
             ok, why = self.turn_clear(pts, e)            # what is left of the swing
             self._blocked = 0 if ok else self._blocked + 1
             if self._blocked >= self.BLOCK_STEPS:
-                self._finish('refused', 'blocked mid-turn: ' + why)
+                # got part of the way (the owner's "70 of 90"): stop, settle,
+                # and shuffle from HERE -- the slide and fresh points closed it
+                steps = self.maneuver(pts, e) if self.maneuvers < self.MAX_MANEUVERS else None
+                if not steps:
+                    self._finish('refused', 'blocked mid-turn: ' + why)
+                    return 0.0, 0.0
+                self.maneuvers += 1
+                self._msteps = steps
+                self.log.append((t, 'turn-and-shuffle mid-turn', [(k, round(math.degrees(v), 1) if k == 'turn'
+                                                                   else round(v, 2)) for k, v in steps]))
+                self.settle_until = t + self.SETTLE_S
+                self.state = 'mpause'
                 return 0.0, 0.0
         tol = self.YAW_TOL if self.turn_purpose in ('final', 'align') else self.FACE_TOL
         # the measured turn rate, to stop early by what it will coast -- over at
@@ -414,6 +495,8 @@ class GoalExec:
         if abs(e) <= max(tol, lead):
             self.learn_pivot(self.turn_start, pose)
             self.settle_until = t + self.SETTLE_S
+            if self.turn_purpose == 'mstep':
+                return self._next_mstep(t, pose)
             if self.turn_purpose == 'face':
                 self._start_leg(t, pose, self.aim, self.rev, hold=None)
             elif self.turn_purpose == 'toline':
@@ -503,6 +586,8 @@ class GoalExec:
                 self.state = 'plan'              # stop; _plan backs out along the line and retries
                 return 0.0, 0.0
         if left <= self.ARRIVE:
+            if self.after_leg == 'mstep':
+                return self._next_mstep(t, pose)
             if self.after_leg == 'toline':
                 self._start_turn(t, pose, self.goal[2], 'align')
             else:

@@ -212,11 +212,14 @@ def main():
     for b in bad:
         print(f'   ! {b}')
     ok_all &= not bad
-    # a turn that must be refused: a box right beside the rover
+    # a box right beside the rover: the direct turn is blocked. Before
+    # TURN-AND-SHUFFLE (2026-10-03) that had to be refused; now a short move
+    # may make it fit. Either answer, but a finished turn must be ON heading
+    # (sim_maneuver.py checks, against the true boxes, that it never touches)
     blocked = room + box(0.0, 0.33, 0.25, 0.12)
     out, e, eh, t, ex = run((0.0, 0.0, math.radians(90)), [(0.0, 0.03), (0.0, -0.03)], 1.0, 0.22, rng, blocked)
     print(f'{"box 3 cm beside, turn 90":28s} {out}: {ex.why}')
-    ok_all &= out == 'refused'
+    ok_all &= out == 'refused' or (out == 'reached' and eh < 2.5)
     out, e, eh, t, ex = run((1.2, 0.0, 0.0), [(0.0, 0.03), (0.0, -0.03)], 1.0, 0.22, rng, room + box(0.7, 0.0, 0.2, 0.4))
     print(f'{"box in the path, 1.2 m":28s} {out}: {ex.why}')
     ok_all &= out == 'refused'
