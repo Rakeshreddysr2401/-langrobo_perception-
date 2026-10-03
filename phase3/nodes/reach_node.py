@@ -429,8 +429,13 @@ class Reach(GP.Pass):
             a = math.radians(deg)
             # a turn swings the corners out (0.263 m from the centre vs 0.19 m
             # at the sides): its sweep may dip below today's gap, but never
-            # under TURN_SWEEP_MIN; it must END with more space than now
-            sweep = min(self.gap_all(pts, cells, 0.0, s) for s in np.linspace(a / 15, a, 15))
+            # under TURN_SWEEP_MIN -- against the REAL points, which is what
+            # goal_exec checks before it moves (costmap cells less their
+            # rounding read -0.6 cm where the points were 1.2 cm, live,
+            # 2026-10-03). It must END with more space than now by the
+            # costmap too: that is the start the planner will judge.
+            none = np.zeros((0, 2))
+            sweep = min(self.gap_all(pts, none, 0.0, s) for s in np.linspace(a / 15, a, 15))
             end = self.gap_all(pts, cells, 0.0, a)
             if sweep < self.TURN_SWEEP_MIN or end <= g0 + 0.01:
                 continue

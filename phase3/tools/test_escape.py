@@ -63,6 +63,16 @@ def test_turns_toward_open_side():
     assert f.said[-2].get("turn_deg", 0) > 0, f.said
 
 
+def test_turns_with_live_costmap_cells():
+    # the same spot, with the local costmap's lethal cells as reach saw them
+    # live: g0 3.0 cm (cells less their rounding); the turn must still be found
+    cells = np.load(HERE / "fixture_chest_right_cells_2026-10-03.npy").astype(np.float64)
+    f = Fake(chest_on_right(), cells)
+    f.scans = []
+    assert f.escape(1, g=(2.0, 1.0)) is True, f.said
+    assert f.turned and f.turned[0] > 0, (f.turned, f.said)
+
+
 def test_long_wall_alongside_no_turn():
     # a wall the whole length of the right side, 4.9 cm off: a corner swings
     # out to 0.263 m, the wall is 0.239 m away -- no turn fits, none is tried
