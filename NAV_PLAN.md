@@ -317,3 +317,25 @@ over two 10 cm slabs (2.42 m: 412 pts + 2.52 m: 1440 pts). Next for big targets:
 brain says "large" (door/wall/cupboard) and pixel_to_goal merges adjacent
 slabs, then takes the largest. Left for after D2/D3, because the 0.6 m now
 lands on reachable floor.
+
+### Drive tests to the door, and what they found (2026-10-03, late)
+
+| run | target | drive | why |
+|---|---|---|---|
+| 1 (D1 v1) | door frame edge, 1.53 m | 0.49 m gained, then "obstacle 0.29 m into the leg", "no path"; cancelled | **red on empty floor**: the camera mount had tipped 0.49 -> 3.02 deg nose-down; ghost_check 1913 camera-only cells 0.85-1.85 m ahead. Re-calibrated (add9474): 497, open floor clean |
+| 2 (camera fixed) | **the white pillar beside the door**, 1.61 m | **first try, finished 6.7 cm from the goal**; brain: "I have arrived at the door" | the box clipped the pillar at its edge; the door was 0.8 m behind it |
+
+**D1 v2, centre rule:** the object must also hold >= 25 % of the points in the middle
+half of the box's width (the VLM centres its box on what it means; the pillar and
+the frame sat at the edges). Tests 10/10 incl. both live cases. From in front of
+the door, the pick moved from the frame (0.75 m, 0.3 m in front of the door) to
+**the door's plane at its right end** (LiDAR: leaf 0.89-1.13 m across bearing
++8..-25 deg; pick 1.14 m ahead, 0.55 m right).
+
+**Still open: dark, plain surfaces have almost no depth.** The door is near-black
+and the D555 runs with its IR projector OFF (load-bearing for cuVSLAM, phase1/README),
+so stereo finds little texture on it: the leaf gave few points and the pick fell on
+its lighter edge. Next: for structural targets (door, wall, cupboard) ground on the
+**LiDAR**, which sees them at 25 cm: the scan points across the box's bearing range,
+nearest continuous segment, its middle. The LiDAR is the pose reference already and
+is not fooled by colour or gloss.

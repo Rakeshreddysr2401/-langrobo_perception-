@@ -105,6 +105,15 @@ THE OBJECT'S BOX, NOT ONE PIXEL (2026-09-26)
     not. The reply says which ("slab": "nearest" | "largest"), its share,
     and the slab it passed over ("skipped": {"depth_m", "points"}).
 
+    ...AND THAT FILLS THE MIDDLE OF THE BOX (same night, two drives later).
+    With the camera fixed the rover drove to its goal first time -- the white
+    pillar BESIDE the door: slabs 1.61 m (887, the pillar the box clipped at
+    its edge) and 2.43 m (1119, the door, set 0.8 m back). From in front of
+    the door: 0.75 m (981, the frame at both edges) and 1.05 m (2810, the door
+    leaf, set back in it). The VLM centres its box on what it means, so the
+    object must also hold >= CENTRE_MIN_FRAC of the points in the middle
+    CENTRE_BAND of the box's width.
+
 FRAME: odom, not map. approach.py's docstring and ros2_bridge.py's
 get_current_pose()/_nav_worker() were written assuming a `map` frame from a
 different, fuller perception stack (Isaac ROS detections_3d, a pan/tilt
@@ -203,6 +212,8 @@ CLUSTER_DEPTH = 0.10      # m of range: one object's front-to-back slab
 CLUSTER_MIN = 12          # points for a slab to count (not a speck of noise)
 SLAB_MIN_FRAC = 0.08      # ... and this share of the box's above-floor points
                           # to be THE object (door case: 86 of thousands)
+CENTRE_BAND = 0.5         # the middle half of the box's width ...
+CENTRE_MIN_FRAC = 0.25    # ... of whose points the object holds at least this
 
 
 def compute_standoff_goal(rx, ry, ox, oy, standoff):
@@ -254,12 +265,14 @@ def nearest_slab(pts: np.ndarray, cam_xy: tuple, depth_slab=None, min_n=None):
 
 
 def object_slab(pts: np.ndarray, cam_xy: tuple, depth_slab=None, min_n=None,
-                min_frac=None):
+                min_frac=None, centre=None, centre_frac=None):
     """The object in a box's points (N x 3, odom): the nearest dense slab that
-    holds >= min_frac of all the points, else the largest slab. Returns
-    (median point, indices, info) or (None, empty, {}); info = {"slab":
-    "nearest" | "largest", "share": fraction, "skipped": the nearest slab
-    when it was passed over, as {"range_m", "points"}}. Pure."""
+    holds >= min_frac of all the points -- and, given centre (a bool per
+    point: in the middle band of the box), >= centre_frac of the middle
+    band's points -- else the largest slab. Returns (median point, indices,
+    info) or (None, empty, {}); info = {"slab": "nearest" | "largest",
+    "share": fraction, "skipped": the nearest slab when it was passed over,
+    as {"range_m", "points"}, "candidates"}. Pure."""
     depth_slab = CLUSTER_DEPTH if depth_slab is None else depth_slab
     min_n = CLUSTER_MIN if min_n is None else min_n
     min_frac = SLAB_MIN_FRAC if min_frac is None else min_frac
@@ -275,7 +288,14 @@ def object_slab(pts: np.ndarray, cam_xy: tuple, depth_slab=None, min_n=None,
     ok = np.nonzero(counts >= min_n)[0]
     if len(ok) == 0:
         return none
-    big = np.nonzero(counts >= max(min_n, min_frac * n))[0]
+    big = counts >= max(min_n, min_frac * n)
+    if centre is not None and centre.any():
+        # the VLM centres its box on what it means; a neighbour it clipped
+        # (the pillar beside a door, the frame round it) sits at the edges
+        centre_frac = CENTRE_MIN_FRAC if centre_frac is None else centre_frac
+        c = np.concatenate([[0], np.cumsum(centre[order])])
+        big &= (c[ends] - c[:n]) >= centre_frac * c[-1]
+    big = np.nonzero(big)[0]
     if len(big):
         i, kind = big[0], 'nearest'
     else:
@@ -492,7 +512,10 @@ class PixelToGoal(Node):
         tr = cam_to_odom.transform.translation
         pts = cam @ _quat_matrix(cam_to_odom.transform.rotation).T + np.array([tr.x, tr.y, tr.z])
         keep = (pts[:, 2] > FLOOR_Z) & (pts[:, 2] < TOP_Z)
-        centre, idx, info = object_slab(pts[keep], (tr.x, tr.y))
+        bx0, bx1 = min(box[0], box[2]), max(box[0], box[2])
+        half = CENTRE_BAND * (bx1 - bx0) / 2
+        mid = np.abs(us - (bx0 + bx1) / 2) <= half
+        centre, idx, info = object_slab(pts[keep], (tr.x, tr.y), centre=mid[keep])
         if centre is None:
             return None
         info["box_points"] = int(keep.sum())

@@ -67,6 +67,50 @@ def test_scattered_clutter_takes_largest():
     assert info["slab"] == "largest" and abs(c[0] - 4.0) < 0.05, (c, info)
 
 
+def mid(pts, x0=-0.4, x1=0.4, band=0.5):
+    """the centre mask _ground_box builds, here on y (camera at the origin)"""
+    return np.abs(pts[:, 1] - (x0 + x1) / 2) <= band * (x1 - x0) / 2
+
+
+def test_pillar_beside_door():
+    # live 2026-10-03: pillar 1.61 m (887) clipped at the box's left edge,
+    # the door 2.43 m (1119) behind it, centred
+    pillar = wall(1.61, 887, y=(0.25, 0.4))
+    door = wall(2.43, 1119, y=(-0.4, 0.3))
+    pts = np.vstack([pillar, door])
+    c, _, info = p2g.object_slab(pts, (0.0, 0.0))
+    assert abs(c[0] - 1.61) < 0.05, "without the centre rule the pillar wins"
+    c, _, info = p2g.object_slab(pts, (0.0, 0.0), centre=mid(pts))
+    assert abs(c[0] - 2.43) < 0.05 and info["skipped"]["range_m"] < 1.7, (c, info)
+
+
+def test_frame_round_door():
+    # live 2026-10-03: frame 0.75 m (981) at both edges, the leaf 1.05 m (2810)
+    frame = np.vstack([wall(0.75, 490, y=(-0.4, -0.32)), wall(0.75, 491, y=(0.32, 0.4))])
+    leaf = wall(1.05, 2810, y=(-0.32, 0.32))
+    pts = np.vstack([frame, leaf])
+    c, _, info = p2g.object_slab(pts, (0.0, 0.0), centre=mid(pts))
+    assert abs(c[0] - 1.05) < 0.05, (c, info)
+
+
+def test_open_chair_still_the_chair():
+    # legs at the edges, seat + backrest across the middle, wall behind
+    legs = np.vstack([wall(1.0, 150, y=(-0.4, -0.35)), wall(1.0, 150, y=(0.35, 0.4))])
+    seat = wall(1.05, 400, y=(-0.25, 0.25))
+    back = wall(2.0, 1500)
+    pts = np.vstack([legs, seat, back])
+    c, _, info = p2g.object_slab(pts, (0.0, 0.0), centre=mid(pts))
+    assert c[0] < 1.2, (c, info)
+
+
+def test_bottle_with_centre():
+    bottle = wall(1.5, 600, y=(-0.035, 0.035), z=(0.05, 0.30))
+    back = wall(2.5, 2400, y=(-0.4, 0.4))
+    pts = np.vstack([bottle, back])
+    c, _, info = p2g.object_slab(pts, (0.0, 0.0), centre=mid(pts))
+    assert abs(c[0] - 1.5) < 0.05, (c, info)
+
+
 def test_single_object():
     c, idx, info = p2g.object_slab(wall(2.0, 500), (0.0, 0.0))
     assert abs(c[0] - 2.0) < 0.05 and info["slab"] == "nearest" and "skipped" not in info
