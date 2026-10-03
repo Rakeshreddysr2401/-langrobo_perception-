@@ -1,5 +1,19 @@
 # Open issues — where things stand, 2026-10-03
 
+## 2026-10-03 (late) — Pi 5 ssh/IDE, ports, real-rover bring-up
+
+Focus is the **real rover only**; the Mitra twin / Gazebo is parked (owner reviews it later).
+
+| item | finding | status |
+|---|---|---|
+| ssh to the Pi 5 | 192.168.1.16 answers (MAC 2c:cf:67:24:d6:bf, hostname `rakhi24-desktop`, `~/ros2_ws` there); sshd on :22, all interfaces. 192.168.1.22 is **no host at all** (no ARP reply, no route). Nothing on the Jetson, Pi 5 or laptop (.17) mentions .22, so it is a saved connection in the **IDE client** (JetBrains Gateway/PyCharm on the machine at .6, which does log into the Pi 5 by password) | **owner: edit/delete the saved .22 connection in Gateway; recreate it as rakhi24@192.168.1.16, port 22, project `/home/rakhi24/ros2_ws`** |
+| PyCharm can't open `~/ros2_ws` on the Pi 5 | `.idea/workspace.xml` was corrupt (a truncated save left `mponent>\n</project>` after the end, "junk after document element", line 257); PyCharm logged "Save blocked". It also has only the old 252 backend; the client is 262, so Gateway will download 262 the first time | fixed: moved aside to `.idea/workspace.xml.corrupt-2026-10-03` (per-user IDE state, untracked; PyCharm rebuilds it) |
+| ports, Pi 5 | TCP: 22 (ssh), 8091 (teleop), 127.0.0.1:8090 (agent_node), 127.0.0.1:2024 (Studio). UDP: 8888 micro-ROS, 7000-7004 + 74xx DDS, 11811 discovery server. No strays, no duplicates | clean |
+| ports, Jetson | TCP: 22, PyCharm remote-dev on 127.0.0.1 only (5990/63342/...), 5201 iperf3 server (left from the switch test), 6566 (saned) | clean. iperf3 is harmless; stop it if unwanted |
+| Mac mini LLM/VLM | `singireddys-mac-mini.local` does not resolve from the Pi 5; .10 pings but :8080 and :22 are **refused** | **open: start llama.cpp on the Mac (or find its new IP). Until then the brain can't think or see** |
+| bring-up | `./rover up` exit 0: IR 30 Hz, depth 28.6, VO 28.4, gyro 203, lidar 10, lidar odom 10, `/odom` 20 (LiDAR-anchored, sd 0.6-0.7 cm), cuVSLAM 44 landmarks, slam map 0.5, nvblox 4.9, costmaps 0.9/1.7, colour for Pi 5 4.6, wheel_state 20-21.5; teleop AUTO; RViz on the laptop (.17) | up |
+| Studio + agent_node both up | both publish `/cmd_vel` and poll Telegram | known (see STARTUP.md): stop Studio before driving from Telegram |
+
 ## 2026-10-03 (evening) — wired network: the Waveshare switch and the D555 (PARKED, owner tests later)
 
 Goal: D555 + Jetson + Pi 5 on one gigabit switch (Waveshare Industrial 5P, SKU TIFPS0683, RTL8367N),
