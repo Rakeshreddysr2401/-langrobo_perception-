@@ -148,6 +148,7 @@ container can't have added to it.
 Run:  python3 pixel_to_goal.py
 """
 import json
+import re
 import math
 import os
 import time
@@ -159,7 +160,7 @@ from rclpy.node import Node
 from rclpy.time import Time
 from cv_bridge import CvBridge
 from geometry_msgs.msg import PointStamped
-from sensor_msgs.msg import CameraInfo, Image
+from sensor_msgs.msg import CameraInfo, Image, LaserScan
 from std_msgs.msg import String
 from tf2_ros import Buffer, TransformListener
 
@@ -214,6 +215,15 @@ SLAB_MIN_FRAC = 0.08      # ... and this share of the box's above-floor points
                           # to be THE object (door case: 86 of thousands)
 CENTRE_BAND = 0.5         # the middle half of the box's width ...
 CENTRE_MIN_FRAC = 0.25    # ... of whose points the object holds at least this
+# Big flat things the LiDAR (one plane at 25 cm) sees better than the camera:
+# a dark, plain door gives stereo almost nothing with the emitter off
+# (2026-10-03). Matched against the brain's description (";what=").
+LIDAR_TARGETS = re.compile(r'\b(doors?|doorway|entrance|gate|walls?|cupboard|wardrobe|almirah|'
+                           r'cabinet|fridge|refrigerator|sofa|couch)\b', re.I)
+LIDAR_MIN_PTS = 4         # scan points in the box's middle for a surface
+LIDAR_MIN_FRAC = 0.3      # ... and this share of them on it (not a stray return)
+SCAN_RING_S = 3.0         # scans kept, in odom, to pair with a photo
+SCAN_MAX_DT_S = 0.15      # a scan this close to the photo is "the same moment"
 
 
 def compute_standoff_goal(rx, ry, ox, oy, standoff):
@@ -319,6 +329,58 @@ def object_slab(pts: np.ndarray, cam_xy: tuple, depth_slab=None, min_n=None,
     return np.median(pts[idx], axis=0), idx, info
 
 
+def bearing_band(us, fx: float, cx: float, rot: np.ndarray) -> tuple:
+    """Horizontal bearings (odom, radians) of the camera rays through colour
+    columns us (centre row; rot = camera optical -> odom rotation). Returns
+    (low, high), unwrapped so high - low < pi. Pure."""
+    us = np.asarray(us, dtype=np.float64)
+    rays = np.stack([(us - cx) / fx, np.zeros_like(us), np.ones_like(us)], 1) @ rot.T
+    b = np.unwrap(np.arctan2(rays[:, 1], rays[:, 0]))
+    return float(b.min()), float(b.max())
+
+
+def lidar_surface(scan_xy: np.ndarray, cam_xy: tuple, band: tuple, min_n=None, min_frac=None):
+    """The nearest continuous surface the LiDAR saw inside a bearing band seen
+    from the camera: (x, y, range_m, n_points, info) or None. scan_xy = N x 2
+    odom points of the scan taken with the photo. Pure."""
+    min_n = LIDAR_MIN_PTS if min_n is None else min_n
+    min_frac = LIDAR_MIN_FRAC if min_frac is None else min_frac
+    if scan_xy is None or len(scan_xy) == 0:
+        return None
+    d = scan_xy - np.asarray(cam_xy)
+    b = np.arctan2(d[:, 1], d[:, 0])
+    lo, hi = band
+    mid = (lo + hi) / 2
+    rel = np.arctan2(np.sin(b - mid), np.cos(b - mid))   # wrap-safe
+    inside = np.abs(rel) <= (hi - lo) / 2
+    pts = scan_xy[inside]
+    if len(pts) < min_n:
+        return None
+    pts3 = np.column_stack([pts, np.zeros(len(pts))])
+    c, idx, info = object_slab(pts3, cam_xy, min_n=min_n, min_frac=min_frac)
+    if c is None:
+        return None
+    rng = float(np.hypot(c[0] - cam_xy[0], c[1] - cam_xy[1]))
+    info["band_points"] = int(len(pts))
+    return float(c[0]), float(c[1]), rng, len(idx), info
+
+
+def parse_query_opts(opts: str) -> dict:
+    """"box=x0,y0,x1,y1;what=the door" -> {"box": [..] or None, "what": str}"""
+    out = {"box": None, "what": ""}
+    for part in opts.split(';'):
+        k, _, v = part.partition('=')
+        if k == 'box':
+            try:
+                box = [float(a) for a in v.split(',')]
+                out["box"] = box if len(box) == 4 else None
+            except ValueError:
+                pass
+        elif k == 'what':
+            out["what"] = v.strip()
+    return out
+
+
 def _yaw_from_quat(q) -> float:
     """Yaw (radians) about Z from quaternion q. Same manual extraction as
     fusion_node's — no tf2_geometry_msgs in the frozen image, see the module
@@ -355,6 +417,7 @@ class PixelToGoal(Node):
         self._ring = deque()                 # (stamp_ns, depth array)
         self._snaps = OrderedDict()          # stamp_ns -> {depth, cam_tf, dt_ms}
         self._snap_pending = []              # (stamp_ns, first try, monotonic)
+        self._scans = deque()                # (stamp_ns, N x 2 odom points)
 
         self.create_subscription(
             CameraInfo, '/camera/camera0/color/camera_info', self._on_camera_info, 5)
@@ -364,9 +427,36 @@ class PixelToGoal(Node):
             PointStamped, '/vision/pixel_query', self._on_query, 5)
         self.create_subscription(
             PointStamped, '/vision/pixel_snapshot', self._on_snapshot, 5)
+        self.create_subscription(LaserScan, '/scan', self._on_scan, 2)
         self.create_timer(0.1, self._retry_snapshots)
         self._result_pub = self.create_publisher(String, '/vision/pixel_result', 5)
         self.get_logger().info('pixel_to_goal up — waiting for /vision/pixel_query')
+
+    def _on_scan(self, msg: LaserScan) -> None:
+        """Keep the last SCAN_RING_S of scans, in odom, for photos to pair with."""
+        stamp_ns = msg.header.stamp.sec * 1_000_000_000 + msg.header.stamp.nanosec
+        try:
+            tf = self._tf_buffer.lookup_transform('odom', msg.header.frame_id, Time(nanoseconds=stamp_ns))
+        except Exception:
+            return                            # TF not in yet for this stamp: skip the scan
+        r = np.asarray(msg.ranges, dtype=np.float64)
+        a = msg.angle_min + np.arange(len(r)) * msg.angle_increment
+        ok = np.isfinite(r) & (r > msg.range_min) & (r < msg.range_max)
+        loc = np.stack([r[ok] * np.cos(a[ok]), r[ok] * np.sin(a[ok]), np.zeros(int(ok.sum()))], 1)
+        tr = tf.transform.translation
+        xy = (loc @ _quat_matrix(tf.transform.rotation).T)[:, :2] + np.array([tr.x, tr.y])
+        self._scans.append((stamp_ns, xy))
+        while self._scans and stamp_ns - self._scans[0][0] > SCAN_RING_S * 1e9:
+            self._scans.popleft()
+
+    def _scan_near(self, stamp_ns: int):
+        """The kept scan nearest stamp_ns (0 = newest), within SCAN_MAX_DT_S, or None."""
+        if not self._scans:
+            return None
+        if not stamp_ns:
+            return self._scans[-1][1]
+        s_ns, xy = min(self._scans, key=lambda f: abs(f[0] - stamp_ns))
+        return xy if abs(s_ns - stamp_ns) <= SCAN_MAX_DT_S * 1e9 else None
 
     def _on_camera_info(self, msg: CameraInfo) -> None:
         self._camera_info = msg
@@ -398,7 +488,8 @@ class PixelToGoal(Node):
             return None, ('tf_not_yet' if 'Extrapolation' in name else f'tf_failed:{name}')
 
     def _store_snapshot(self, stamp_ns: int, depth, cam_tf, dt_s: float) -> dict:
-        snap = {'depth': depth, 'cam_tf': cam_tf, 'dt_ms': round(dt_s * 1000, 1)}
+        snap = {'depth': depth, 'cam_tf': cam_tf, 'dt_ms': round(dt_s * 1000, 1),
+                'scan': self._scan_near(stamp_ns)}
         self._snaps[stamp_ns] = snap
         while len(self._snaps) > SNAPSHOTS:
             self._snaps.popitem(last=False)
@@ -539,14 +630,8 @@ class PixelToGoal(Node):
 
     def _on_query(self, msg: PointStamped) -> None:
         req_id, _, opts = msg.header.frame_id.partition(';')
-        box = None
-        if opts.startswith('box='):
-            try:
-                box = [float(a) for a in opts[4:].split(',')]
-                if len(box) != 4:
-                    box = None
-            except ValueError:
-                box = None
+        q = parse_query_opts(opts)
+        box, what = q["box"], q["what"]
         u, v = msg.point.x, msg.point.y
         now = time.monotonic()
         stamp_ns = msg.header.stamp.sec * 1_000_000_000 + msg.header.stamp.nanosec
@@ -635,6 +720,25 @@ class PixelToGoal(Node):
             ox, oy = t.x + rot_x, t.y + rot_y
             n_pts = 0
             extra_log = f'window ±{half}px' + (' (box: nothing above the floor)' if box else '')
+        # Big flat things: the LiDAR's nearest surface across the middle of the
+        # box's bearing, not the camera's (LIDAR_TARGETS).
+        lidar = None
+        if box is not None and LIDAR_TARGETS.search(what):
+            scan = snap['scan'] if snap is not None else self._scan_near(0)
+            bx0, bx1 = min(box[0], box[2]), max(box[0], box[2])
+            half_w = CENTRE_BAND * (bx1 - bx0) / 2
+            band = bearing_band([(bx0 + bx1) / 2 - half_w, (bx0 + bx1) / 2 + half_w], fx, cx,
+                                _quat_matrix(cam_to_odom.transform.rotation))
+            lidar = lidar_surface(scan, (t.x, t.y), band)
+            if lidar is not None:
+                cam_m = depth_m
+                ox, oy, depth_m, n_lidar, linfo = lidar
+                extra_log = (f'LIDAR surface for {what!r}: {n_lidar} of {linfo["band_points"]} '
+                             f'scan points, camera said {cam_m:.2f} m; ' + extra_log)
+            else:
+                extra_log = (f'LIDAR: no surface for {what!r} '
+                             f'({"no scan with the photo" if scan is None else "too few points"}); '
+                             + extra_log)
         self.get_logger().info(
             f'query {req_id} ({ui},{vi}): depth {depth_m:.2f}m ({extra_log})')
 
@@ -658,7 +762,10 @@ class PixelToGoal(Node):
         forward = dx * math.cos(r_yaw) + dy * math.sin(r_yaw)
         left = -dx * math.sin(r_yaw) + dy * math.cos(r_yaw)
 
-        extra = {"at_capture": snap is not None, "region": region is not None}
+        extra = {"at_capture": snap is not None, "region": region is not None,
+                 "source": "lidar" if lidar is not None else "camera"}
+        if lidar is not None:
+            extra["camera_m"] = round(cam_m, 2)
         if region is not None:
             extra["points"] = n_pts
             extra.update({k: slab[k] for k in ("slab", "share", "skipped", "candidates") if k in slab})

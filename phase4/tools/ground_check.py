@@ -93,7 +93,8 @@ def main():
 
     req_id = uuid.uuid4().hex[:8]
     q = PointStamped()
-    q.header.frame_id = req_id + ";box=" + ",".join(f"{b:.0f}" for b in box)
+    q.header.frame_id = (req_id + ";box=" + ",".join(f"{b:.0f}" for b in box)
+                         + ";what=" + a.description.replace(";", " ").replace("=", " "))
     q.header.stamp = msg.header.stamp          # ground on THIS photo's depth + pose
     q.point.x, q.point.y = float(u), float(v)
     pub.publish(q)
@@ -111,7 +112,7 @@ def main():
         d.text((box[0] + 4, box[1] + 4),
                f'{a.description}: {reply["depth_m"]} m, {reply.get("slab", "pixel")}', fill=(255, 0, 0))
         print(f'\n=> object {rel["forward_m"]} m ahead, {rel["left_m"]} m left '
-              f'(bearing {rel["bearing_deg"]} deg); slab: {reply.get("slab", "pixel")}'
+              f'(bearing {rel["bearing_deg"]} deg); source: {reply.get("source", "camera")}; slab: {reply.get("slab", "pixel")}'
               + (f'; passed over {reply["skipped"]}' if "skipped" in reply else ""))
     im.save("/tmp/ground_check.jpg")
     print("photo with the box: /tmp/ground_check.jpg")

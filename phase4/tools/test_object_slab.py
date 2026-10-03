@@ -111,6 +111,62 @@ def test_bottle_with_centre():
     assert abs(c[0] - 1.5) < 0.05, (c, info)
 
 
+# camera at the origin looking along odom +x: optical z -> x, x -> -y, y -> -z
+R_FWD = np.array([[0.0, 0.0, 1.0], [-1.0, 0.0, 0.0], [0.0, -1.0, 0.0]])
+
+
+def test_bearing_band_left_right():
+    lo, hi = p2g.bearing_band([100, 300], fx=450.0, cx=448.0, rot=R_FWD)
+    assert 0 < lo < hi, (lo, hi)                   # left of the image = left (+y)
+    lo, hi = p2g.bearing_band([600, 800], fx=450.0, cx=448.0, rot=R_FWD)
+    assert lo < hi < 0, (lo, hi)
+
+
+def line(x0, y0, x1, y1, n):
+    return np.column_stack([np.linspace(x0, x1, n), np.linspace(y0, y1, n)])
+
+
+def test_lidar_door_behind_pillar():
+    # live 2026-10-03: pillar ~1.6 m off to one side, the door ~2.45 m in the middle
+    scan = np.vstack([line(1.6, 0.25, 1.6, 0.6, 30), line(2.45, -0.5, 2.45, 0.2, 60)])
+    band = (np.radians(-8), np.radians(4))           # the box's middle half
+    x, y, rng, n, info = p2g.lidar_surface(scan, (0.0, 0.0), band)
+    assert abs(x - 2.45) < 0.05 and abs(rng - 2.45) < 0.08, (x, y, rng, info)
+
+
+def test_lidar_door_in_its_frame():
+    # frame at 0.75 m at both sides, leaf 1.05 m across the middle
+    scan = np.vstack([line(0.75, 0.35, 0.75, 0.5, 15), line(0.75, -0.5, 0.75, -0.35, 15),
+                      line(1.05, -0.32, 1.05, 0.32, 60)])
+    band = (np.radians(-8), np.radians(8))
+    x, y, rng, n, info = p2g.lidar_surface(scan, (0.0, 0.0), band)
+    assert abs(x - 1.05) < 0.05 and abs(y) < 0.1, (x, y, info)
+
+
+def test_lidar_nothing_in_band():
+    scan = line(1.0, 1.0, 1.0, 2.0, 40)                 # all off to the left
+    assert p2g.lidar_surface(scan, (0.0, 0.0), (np.radians(-5), np.radians(5))) is None
+    assert p2g.lidar_surface(None, (0.0, 0.0), (0.0, 0.1)) is None
+
+
+def test_lidar_band_across_pi():
+    # looking backwards (bearing +-180 deg): the band must not wrap into "everything"
+    scan = np.vstack([line(-2.0, -0.2, -2.0, 0.2, 40), line(2.0, -0.2, 2.0, 0.2, 40)])
+    x, *_ = p2g.lidar_surface(scan, (0.0, 0.0), (np.radians(175), np.radians(185)))
+    assert x < 0, x
+
+
+def test_query_opts_and_targets():
+    q = p2g.parse_query_opts("box=1,2,3,4;what=the brown door")
+    assert q == {"box": [1.0, 2.0, 3.0, 4.0], "what": "the brown door"}, q
+    assert p2g.parse_query_opts("box=1,2,3")["box"] is None
+    assert p2g.parse_query_opts("")["what"] == ""
+    for yes in ("the door", "Doorway to the kitchen", "the white wall", "wardrobe", "the sofa"):
+        assert p2g.LIDAR_TARGETS.search(yes), yes
+    for no in ("the bottle", "indoor plant", "the outdoor shoes", "the chair", "walled garden poster"):
+        assert not p2g.LIDAR_TARGETS.search(no), no
+
+
 def test_single_object():
     c, idx, info = p2g.object_slab(wall(2.0, 500), (0.0, 0.0))
     assert abs(c[0] - 2.0) < 0.05 and info["slab"] == "nearest" and "skipped" not in info
