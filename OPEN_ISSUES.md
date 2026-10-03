@@ -1,5 +1,33 @@
 # Open issues — where things stand, 2026-10-03
 
+## TRIAL in place: LiDAR grounding for doors / walls (G1) -- verify or remove
+
+**What it does:** when the brain asks to approach a door, wall, cupboard, wardrobe,
+fridge or sofa, `pixel_to_goal` measures it with the LiDAR (the nearest continuous
+surface across the middle of the VLM box's bearing) instead of the camera.
+Everything else is unchanged.
+
+| proven | not proven yet |
+|---|---|
+| 16 offline tests; live "the wall" under the desk: 1.24 m, past the legs and the bin (camera said 1.08) | **the real door** (closed, open, at an angle); a full "go near the door" drive through it |
+
+Known weak spots: an **open** door (the LiDAR may measure the next room); a wall
+with furniture in front (takes the furniture); only `approach` sends `what=`
+(`locate.py`, `photo_recall.py` do not).
+
+**Test:** rover ~2 m facing the closed door, then
+`docker exec rover bash -lc 'source /opt/ros/jazzy/setup.bash; python3 /opt/rover4/tools/ground_check.py "the door"'`
+(never drives) and compare with the LiDAR; again at an angle and with the door open.
+
+**If it does not work:**
+- *Turn it off:* `LIDAR_GROUNDING = False` in `phase4/nodes/pixel_to_goal.py`, then `./rover vlm`.
+- *Remove it:* `git revert ad1319f 9fda655` (Jetson) and, on the Pi 5,
+  `git revert 72e0bae` + restart the brain (the Pi side alone is harmless: the
+  Jetson ignores `what=` when the trial is off or reverted).
+
+**Keep regardless** (proven tonight): the camera re-calibration (add9474) and
+D1 -- ignore specks, prefer the middle of the box (866a97d, 1dc6d96).
+
 ## 2026-10-03 (late) — Pi 5 ssh/IDE, ports, real-rover bring-up
 
 Focus is the **real rover only**; the Mitra twin / Gazebo is parked (owner reviews it later).

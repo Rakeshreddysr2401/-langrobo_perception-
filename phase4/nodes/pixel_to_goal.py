@@ -215,6 +215,10 @@ SLAB_MIN_FRAC = 0.08      # ... and this share of the box's above-floor points
                           # to be THE object (door case: 86 of thousands)
 CENTRE_BAND = 0.5         # the middle half of the box's width ...
 CENTRE_MIN_FRAC = 0.25    # ... of whose points the object holds at least this
+# TRIAL (G1, 2026-10-03, NAV_PLAN.md "G1"): False puts every target back on the
+# camera (D1 rules) -- then `./rover vlm`. Nothing else needs undoing: the Pi 5
+# still sends ";what=", which is then ignored.
+LIDAR_GROUNDING = True
 # Big flat things the LiDAR (one plane at 25 cm) sees better than the camera:
 # a dark, plain door gives stereo almost nothing with the emitter off
 # (2026-10-03). Matched against the brain's description (";what=").
@@ -732,7 +736,7 @@ class PixelToGoal(Node):
         # Big flat things: the LiDAR's nearest surface across the middle of the
         # box's bearing, not the camera's (LIDAR_TARGETS).
         lidar = None
-        if box is not None and LIDAR_TARGETS.search(what):
+        if LIDAR_GROUNDING and box is not None and LIDAR_TARGETS.search(what):
             scan = snap['scan'] if snap is not None else self._scan_near(0)
             bx0, bx1 = min(box[0], box[2]), max(box[0], box[2])
             half_w = CENTRE_BAND * (bx1 - bx0) / 2
