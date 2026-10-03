@@ -12,6 +12,7 @@ Focus is the **real rover only**; the Mitra twin / Gazebo is parked (owner revie
 | ports, Jetson | TCP: 22, PyCharm remote-dev on 127.0.0.1 only (5990/63342/...), 5201 iperf3 server (left from the switch test), 6566 (saned) | clean. iperf3 is harmless; stop it if unwanted |
 | Mac mini LLM/VLM | `singireddys-mac-mini.local` does not resolve from the Pi 5; .10 pings but :8080 and :22 are **refused** | **open: start llama.cpp on the Mac (or find its new IP). Until then the brain can't think or see** |
 | bring-up | `./rover up` exit 0: IR 30 Hz, depth 28.6, VO 28.4, gyro 203, lidar 10, lidar odom 10, `/odom` 20 (LiDAR-anchored, sd 0.6-0.7 cm), cuVSLAM 44 landmarks, slam map 0.5, nvblox 4.9, costmaps 0.9/1.7, colour for Pi 5 4.6, wheel_state 20-21.5; teleop AUTO; RViz on the laptop (.17) | up |
+| Gazebo twin on the laptop | `home_real` world was still running from 18:42 (domain 42, so it never touched the real wheels, but it was using laptop CPU next to RViz) | stopped with `./mitra down`. Twin brain (Pi 5) and twin Jetson stack were already down. Restart all: `fleet.sh twin up` on the Pi 5 |
 | Studio + agent_node both up | both publish `/cmd_vel` and poll Telegram | known (see STARTUP.md): stop Studio before driving from Telegram |
 
 ## 2026-10-03 (evening) — wired network: the Waveshare switch and the D555 (PARKED, owner tests later)
