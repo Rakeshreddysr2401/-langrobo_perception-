@@ -1,5 +1,30 @@
 # Open issues — where things stand, 2026-10-03
 
+## 2026-10-03 (evening) — wired network: the Waveshare switch and the D555 (PARKED, owner tests later)
+
+Goal: D555 + Jetson + Pi 5 on one gigabit switch (Waveshare Industrial 5P, SKU TIFPS0683, RTL8367N),
+no WiFi between Jetson and Pi 5. **Today the camera is back on its direct cable (works) and the Pi 5
+talks to the Jetson over WiFi.** Jetson enP8p1s0 = 192.168.11.70 only, MTU 9000, as before.
+
+| measured | result |
+|---|---|
+| D555 network config (`~/rs_build/rs-dds-config`, read-only) | MTU **9000**; `--mtu 1500` refused: "Camera FW supports only MTU 9000" (FW 7.56.19919.4144). Nothing written to the camera |
+| D555 streaming, direct cable | 4764 of 5000 packets are **9010-byte** frames; 659 Mbit/s; IR 30 Hz, depth 30 Hz |
+| D555 through the switch (2 ports, same cable + injector, full 2-3 min boot) | only <= 700-byte packets arrive (discovery, IMU); no jumbo frame ever; driver "zeroed intrinsics" / "No RealSense devices" / emitter "control channel not ready" |
+| switch port lights | Jetson port yellow + orange, camera port yellow only (camera leg possibly negotiated < 1000 Mb/s) |
+| Jetson <-> Pi 5 through the switch (DDS, 200 kB messages) | 160/160 each way at MTU 1500; 0/160 when the Jetson port was 9000 (the Pi 5 is 1500) |
+
+Waveshare's wiki claims "forwarding 9216 bytes huge data packet". Two explanations remain, both on
+the switch side: (1) the board only forwards ~1536-byte frames, or (2) the camera's port negotiates
+100 Mb/s with this switch (a 660 Mbit/s stream cannot fit). The clean test: Jetson <-> Pi 5 through the
+switch with both at MTU 9000 (`sudo ip link set eth0 mtu 9000` on the Pi 5, temporary) and a ping-size
+sweep. Options: a USB 3 gigabit adapter on the Jetson (camera direct, switch on the adapter) --
+recommended; D555 FW 7.58.38448.10612 (librealsense 2.58.2's, "enables configuration of MTU size and
+delay") then `rs-dds-config --mtu 1500 --transmission-delay N`, only helps under (1); or a switch with
+real 9K jumbo. Traps found on the way (memory note): the D555 refuses pings > 1472 bytes although its
+data is jumbo; it takes ~2 min to boot; plain `rs-enumerate-devices` in the container has no DDS (use
+`LD_LIBRARY_PATH=/root/librealsense/install/lib`).
+
 ## 2026-10-03 (night) — the Mitra twin (simulator) and what it found
 
 A laptop Gazebo twin of this rover: github.com/Rakeshreddysr2401/mitra_sim
