@@ -374,3 +374,13 @@ space, ties toward the goal, done by goal_exec (it re-checks the swing about
 its learned pivot); and after escaping a refused START, plan again at once.
 Tests: `phase3/tools/test_escape.py` (real points: turns left; a wall the whole
 length of the side or a corridor: no turn).
+
+**Removed (owner, same night):** the reach escape changes made for this --
+turn-in-place escape, 3-point turns, ESCAPE_NEAR 0.05, the re-plan after a
+refused start, the per-turn logging and `test_escape.py` with its two fixtures
+(commits 2b0c9d8, d3e3549, d631ace, 20ee5ac, reverted). reach is back to its
+straight-only escape at 3 cm. The owner will pick the approach. Facts kept for
+it: beside the chest, reach's own points (LiDAR + depth memory, 29,828) put
+the body 3.7 cm off; turns in place swept 0.1-1.2 cm; a 3-point turn (left 45,
+forward 10 cm, left 60) ended 10.8 cm clear on those points; MPPI's costmap
+pads 0.02 while the planner's pads 0.04 (unchanged).

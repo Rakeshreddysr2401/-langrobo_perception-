@@ -324,20 +324,8 @@ class Reach(GP.Pass):
     # a few cm STRAIGHT (a turn sweeps the corners into the wall): forward
     # first, back only a little (blind behind below the LiDAR plane), and
     # only a move whose whole sweep keeps at least today's gap.
-    # Pinned = closer than the PLANNER's start check needs: global
-    # footprint_padding (0.04 since 2026-10-03, nav2.yaml) + 1 cm. It was 0.03
-    # when padding was 0.01; left at 0.03, a rover 4.9 cm from a chest of
-    # drawers got "start occupied" 8 times while escape saw nothing to do
-    # (2026-10-03 night). Change with footprint_padding.
-    ESCAPE_NEAR = 0.05
+    ESCAPE_NEAR = 0.03                     # m: pinned = something this close to the outline
     ESCAPE_STEPS = (0.05, 0.10, -0.05)     # m along the heading
-    # ...and turns, when no straight move opens space: furniture ALONG one
-    # side, open on the other. Same night: right side 4.9 cm, left free; a
-    # left 90 deg turn's worst gap was 1.2 cm, back 5 cm + left 180 1.5 cm,
-    # while every straight move closed in. goal_exec re-checks the real swing
-    # (its learned pivot) before it moves, and refuses what does not fit.
-    ESCAPE_TURNS_DEG = (30, -30, 60, -60, 90, -90)
-    TURN_SWEEP_MIN = 0.01                  # m: goal_exec's MARGIN (it re-checks the swing about its learned pivot)
 
     @staticmethod
     def body_gap(pts, dx=0.0):
@@ -369,15 +357,9 @@ class Reach(GP.Pass):
         b = np.stack([c * wx + s * wy, -s * wx + c * wy], 1)
         return b[np.hypot(b[:, 0], b[:, 1]) < 0.8]
 
-    def gap_all(self, pts, cells, dx=0.0, th=0.0):
+    def gap_all(self, pts, cells, dx=0.0):
         """The closer of: raw points, and costmap cells less CELL_SLACK --
-        the planner refuses what its costmap says, not what the LiDAR says.
-        th: the outline turned th in place first (points seen from it)."""
-        if th:
-            c, s = math.cos(th), math.sin(th)
-            rot = np.array([[c, -s], [s, c]])
-            pts = pts @ rot if pts is not None and len(pts) else pts
-            cells = cells @ rot if cells is not None and len(cells) else cells
+        the planner refuses what its costmap says, not what the LiDAR says."""
         return min(self.body_gap(pts, dx), self.body_gap(cells, dx) - self.CELL_SLACK)
 
     @staticmethod
@@ -398,9 +380,8 @@ class Reach(GP.Pass):
         pts = np.vstack(scans + [self.dobs.points_base(self.pose)]) if scans else None
         return self.outside_body(pts), self.outside_body(self.costmap_cells())
 
-    def escape(self, attempt, g=None):
-        """One short straight move -- or, when none opens space, one turn in
-        place -- away from contact. True if it moved."""
+    def escape(self, attempt):
+        """One short straight move away from contact. True if it moved."""
         pts, cells = self.near_now(self.scans)
         g0 = self.gap_all(pts, cells)
         if g0 > self.ESCAPE_NEAR:
@@ -412,111 +393,17 @@ class Reach(GP.Pass):
             if sweep >= g0 - 0.002 and end > g0 + 0.01 and (best is None or end > best[1]):
                 best = (step, end)
         if best is None:
-            return self.escape_turn(attempt, g, pts, cells, g0)
+            self.say(attempt=attempt, phase='escape', gap_cm=round(g0 * 100, 1), outcome='no straight move opens space')
+            return False
         step, end = best
         self.say(attempt=attempt, phase='escape', gap_cm=round(g0 * 100, 1), move_cm=round(step * 100), to_gap_cm=round(end * 100, 1))
         r, why = self.drive_straight(step, g0)
         self.say(attempt=attempt, phase='escape', outcome=r, why=why)
         return r == 'reached'
 
-    def escape_turn(self, attempt, g, pts, cells, g0):
-        """The turn in place (ESCAPE_TURNS_DEG) whose sweep never closes in and
-        whose end opens the most space; ties go to the one facing the goal.
-        Done by goal_exec, which checks the real swing before moving."""
-        to_goal = 0.0 if g is None else wrap(math.atan2(g[1] - self.pose[1], g[0] - self.pose[0]) - self.pose[2])
-        best = self.plan_escape(pts, cells, g0, to_goal)
-        if best is None:
-            try:                                    # what it saw, for offline replay
-                np.savez('/tmp/reach_escape_last.npz', pts=np.zeros((0, 2)) if pts is None else pts,
-                         cells=cells, pose=np.array(self.pose))
-            except OSError:
-                pass
-            self.say(attempt=attempt, phase='escape', gap_cm=round(g0 * 100, 1),
-                     outcome='no straight move, turn or 3-point turn opens space',
-                     raw_gap_cm=round(self.body_gap(pts) * 100, 1),
-                     n_pts=0 if pts is None else len(pts), n_cells=len(cells))
-            return False
-        steps, end = best
-        self.say(attempt=attempt, phase='escape', gap_cm=round(g0 * 100, 1), to_gap_cm=round(end * 100, 1),
-                 steps=[(k, round(math.degrees(v)) if k == 'turn' else round(v * 100)) for k, v in steps])
-        moved = False
-        for kind, v in steps:
-            if kind == 'turn':
-                r, why = self.run_goal_exec_turn(wrap(self.pose[2] + v))
-            else:
-                r, why = self.drive_straight(v, None, floor=self.TURN_SWEEP_MIN)
-            self.say(attempt=attempt, phase='escape', step=kind, outcome=r, why=why)
-            if r != 'reached':
-                return moved                        # partway: the next attempt re-plans from here
-            moved = True
-        return moved
-
-    # ── 3-point turns: (turn a1, drive d, turn a2), (drive d, turn a) ────────
-    # Owner, same night: "move 30 degrees, then a little back, then 60 -- a
-    # U-turn kind of thing works". Searched over the same points, every step's
-    # sweep >= TURN_SWEEP_MIN on the REAL points, the end judged by the costmap.
-    THREE_A1_DEG = (15, -15, 30, -30, 45, -45)
-    THREE_D = (-0.03, -0.06, -0.10, 0.03, 0.06, 0.10)
-    THREE_A2_DEG = (0, 30, -30, 60, -60, 90, -90, 120, -120)
-
-    def _gap_at(self, pts, cells, x, y, th):
-        """gap_all with the outline at (x, y, th) of today's body frame."""
-        c, s = math.cos(th), math.sin(th)
-        rot = np.array([[c, -s], [s, c]])
-        def move(b):
-            return (b - np.array([x, y])) @ rot if b is not None and len(b) else b
-        return min(self.body_gap(move(pts)), self.body_gap(move(cells)) - self.CELL_SLACK)
-
-    def _sweep_ok(self, pts, pose, kind, v):
-        """Every pose of one step clear of the REAL points by TURN_SWEEP_MIN.
-        Returns the pose after the step, or None."""
-        x, y, th = pose
-        none = np.zeros((0, 2))
-        n = max(4, int(abs(math.degrees(v)) / 4) if kind == 'turn' else int(abs(v) / 0.01))
-        for f in np.linspace(1.0 / n, 1.0, n):
-            if kind == 'turn':
-                p = (x, y, th + v * f)
-            else:
-                p = (x + v * f * math.cos(th), y + v * f * math.sin(th), th)
-            if self._gap_at(pts, none, *p) < self.TURN_SWEEP_MIN:
-                return None
-        return p
-
-    def plan_escape(self, pts, cells, g0, to_goal=0.0):
-        """The move sequence (('turn', rad) / ('drive', m), ...) that ends with
-        the most space (> g0 + 1 cm by the costmap), then the fewest steps,
-        then the least motion, then facing the goal; or None. Pure geometry."""
-        seqs = [[('turn', math.radians(a))] for a in self.ESCAPE_TURNS_DEG]
-        seqs += [[('drive', d), ('turn', math.radians(a))] for d in self.THREE_D
-                 for a in self.ESCAPE_TURNS_DEG]
-        seqs += [[('turn', math.radians(a1)), ('drive', d)] + ([('turn', math.radians(a2))] if a2 else [])
-                 for a1 in self.THREE_A1_DEG for d in self.THREE_D for a2 in self.THREE_A2_DEG]
-        # only what a 10 cm / 1.5 rad manoeuvre can reach: 0.10 + 0.263 (the
-        # corner) + margin. 29,828 live points -> a few hundred; ~20 s -> <1 s
-        def near(b):
-            return b[np.hypot(b[:, 0], b[:, 1]) < 0.75] if b is not None and len(b) else b
-        pts, cells = near(pts), near(cells)
-        best = None
-        for seq in seqs:
-            pose = (0.0, 0.0, 0.0)
-            for kind, v in seq:
-                pose = self._sweep_ok(pts, pose, kind, v)
-                if pose is None:
-                    break
-            if pose is None:
-                continue
-            end = self._gap_at(pts, cells, *pose)
-            if end <= g0 + 0.01:
-                continue
-            motion = sum(abs(v) * (0.3 if k == 'turn' else 1.0) for k, v in seq)   # rad ~ 0.3 m of fuss
-            score = (round(end, 2), -len(seq), -round(motion, 2), -abs(wrap(pose[2] - to_goal)))
-            if best is None or score > best[0]:
-                best = (score, seq, end)
-        return None if best is None else (best[1], best[2])
-
     ESCAPE_VX = 0.05                       # m/s, goal_exec's pass speed
 
-    def drive_straight(self, step, g0, floor=None):
+    def drive_straight(self, step, g0):
         """Exactly straight, closed on fresh points every tick. NOT goal_exec:
         its docking turns to line up first when the pose has slid (drive test
         2026-09-27: a 5 cm reverse became a +30 deg turn, refused by its own
@@ -534,8 +421,7 @@ class Reach(GP.Pass):
                 # the LATEST scan only: the kept ones are in base_link as it was
                 # up to 1 s ago, 5 cm off at this speed
                 pts, cells = self.near_now(self.scans[-1:])
-                # floor: a planned 3-point-turn leg may close in, down to floor (real points)
-                if (self.body_gap(pts) < floor) if floor is not None else (self.gap_all(pts, cells) < g0 - 0.005):
+                if self.gap_all(pts, cells) < g0 - 0.005:
                     return 'failed', f'gap closing after {moved * 100:.1f} cm -- stopped'
                 cmd = Twist()
                 cmd.linear.x = sgn * self.ESCAPE_VX
@@ -797,12 +683,7 @@ class Reach(GP.Pass):
             # nav2 five times at the gap mouth, touching the chair leg each
             # time). Those go on to look and a straight pass.
             jammed = why.startswith('narrow') or 'stuck' in why or 'no path' in why
-            # ...except a refused START: stepping or turning off the thing it
-            # is parked against IS the fix, so plan again at once (2026-10-03
-            # night: 8 x start occupied, never retried after a move).
-            if 'start occupied' in why or 'start or goal' in why:
-                jammed = False
-            if self.escape(attempt, g) and not jammed:
+            if self.escape(attempt) and not jammed:
                 continue
             # no route to the goal: look both ways and try a straight pass from
             # HERE first; only if no line fits, go as near as a route goes
