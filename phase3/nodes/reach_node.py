@@ -424,41 +424,99 @@ class Reach(GP.Pass):
         whose end opens the most space; ties go to the one facing the goal.
         Done by goal_exec, which checks the real swing before moving."""
         to_goal = 0.0 if g is None else wrap(math.atan2(g[1] - self.pose[1], g[0] - self.pose[0]) - self.pose[2])
-        best, seen = None, {}
-        for deg in self.ESCAPE_TURNS_DEG:
-            a = math.radians(deg)
-            # a turn swings the corners out (0.263 m from the centre vs 0.19 m
-            # at the sides): its sweep may dip below today's gap, but never
-            # under TURN_SWEEP_MIN -- against the REAL points, which is what
-            # goal_exec checks before it moves (costmap cells less their
-            # rounding read -0.6 cm where the points were 1.2 cm, live,
-            # 2026-10-03). It must END with more space than now by the
-            # costmap too: that is the start the planner will judge.
-            none = np.zeros((0, 2))
-            sweep = min(self.gap_all(pts, none, 0.0, s) for s in np.linspace(a / 15, a, 15))
-            end = self.gap_all(pts, cells, 0.0, a)
-            seen[deg] = (round(sweep * 100, 1), round(end * 100, 1))     # cm: sweep, end
-            if sweep < self.TURN_SWEEP_MIN or end <= g0 + 0.01:
-                continue
-            score = (round(end, 2), -abs(wrap(a - to_goal)))     # more space first, then toward the goal
-            if best is None or score > best[0]:
-                best = (score, deg, end)
+        best = self.plan_escape(pts, cells, g0, to_goal)
         if best is None:
+            try:                                    # what it saw, for offline replay
+                np.savez('/tmp/reach_escape_last.npz', pts=np.zeros((0, 2)) if pts is None else pts,
+                         cells=cells, pose=np.array(self.pose))
+            except OSError:
+                pass
             self.say(attempt=attempt, phase='escape', gap_cm=round(g0 * 100, 1),
-                     outcome='no straight move or turn opens space',
-                     turns_sweep_end_cm=seen, raw_gap_cm=round(self.body_gap(pts) * 100, 1),
+                     outcome='no straight move, turn or 3-point turn opens space',
+                     raw_gap_cm=round(self.body_gap(pts) * 100, 1),
                      n_pts=0 if pts is None else len(pts), n_cells=len(cells))
             return False
-        _, deg, end = best
-        self.say(attempt=attempt, phase='escape', gap_cm=round(g0 * 100, 1), turn_deg=deg,
-                 to_gap_cm=round(end * 100, 1))
-        r, why = self.run_goal_exec_turn(wrap(self.pose[2] + math.radians(deg)))
-        self.say(attempt=attempt, phase='escape', outcome=r, why=why)
-        return r == 'reached'
+        steps, end = best
+        self.say(attempt=attempt, phase='escape', gap_cm=round(g0 * 100, 1), to_gap_cm=round(end * 100, 1),
+                 steps=[(k, round(math.degrees(v)) if k == 'turn' else round(v * 100)) for k, v in steps])
+        moved = False
+        for kind, v in steps:
+            if kind == 'turn':
+                r, why = self.run_goal_exec_turn(wrap(self.pose[2] + v))
+            else:
+                r, why = self.drive_straight(v, None, floor=self.TURN_SWEEP_MIN)
+            self.say(attempt=attempt, phase='escape', step=kind, outcome=r, why=why)
+            if r != 'reached':
+                return moved                        # partway: the next attempt re-plans from here
+            moved = True
+        return moved
+
+    # ── 3-point turns: (turn a1, drive d, turn a2), (drive d, turn a) ────────
+    # Owner, same night: "move 30 degrees, then a little back, then 60 -- a
+    # U-turn kind of thing works". Searched over the same points, every step's
+    # sweep >= TURN_SWEEP_MIN on the REAL points, the end judged by the costmap.
+    THREE_A1_DEG = (15, -15, 30, -30, 45, -45)
+    THREE_D = (-0.03, -0.06, -0.10, 0.03, 0.06, 0.10)
+    THREE_A2_DEG = (0, 30, -30, 60, -60, 90, -90, 120, -120)
+
+    def _gap_at(self, pts, cells, x, y, th):
+        """gap_all with the outline at (x, y, th) of today's body frame."""
+        c, s = math.cos(th), math.sin(th)
+        rot = np.array([[c, -s], [s, c]])
+        def move(b):
+            return (b - np.array([x, y])) @ rot if b is not None and len(b) else b
+        return min(self.body_gap(move(pts)), self.body_gap(move(cells)) - self.CELL_SLACK)
+
+    def _sweep_ok(self, pts, pose, kind, v):
+        """Every pose of one step clear of the REAL points by TURN_SWEEP_MIN.
+        Returns the pose after the step, or None."""
+        x, y, th = pose
+        none = np.zeros((0, 2))
+        n = max(4, int(abs(math.degrees(v)) / 4) if kind == 'turn' else int(abs(v) / 0.01))
+        for f in np.linspace(1.0 / n, 1.0, n):
+            if kind == 'turn':
+                p = (x, y, th + v * f)
+            else:
+                p = (x + v * f * math.cos(th), y + v * f * math.sin(th), th)
+            if self._gap_at(pts, none, *p) < self.TURN_SWEEP_MIN:
+                return None
+        return p
+
+    def plan_escape(self, pts, cells, g0, to_goal=0.0):
+        """The move sequence (('turn', rad) / ('drive', m), ...) that ends with
+        the most space (> g0 + 1 cm by the costmap), then the fewest steps,
+        then the least motion, then facing the goal; or None. Pure geometry."""
+        seqs = [[('turn', math.radians(a))] for a in self.ESCAPE_TURNS_DEG]
+        seqs += [[('drive', d), ('turn', math.radians(a))] for d in self.THREE_D
+                 for a in self.ESCAPE_TURNS_DEG]
+        seqs += [[('turn', math.radians(a1)), ('drive', d)] + ([('turn', math.radians(a2))] if a2 else [])
+                 for a1 in self.THREE_A1_DEG for d in self.THREE_D for a2 in self.THREE_A2_DEG]
+        # only what a 10 cm / 1.5 rad manoeuvre can reach: 0.10 + 0.263 (the
+        # corner) + margin. 29,828 live points -> a few hundred; ~20 s -> <1 s
+        def near(b):
+            return b[np.hypot(b[:, 0], b[:, 1]) < 0.75] if b is not None and len(b) else b
+        pts, cells = near(pts), near(cells)
+        best = None
+        for seq in seqs:
+            pose = (0.0, 0.0, 0.0)
+            for kind, v in seq:
+                pose = self._sweep_ok(pts, pose, kind, v)
+                if pose is None:
+                    break
+            if pose is None:
+                continue
+            end = self._gap_at(pts, cells, *pose)
+            if end <= g0 + 0.01:
+                continue
+            motion = sum(abs(v) * (0.3 if k == 'turn' else 1.0) for k, v in seq)   # rad ~ 0.3 m of fuss
+            score = (round(end, 2), -len(seq), -round(motion, 2), -abs(wrap(pose[2] - to_goal)))
+            if best is None or score > best[0]:
+                best = (score, seq, end)
+        return None if best is None else (best[1], best[2])
 
     ESCAPE_VX = 0.05                       # m/s, goal_exec's pass speed
 
-    def drive_straight(self, step, g0):
+    def drive_straight(self, step, g0, floor=None):
         """Exactly straight, closed on fresh points every tick. NOT goal_exec:
         its docking turns to line up first when the pose has slid (drive test
         2026-09-27: a 5 cm reverse became a +30 deg turn, refused by its own
@@ -476,7 +534,8 @@ class Reach(GP.Pass):
                 # the LATEST scan only: the kept ones are in base_link as it was
                 # up to 1 s ago, 5 cm off at this speed
                 pts, cells = self.near_now(self.scans[-1:])
-                if self.gap_all(pts, cells) < g0 - 0.005:
+                # floor: a planned 3-point-turn leg may close in, down to floor (real points)
+                if (self.body_gap(pts) < floor) if floor is not None else (self.gap_all(pts, cells) < g0 - 0.005):
                     return 'failed', f'gap closing after {moved * 100:.1f} cm -- stopped'
                 cmd = Twist()
                 cmd.linear.x = sgn * self.ESCAPE_VX

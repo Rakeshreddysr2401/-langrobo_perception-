@@ -40,7 +40,7 @@ class Fake(RN.Reach):
         self.turned.append(math.degrees(heading))
         return 'reached', ''
 
-    def drive_straight(self, step, g0):
+    def drive_straight(self, step, g0, floor=None):
         self.straight = step
         return 'reached', ''
 
@@ -58,9 +58,9 @@ def test_turns_toward_open_side():
     f = Fake(chest_on_right())
     f.scans = []
     assert f.escape(1, g=(2.0, 1.0)) is True, f.said
-    assert f.straight is None, "every straight move closes in here"
-    assert f.turned and f.turned[0] > 0, (f.turned, f.said)      # left: away from the chest
-    assert f.said[-2].get("turn_deg", 0) > 0, f.said
+    plan = next(d["steps"] for d in f.said if "steps" in d)
+    assert plan[0][0] == "turn" and plan[0][1] > 0, plan               # first: left, away from the chest
+    assert f.turned and f.turned[0] > 0, (f.turned, f.said)
 
 
 def test_turns_with_live_costmap_cells():
@@ -104,7 +104,7 @@ def test_corridor_no_turn():
     f.scans = []
     assert f.escape(1, g=(2.0, 0.0)) is False
     assert not f.turned
-    assert "no straight move or turn" in f.said[-1].get("outcome", ""), f.said
+    assert "opens space" in f.said[-1].get("outcome", ""), f.said
 
 
 def test_not_pinned_does_nothing():
