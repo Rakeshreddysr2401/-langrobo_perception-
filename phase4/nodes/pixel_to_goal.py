@@ -417,7 +417,7 @@ class PixelToGoal(Node):
         self._ring = deque()                 # (stamp_ns, depth array)
         self._snaps = OrderedDict()          # stamp_ns -> {depth, cam_tf, dt_ms}
         self._snap_pending = []              # (stamp_ns, first try, monotonic)
-        self._scans = deque()                # (stamp_ns, N x 2 odom points)
+        self._scans = deque()                # (stamp_ns, frame_id, N x 3 points in the laser frame)
 
         self.create_subscription(
             CameraInfo, '/camera/camera0/color/camera_info', self._on_camera_info, 5)
@@ -433,30 +433,39 @@ class PixelToGoal(Node):
         self.get_logger().info('pixel_to_goal up — waiting for /vision/pixel_query')
 
     def _on_scan(self, msg: LaserScan) -> None:
-        """Keep the last SCAN_RING_S of scans, in odom, for photos to pair with."""
+        """Keep the last SCAN_RING_S of scans, in the laser frame. They are put
+        in odom only when paired with a photo, with the TF at the PHOTO's stamp
+        (measured 2026-10-03: at receipt, 34 ms after the scan, odom ->
+        base_link for that stamp is not in yet, so converting here dropped
+        every scan; the photo's stamp is the one the camera pose already
+        resolved, and the rover stands still for a photo)."""
         stamp_ns = msg.header.stamp.sec * 1_000_000_000 + msg.header.stamp.nanosec
-        try:
-            tf = self._tf_buffer.lookup_transform('odom', msg.header.frame_id, Time(nanoseconds=stamp_ns))
-        except Exception:
-            return                            # TF not in yet for this stamp: skip the scan
         r = np.asarray(msg.ranges, dtype=np.float64)
         a = msg.angle_min + np.arange(len(r)) * msg.angle_increment
         ok = np.isfinite(r) & (r > msg.range_min) & (r < msg.range_max)
         loc = np.stack([r[ok] * np.cos(a[ok]), r[ok] * np.sin(a[ok]), np.zeros(int(ok.sum()))], 1)
-        tr = tf.transform.translation
-        xy = (loc @ _quat_matrix(tf.transform.rotation).T)[:, :2] + np.array([tr.x, tr.y])
-        self._scans.append((stamp_ns, xy))
+        self._scans.append((stamp_ns, msg.header.frame_id, loc))
         while self._scans and stamp_ns - self._scans[0][0] > SCAN_RING_S * 1e9:
             self._scans.popleft()
 
     def _scan_near(self, stamp_ns: int):
-        """The kept scan nearest stamp_ns (0 = newest), within SCAN_MAX_DT_S, or None."""
+        """The kept scan nearest stamp_ns (0 = newest), within SCAN_MAX_DT_S,
+        as N x 2 odom points (TF at stamp_ns, or the latest for 0), or None."""
         if not self._scans:
             return None
-        if not stamp_ns:
-            return self._scans[-1][1]
-        s_ns, xy = min(self._scans, key=lambda f: abs(f[0] - stamp_ns))
-        return xy if abs(s_ns - stamp_ns) <= SCAN_MAX_DT_S * 1e9 else None
+        if stamp_ns:
+            s_ns, frame, loc = min(self._scans, key=lambda f: abs(f[0] - stamp_ns))
+            if abs(s_ns - stamp_ns) > SCAN_MAX_DT_S * 1e9:
+                return None
+        else:
+            _, frame, loc = self._scans[-1]
+        try:
+            tf = self._tf_buffer.lookup_transform(
+                'odom', frame, Time(nanoseconds=stamp_ns) if stamp_ns else Time())
+        except Exception:
+            return None
+        tr = tf.transform.translation
+        return (loc @ _quat_matrix(tf.transform.rotation).T)[:, :2] + np.array([tr.x, tr.y])
 
     def _on_camera_info(self, msg: CameraInfo) -> None:
         self._camera_info = msg

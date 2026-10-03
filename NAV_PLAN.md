@@ -339,3 +339,15 @@ its lighter edge. Next: for structural targets (door, wall, cupboard) ground on 
 **LiDAR**, which sees them at 25 cm: the scan points across the box's bearing range,
 nearest continuous segment, its middle. The LiDAR is the pose reference already and
 is not fooled by colour or gloss.
+
+### G1 — LiDAR grounding for big flat things (2026-10-03, night)
+
+Brain sends `;what=<description>` (Pi 5 72e0bae); `pixel_to_goal` (9fda655 + this)
+measures door / wall / cupboard / wardrobe / fridge / sofa with the LiDAR: the
+nearest continuous surface across the middle half of the box's bearing, from the
+scan nearest the photo, converted with the TF at the photo's stamp. (Converting at
+receipt dropped every scan: 34 ms after it, odom -> base_link for its stamp is not
+in yet.) Everything else stays on the camera. Live, under the desk: "the wall" ->
+LiDAR 1.24 m (camera 1.08 m = the bin and legs in front; thin legs at 0.44 m
+passed over); "the white bin" -> camera 0.42 m. Door drive test next, with fresh
+batteries (the earlier search turns stalled at 0 deg on the old ones).
