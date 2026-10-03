@@ -72,8 +72,13 @@ camera:
   # ~2.6 cm by 3 m -- with depth noise, far floor crossed the 5 cm obstacle
   # band (NAV_PLAN.md: 270 camera-only vs 12 LiDAR cells on a blocked route).
   # The mount moves: re-run ./rover camera --floor after the rover is knocked.
-  pitch:       {value: 0.0086,  status: calibrated, source: "floor plane from depth, ./rover camera --floor", date: 2026-09-28}
-  roll:        {value: -0.0149, status: calibrated, source: "floor plane from depth, ./rover camera --floor", date: 2026-09-28}
+  # 2026-10-03: the mount had moved again. RViz showed red on empty, glossy
+  # floor before the door; ghost_check: 1913 camera-only lethal cells 0.85-1.85 m
+  # ahead, LiDAR 0 there. Three --floor runs: pitch +3.07/+3.07/+2.93 deg, roll
+  # -0.11/-0.16/-0.15 deg, height 0.173-0.174 m, 84% on the plane, 3.0-3.2 mm rms.
+  # 2.5 deg of unknown nose-down puts the floor ~4.5 cm high at 1 m, 7 cm at 1.6 m.
+  pitch:       {value: 0.0528,  status: calibrated, source: "floor plane from depth, ./rover camera --floor (3 runs)", date: 2026-10-03}
+  roll:        {value: -0.0025, status: calibrated, source: "floor plane from depth, ./rover camera --floor (3 runs)", date: 2026-10-03}
   # Yaw against the LiDAR (./rover camera --lidar): depth at 20-30 cm fitted
   # to the scan from 6 hand-placed poses facing corners. Per pose: +1.59,
   # -0.29, +0.71, +1.13, +0.98, +0.94 deg; median +0.96. The three with saved
