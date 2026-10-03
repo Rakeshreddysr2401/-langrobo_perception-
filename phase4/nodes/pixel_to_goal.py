@@ -776,7 +776,7 @@ class PixelToGoal(Node):
         left = -dx * math.sin(r_yaw) + dy * math.cos(r_yaw)
 
         extra = {"at_capture": snap is not None, "region": region is not None,
-                 "source": "lidar" if lidar is not None else "camera"}
+                 "source": "lidar" if lidar is not None else "camera", "what": what}
         if lidar is not None:
             extra["camera_m"] = round(cam_m, 2)
         if region is not None:

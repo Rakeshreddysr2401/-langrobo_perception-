@@ -609,6 +609,9 @@ nav)
   # display only: walls red, the 5 cm body margin violet, floor clear (RViz)
   kill_match 'wall_margin_view[.]py'
   dexec "python3 $SRC3/nodes/wall_margin_view.py > /tmp/wall_margin_view.log 2>&1"
+  # display only: who blocks (RED lidar, ORANGE camera only, PURPLE both) + the brain's target
+  kill_match 'blocker_view[.]py'
+  dexec "python3 $SRC3/nodes/blocker_view.py > /tmp/blocker_view.log 2>&1"
   sleep 20
   echo
   echo "  GATE nav:"

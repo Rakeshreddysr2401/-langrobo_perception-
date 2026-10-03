@@ -362,6 +362,66 @@ Visualization Manager:
         Value: /brain/objects
       Value: true
 
+    # ── WHO BLOCKS (blocker_view.py): RED = LiDAR only, ORANGE = camera only
+    # (low things under the 25 cm LiDAR plane -- and phantoms: reflections,
+    # a tilted camera), PURPLE = both. Legend with counts behind the rover.
+    # "near" is the costmap the rover drives on; "room" is the 8 x 8 m one. ──
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: Blockers - who says so (near)
+      Namespaces:
+        {}
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /rover_view/blockers
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: false
+      Name: Blockers - who says so (room)
+      Namespaces:
+        {}
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /rover_view/blockers_room
+      Value: false
+
+    # ── WHAT IT AIMS AT: the object the brain picked (green ball), the goal
+    # pose in front of it (green arrow), "<what>: lidar|camera <m> m". ──────
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: Target the brain picked
+      Namespaces:
+        {}
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /rover_view/target
+      Value: true
+
+    # ── what the camera sees (the JPEG the brain gets, ~4.5 Hz over WiFi) ──
+    - Class: rviz_default_plugins/Image
+      Enabled: true
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: Camera (what the brain sees)
+      Normalize Range: true
+      Topic:
+        Depth: 1
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /camera/color/image_raw/compressed
+      Value: true
+
     # ── where it is going: the goal reach is driving to (from the brain,
     # or from this window's 2D Goal Pose). Magenta arrow. ─────────────────
     - Alpha: 1
