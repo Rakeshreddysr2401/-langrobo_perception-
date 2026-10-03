@@ -250,3 +250,48 @@ held 20 Hz throughout; no nav2 crash after the change.
 4. Re-drive the session's goals: pocket → far side (goal 2), through the gap,
    click-on-obstacle. Exit bar: long goals reach first time, 0 Start occupied.
 5. Then **N7 speed governor**, **N8 build-and-go**, **N9 motor effort**.
+
+## Session 2026-10-03 (night) — "go near the door" in a full room: why it failed
+
+Owner: the floor now has many objects; the rover takes bad ways, tries blocked
+areas when an open way exists, curves poorly. Wants settings fitted to the
+real objects' measurements. Rover cancelled by `/reach/cancel` after this was read.
+
+**What happened (logs: pixel_to_goal, reach, goal_exec):**
+
+| step | measured |
+|---|---|
+| VLM box for "door" | `[86, 0, 314, 325]` (left third of a 896 x 504 frame, top to mid) |
+| pixel_to_goal | `depth 0.80 m ... 86 points above the floor, nearest slab` → the goal was the **nearest thing in the box**, i.e. the furniture in front, not the door |
+| reach snap | `the goal as clicked touches something; nearest pose that fits`, moved 10 cm, gap 3.2 cm |
+| attempts | 8 attempts in 270 s: goal_exec "turn stuck", "obstacle 0.33 m into the leg", "gap too tight 14.9 cm (needs 42)"; nav2 "no path: planner found none" ×5; escapes of 5-10 cm |
+| meanwhile | a fresh frame showed the door on the right with **open floor straight to it** |
+
+**Causes, most damaging first:**
+
+1. **Target choice (decision, not nav).** `nearest_slab()` assumes "an object
+   stands in front of its background". True for a bottle, false for a door,
+   wall, or anything seen *behind* clutter: the box always contains the
+   foreground, and its nearest dense slab (`CLUSTER_MIN` points) wins. The goal
+   lands inside the clutter and every later layer fights a goal that cannot
+   be reached.
+2. **Snap ignores reachability.** "Nearest pose that fits" is the nearest free
+   pose to the goal, not one connected to where the rover is. A pocket
+   between chair legs "fits" and is unreachable.
+3. **No early "this goal is unreachable".** 8 attempts, 270 s, on the same
+   point; nothing tells the brain "the point you picked is boxed in, there is
+   open floor to the right" so it could re-look or re-choose.
+4. **Path quality in clutter** (the owner's "curves", "goes into blocked
+   areas"): global inflation 0.80 m at cost_scaling 2.0 makes every gap
+   narrower than ~1.6 m expensive, so routes bend widely; unknown cells are
+   allowed (`allow_unknown: true`), so the planner may prefer an unseen
+   (actually blocked) way over a seen open one. Needs measuring, not guessing.
+
+**Proposed order (each measured on the floor with the owner):**
+
+| # | change | exit number |
+|---|---|---|
+| D1 | pixel_to_goal: for targets the VLM calls *large/background* (door, wall, cupboard, room) take the **dominant far slab** of the box (or the box's bottom-centre floor contact), not the nearest; reply which one it used | the door goal lands within 30 cm of the real door, from 3 positions |
+| D2 | reach snap = nearest pose **reachable from the rover** (flood fill on the padded-footprint costmap), standoff in front of the target | 0 goals placed in a pocket |
+| D3 | reach gives up after 2 failed tries with a reason + the free direction, as a `[SYSTEM]` turn to the brain | brain re-looks instead of 8 retries |
+| D4 | measure the room (door width, chair-leg gaps, cot, desk) and set inflation / cost scaling / unknown cost from those numbers; N0 course re-run | course: time, recoveries, closest clearance vs the 2026-09-27 baseline |
