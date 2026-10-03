@@ -1,4 +1,23 @@
-# Open issues — where things stand, 2026-10-03
+# Open issues — where things stand, 2026-10-04
+
+## 2026-10-04 — the Mitra twin (simulator) and what it found
+
+A laptop Gazebo twin of this rover: github.com/Rakeshreddysr2401/mitra_sim
+(private). The laptop is only the WORLD (measured body, lidar, depth camera,
+gyro, the wheels' real slide); THIS code is the brain, run as a second
+instance in the rover container on ROS domain 42 (`~/mitra_sim/jetson/
+sim_stack.sh up|down|status`), beside the real stack on domain 0, with its
+learned state in /tmp/mitra_state (ROVER_STATE_DIR). Every run is judged on
+the true pose against the true obstacles. Results: mitra_sim docs/STATUS.md.
+
+| found by the twin | status |
+|---|---|
+| goals > ~4 m away failed at once: the global costmap is an 8 x 8 m rolling window ("outside bounds") | fixed 302de1b: reach drives legs of <= 3.2 m |
+| turn-and-shuffle came 0.2 cm from a box while the pivot was unlearned | fixed 302de1b: goal_exec +3 cm until learned |
+| things under 3 cm (slippers, a laptop) are invisible to nvblox and the lidar: driven over | **open** -- a 1 cm slice sees them but floor noise then boxes the rover in (rejected); next: 2 cm, or a close-range floor sensor |
+| gap passes 1-4 cm from the chair leg (S-gap 45/50/60) | **open** -- MPPI margin 4 cm froze it (rejected); next: speed / cost near obstacles |
+
+The real rover's reach / goal_exec load 302de1b at the next `./rover nav`.
 
 ## 2026-10-03 — close quarters (narrow-gap tests with the owner)
 
