@@ -28,6 +28,7 @@ from sim_goal_exec import DT, Rover, box, scan  # noqa: E402
 
 N = int(sys.argv[sys.argv.index('--n') + 1]) if '--n' in sys.argv else 60
 SEED = int(sys.argv[sys.argv.index('--seed') + 1]) if '--seed' in sys.argv else 7
+LEARNED = '--unlearned' not in sys.argv   # --unlearned: goal_exec starts with no pivot (a fresh rover)
 PACKS = [  # (pivot +, pivot -), turn efficiency, arc share -- as sim_goal_exec
     ([(0.0, 0.03), (0.0, -0.03)], 1.0, 0.22),
     ([(0.04, 0.08), (0.02, -0.02)], 0.85, 0.22),
@@ -48,7 +49,7 @@ def touches(pose, solid):
     return bool(((q[:, 0] < FRONT) & (q[:, 0] > -REAR) & (np.abs(q[:, 1]) < SIDE)).any())
 
 
-def one(rng, a, boxes, pack):
+def one(rng, a, boxes, pack, learned=True):
     P, eff, arc = pack
     room = box(0.0, 0.0, 3.2, 3.2)
     segs = room + [s for b in boxes for s in b]
@@ -56,7 +57,7 @@ def one(rng, a, boxes, pack):
     rov = Rover(P, eff, arc, rng)
     if touches(rov.x, solid):
         return None
-    ex = GoalExec({'1': list(P[0]), '-1': list(P[1])})
+    ex = GoalExec({'1': list(P[0]), '-1': list(P[1])}) if learned else GoalExec()
     pts0 = scan(rov.x, segs, rng)
     direct = ex.turn_clear(pts0, a)[0]
     plan = None if direct else ex.maneuver(pts0, a)
@@ -88,7 +89,7 @@ def main():
             r = rng.uniform(0.27, 0.42)
             w, h = rng.uniform(0.06, 0.3), rng.uniform(0.06, 0.3)
             boxes.append(box(r * math.cos(ang), r * math.sin(ang), w, h))
-        res = one(rng, a, boxes, PACKS[k % 3])
+        res = one(rng, a, boxes, PACKS[k % 3], learned=LEARNED)
         if res is None:
             stats['skipped'] += 1
             continue

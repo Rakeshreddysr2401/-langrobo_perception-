@@ -66,6 +66,16 @@ PASS_D = 0.9           # m: how far a recovery pass crawls
 # turned in it and touched the low chair leg; from 35 cm back the straight
 # line was 51 cm wide -- room, 44 needed).
 PASS_D_FAR = (1.8, 1.3, 0.9)
+# A goal beyond the planner's window goes in LEGS. The global costmap is an
+# 8 x 8 m window that follows the rover (there is no map frame): a goal more
+# than ~4 m away is "outside bounds" and nav2 fails at once. Found in the
+# Mitra twin, 2026-10-04: bedroom -> living room, 6.2 m, eight instant
+# "nav2 failed" in 117 s; in a real home, any room past ~4 m. Each leg: the
+# farthest point toward the goal, up to LEG_MAX, that fits and plans.
+LEG_MAX = 3.2          # m: well inside the 4 m half-window
+LEG_MIN = 1.0
+LEG_STEP = 0.4
+MAX_LEGS = 12
 MARGIN = 0.01          # = goal_exec MARGIN and nav2 footprint_padding (1 cm hard since 2026-09-27 evening, NAV_PLAN.md N1; 0.02, 0.03 before)
 # A PASS keeps 2 cm a side, not MARGIN: goal_exec refuses a pass request under
 # 0.02 m (its blind-ish creep past an edge at 5 cm/s), and reach sent MARGIN
@@ -524,6 +534,37 @@ class Reach(GP.Pass):
         self.say(attempt=attempt, phase='pass_far', D=round(D, 2), outcome=out)
         return out
 
+    def leg_point(self, g):
+        """The farthest point toward g, at most LEG_MAX away, that fits the
+        rover and the planner can reach; None if there is none."""
+        bearing = math.atan2(g[1] - self.pose[1], g[0] - self.pose[0])
+        ux, uy = math.cos(bearing), math.sin(bearing)
+        r = min(LEG_MAX, self.dist(g))
+        while r >= LEG_MIN:
+            cand, _, gap = self.fit((self.pose[0] + r * ux, self.pose[1] + r * uy, bearing))
+            if not (gap == gap and gap < self.SNAP_GAP) and self.plan_ok(cand):
+                return cand
+            r -= LEG_STEP
+        return None
+
+    def legs_toward(self, g, attempt):
+        """Drive legs until g is within LEG_MAX. (True, '') or (False, why)."""
+        for k in range(MAX_LEGS):
+            d0 = self.dist(g)
+            if d0 <= LEG_MAX or self.stop_req:
+                return True, ''
+            leg = self.leg_point(g)
+            if leg is None:
+                return False, 'no reachable point toward the goal (legs)'
+            self.say(attempt=attempt, phase='leg', leg=k + 1, dist_m=round(d0, 2),
+                     leg_m=round(math.hypot(leg[0] - self.pose[0], leg[1] - self.pose[1]), 2))
+            r, why = self.run_nav2(leg)
+            if self.stop_req:
+                return False, 'cancelled'
+            if d0 - self.dist(g) < 0.3:
+                return False, f'leg made no progress ({r}: {why})'
+        return self.dist(g) <= LEG_MAX, f'still {self.dist(g):.1f} m away after {MAX_LEGS} legs'
+
     def face(self, bearing):
         """Turn in place toward bearing (odom), outline-checked; for the look."""
         GP.look_to(self, bearing)
@@ -567,7 +608,13 @@ class Reach(GP.Pass):
                     g = (gm[0] + snap[0], gm[1] + snap[1], gm[2])
             d = self.dist(g)
             line_refused = False
-            if d > EXACT_RANGE or go_nav2:
+            legs_failed = ''
+            if d > LEG_MAX:
+                ok, legs_failed = self.legs_toward(g, attempt)
+                d = self.dist(g)
+            if legs_failed:
+                r, why = 'failed', legs_failed
+            elif d > EXACT_RANGE or go_nav2:
                 self.say(attempt=attempt, phase='nav2', dist_m=round(d, 2))
                 r, why = self.run_nav2(g)
                 if r == 'reached':

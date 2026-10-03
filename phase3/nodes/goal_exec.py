@@ -144,6 +144,11 @@ class GoalExec:
     PART_STEP = math.radians(5)
     PART_MIN = math.radians(10)
     MAX_MANEUVERS = 3     # per goal; then refuse as before
+    # A turn is checked with the outline swept about the LEARNED pivot. Before
+    # it is learned (no saved prior, < 2 turns that way) the prediction can be
+    # several cm off: the Mitra twin, starting fresh, finished a turn-and-
+    # shuffle 0.2 cm from a box (2026-10-04). Until then, this much more margin.
+    UNLEARNED_EXTRA = 0.03   # m
 
     def __init__(self, P_prior=None):
         # the learned pivot, per turn direction. A prior (the node saves what
@@ -207,12 +212,14 @@ class GoalExec:
         """Scan points (base_link) clear of the outline swept about P through a?"""
         if pts is None or len(pts) == 0:
             return True, ''
-        P = self.P[1 if a > 0 else -1]
+        k = 1 if a > 0 else -1
+        P = self.P[k]
+        m = MARGIN + (self.UNLEARNED_EXTRA if self.P_n[k] < 2 else 0.0)
         for s in np.linspace(0.0, a, max(2, int(abs(math.degrees(a)) / 3) + 1)):
             # pose after turning s about P, as a transform of the body frame
             t = (np.eye(2) - R(s)) @ P
             q = (pts - t) @ R(s)                 # points in the turned body frame
-            hit = self._inside(q)
+            hit = self._inside(q, m)
             if hit.any():
                 d = float(np.min(np.hypot(pts[hit, 0], pts[hit, 1])))
                 return False, f'something {d:.2f} m away is in the {math.degrees(a):+.0f} deg swing'
