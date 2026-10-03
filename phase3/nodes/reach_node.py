@@ -424,7 +424,7 @@ class Reach(GP.Pass):
         whose end opens the most space; ties go to the one facing the goal.
         Done by goal_exec, which checks the real swing before moving."""
         to_goal = 0.0 if g is None else wrap(math.atan2(g[1] - self.pose[1], g[0] - self.pose[0]) - self.pose[2])
-        best = None
+        best, seen = None, {}
         for deg in self.ESCAPE_TURNS_DEG:
             a = math.radians(deg)
             # a turn swings the corners out (0.263 m from the centre vs 0.19 m
@@ -437,6 +437,7 @@ class Reach(GP.Pass):
             none = np.zeros((0, 2))
             sweep = min(self.gap_all(pts, none, 0.0, s) for s in np.linspace(a / 15, a, 15))
             end = self.gap_all(pts, cells, 0.0, a)
+            seen[deg] = (round(sweep * 100, 1), round(end * 100, 1))     # cm: sweep, end
             if sweep < self.TURN_SWEEP_MIN or end <= g0 + 0.01:
                 continue
             score = (round(end, 2), -abs(wrap(a - to_goal)))     # more space first, then toward the goal
@@ -444,7 +445,9 @@ class Reach(GP.Pass):
                 best = (score, deg, end)
         if best is None:
             self.say(attempt=attempt, phase='escape', gap_cm=round(g0 * 100, 1),
-                     outcome='no straight move or turn opens space')
+                     outcome='no straight move or turn opens space',
+                     turns_sweep_end_cm=seen, raw_gap_cm=round(self.body_gap(pts) * 100, 1),
+                     n_pts=0 if pts is None else len(pts), n_cells=len(cells))
             return False
         _, deg, end = best
         self.say(attempt=attempt, phase='escape', gap_cm=round(g0 * 100, 1), turn_deg=deg,
