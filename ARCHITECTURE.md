@@ -2,7 +2,9 @@
 
 What runs where, what talks to what, and **why each decision went the way it
 did**. For the measured numbers see [docs/archive/PHASE1.md](docs/archive/PHASE1.md); for how to run it
-see [OPERATIONS.md](OPERATIONS.md); for open faults see [docs/archive/TODO.md](docs/archive/TODO.md).
+see [OPERATIONS.md](OPERATIONS.md); for open faults see [OPEN_ISSUES.md](OPEN_ISSUES.md)
+(the archived [docs/archive/TODO.md](docs/archive/TODO.md) keeps the history the § numbers below cite).
+All machines and repos on one page: [SYSTEM_OVERVIEW.md](SYSTEM_OVERVIEW.md). Refreshed 2026-10-03.
 
 ---
 
@@ -15,14 +17,19 @@ see [OPERATIONS.md](OPERATIONS.md); for open faults see [docs/archive/TODO.md](d
 | visual odometry | **cuVSLAM 16.0.0** via the standalone `pyCuVSLAM` wheel | the packaged `isaac_ros_visual_slam` is a **Thor** build and will not run on this Orin. The wheel is the only path |
 | heading | the D555's own **gyro**, complementary-filtered | measured −0.2% to −0.9% error over four 360° turns — better than the wheels can do through scrub |
 | distance | **wheel encoders**, calibrated against a tape | excellent in a straight line, useless mid-turn (§13) |
-| fusion | **hand-written complementary filter**, `phase1/nodes/fusion.py` | *not* an EKF — see §5 for why a 3-sensor planar problem did not need one |
+| fusion | **fusion2**, an EKF, `phase1/nodes/fusion2.py` (since 2026-09-26) | four sources, each weighted by its own evidence and gated (§5). The Phase 1 complementary filter (`fusion.py`, 20.5 cm / 13° worst) is in git history |
 | LiDAR | **RPLidar C1** — 360°, 10 Hz, USB, driver `sllidar_ros2` pinned + one patch (`lidar/`) | the walls are the one reference that does not drift. Added 2026-09-22 for the pose, not for nav2 |
 | drift correction | **slam_toolbox**, online async mapping, owns `map → odom` | scan-matches every scan against the walls it has seen, so the correction is continuous, where cuVSLAM's loop closure only fires on a recognised place (15–27 closures a session after §23, docs/archive/READINESS.md) — and the two cannot both own the frame, so cuVSLAM's is switched off (`SLAM=false`). No map is kept across power-off, by choice |
 | mapping | **nvblox** — TSDF → ESDF → 2D slice, GPU | the Orin has the GPU for it, and the ESDF slice is what nav2's costmap layer consumes directly |
-| planning | **nav2** — NavFn planner, Regulated Pure Pursuit controller | RPP steers by *arcs*, which is what a skid-steer rover can execute. DWB samples rotations it cannot |
+| planning | **nav2** — Smac **lattice** planner (2.5 cm motion primitives, `phase3/config/lattice_diff_*.json`), **MPPI** controller, Spin removed from the BTs | the lattice plans only motions this skid-steer can drive, MPPI follows them against the full footprint. (NavFn + Regulated Pure Pursuit until 2026-09-28, commit 6aa4c98; NAV_PLAN.md) |
+| exact moves | **goal_exec** (one exact x, y, θ move, learned pivot slide) under **reach** (nav2 route → exact finish, retry with look / pass / wait) | nav2 gets near; the last centimetres and the turns are closed on the fused pose. This is what the Pi 5 brain drives through |
+| obstacles | nvblox fused map (`fused_obstacles.py`) for exact moves; nvblox + LiDAR costmaps for nav2; depth into nvblox only when not turning (`depth_gate`) | a frame painted mid-turn smeared objects 3–10 cm (2026-10-03) |
+| brain bridge | `image_bridge` (JPEG for `look()`), `pixel_to_goal` (a VLM pixel on a held photo → odom goal) | the Pi 5's LangGraph brain sees and points; the Jetson places |
 | wheels | **ESP32 + micro-ROS** over WiFi UDP, BTS7960 drivers, PID per side | the board sits on the rover; the link to it must be the thing that fails visibly |
 | teleop | a **web page on the Pi 5**, hold-to-move | any phone on the WiFi is a controller and a stop button, with no app to install |
 | visualisation | **RViz2 on a laptop** | the Jetson needs its GPU for nvblox |
+
+**A simulation twin** (2026-10-03): the laptop's Gazebo `mitra_sim` publishes the same sensors on ROS domain 42, and `~/mitra_sim/jetson/sim_stack.sh` runs a second copy of this repo's nav stack against it, with its learned state in `ROVER_STATE_DIR=/tmp/mitra_state`. Domain 0 (the real robot) is never touched.
 
 **Everything runs in one container** (`rover`) on the Jetson, brought up in
 layers by `./rover`, because a failure in one layer must name itself rather than
@@ -30,7 +37,9 @@ appear as a wall of log with no owner.
 
 ---
 
-## 1. Four machines
+## 1. The machines
+
+The diagram is the pose path. Not drawn: the **Mac mini** (llama.cpp LLM + VLM, called by the Pi 5 over HTTP) and the **laptop** (RViz and the twin), see SYSTEM_OVERVIEW.md §2–3.
 
 ```
    ┌─────────────────────────────────────────────────────────────┐
@@ -45,6 +54,9 @@ appear as a wall of log with no owner.
    │    gyro_node    IMU → base_link → /gyro/base                │
    │    lidar_odom   /scan + gyro → /lidar/odom (every scan)     │
    │    fusion2      gyro·LiDAR·VO·wheels → /odom + TF           │
+   │    slam_toolbox map → odom   nvblox  depth → obstacle map   │
+   │    nav2 · reach · goal_exec · turn_shaper → /cmd_vel        │
+   │    image_bridge · pixel_to_goal  (for the Pi 5 brain)       │
    │    harness      ./rover record / grade vs LiDAR truth       │
    └───────────────▲─────────────────────────────────────────────┘
                    │  DDS over WiFi
@@ -52,6 +64,7 @@ appear as a wall of log with no owner.
    │  Pi 5                         192.168.1.16                  │
    │    micro-ROS agent   ESP32 ↔ ROS, UDP :8888                 │
    │    teleop web        hold-to-move → /cmd_vel, :8091         │
+   │    LangGraph brain   voice · Telegram → /reach, /goal_exec  │
    └───────────────▲─────────────────────────────────────────────┘
                    │  micro-ROS over WiFi UDP
    ┌───────────────┴─────────────────────────────────────────────┐
@@ -100,7 +113,8 @@ occurrence is a glance rather than an investigation.
 |---|---|---|
 | `/camera/camera0/infra1,2/image_rect_raw` | 30 Hz | cuVSLAM |
 | `/camera/camera0/infra1,2/camera_info` | 30 Hz | intrinsics + baseline |
-| `/camera/camera0/depth/image_rect_raw` | 30 Hz | **nothing yet** — Phase 2 |
+| `/camera/camera0/depth/image_rect_raw` | 30 Hz | `depth_gate` → `.../depth/image_still` → nvblox; `pixel_to_goal`; `depth_obstacles` |
+| `/camera/camera0/color/image_raw` | 30 Hz | `image_bridge` → `/camera/color/image_raw/compressed` (the Pi 5's `look()`) |
 | `/camera/camera0/motion/sample` | 200 Hz | `gyro_node` |
 
 ### On the Jetson
@@ -128,6 +142,11 @@ occurrence is a glance rather than an investigation.
 | `/local_costmap/costmap` | `OccupancyGrid` | 2 Hz | TRANSIENT_LOCAL |
 | `/plan` | `Path` | on request | nav2's computed route |
 | `/goal_pose` | `PoseStamped` | in | set from RViz |
+| `/reach/goal`, `/reach/cancel` → `/reach/status` | `PoseStamped` / `Empty` → JSON | in / out | `reach_node`: nav2 + exact finish + retries. RViz's 2D Goal Pose and the Pi 5 brain use it |
+| `/goal_exec/goal`, `/turn`, `/pass`, `/cancel` → `/goal_exec/status` | `PoseStamped` / JSON | in / out | `goal_exec_node`: one exact move; status keyed by the goal's stamp |
+| `/cmd_vel_turn` → `/cmd_vel` | `Twist` | 20 Hz | `turn_shaper`: nav2's turn rates made real on a scrubbing chassis |
+| `/vision/pixel_snapshot`, `/vision/pixel_query` → `/vision/pixel_result` | `PointStamped` → JSON | in / out | `pixel_to_goal`: the photo-grounded contract (Pi 5 INTEGRATION_GAPS.md §7) |
+| `/rover_view/wall_margin` | `OccupancyGrid` | 1 Hz | `wall_margin_view`: the costmap drawn for RViz only |
 
 **The durabilities are opposite and both matter.** nvblox publishes VOLATILE;
 nav2's costmaps publish TRANSIENT_LOCAL. Subscribe with the wrong one and you
@@ -195,8 +214,21 @@ a point 17 cm in front of itself.
 | `phase2/launch/nvblox.launch.py` | nvblox: depth + `/odom` → TSDF, mesh, 2D grid |
 | `phase2/rviz/rover_live.rviz` | the RViz view, standard message types only |
 | `phase2/rviz/rover_live.sh` | launches RViz on the laptop with the `-d` that is load-bearing |
-| `phase3/config/nav2.yaml` | nav2, with every NO-PIVOT adaptation marked |
+| `phase2/nodes/turn_gate.py`, `depth_gate.py` | is it turning? depth to nvblox only when not (2026-10-03) |
+| `phase3/config/nav2.yaml` | nav2 (Smac lattice + MPPI), with every NO-PIVOT adaptation marked |
 | `phase3/bt/*.xml` | behaviour trees with Spin removed |
+| **`phase3/nodes/goal_exec.py`** + `goal_exec_node.py` | **exact (x, y, θ) moves, no ROS in the class**; turn-and-shuffle, pass mode, learned pivot slide (state in `ROVER_STATE_DIR`, default `/logs`) |
+| `phase3/nodes/reach_node.py` | nav2 route → goal_exec finish; on failure look, straight pass, wait; far goals in ≤ 3.2 m legs |
+| `phase3/nodes/pivot_goto.py` | `./rover drive`: exact short moves planned around the off-centre pivot |
+| `phase3/nodes/turn_shaper.py` | `/cmd_vel_turn` → `/cmd_vel`, turns at the rate nav2 asked |
+| `phase3/nodes/fused_obstacles.py`, `depth_obstacles.py` | obstacles for exact moves: nvblox's fused map (default) or live depth at 1 cm (`ROVER_OBSTACLES=depth`) |
+| `phase3/nodes/wall_margin_view.py` | RViz-only costmap colouring |
+| `phase3/plugins/` | `footprint_clear` costmap layer (C++): cells under the rover are free |
+| `phase3/tools/` | `goto`, `navto`, `reach`, `gap_pass` (the `./rover` drive commands), `plan_check`, `ghost_check`, simulators `sim_goal_exec` / `sim_gap_pass` / `sim_maneuver` |
+| `phase4/nodes/image_bridge.py` | colour → JPEG for the Pi 5's `look()` |
+| `phase4/nodes/pixel_to_goal.py` | a VLM pixel/box on a held photo → odom object + standoff goal (24 photos held) |
+| `phase4/nodes/detections_3d.py` | YOLOv8n + depth → `/vision/detections_3d`; opt-in (`./rover detect`), the brain does not read it today (B4) |
+| `phase1/teleop/teleop_web.py` | the Pi 5's teleop page (copied to `~/langrobo_teleop/`); MANUAL cancels nav2, reach, goal_exec |
 | `phase1/nodes/values.py` | one-shot readout of every sensor |
 | `phase1/firmware/rover_firmware_v2.ino` | ESP32: PID, encoders, telemetry |
 | `phase1/firmware/HARDWARE.md` | the drivetrain itself — wiring, motor/encoder specs, direction flags, bench results |

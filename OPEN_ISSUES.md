@@ -1,6 +1,6 @@
-# Open issues — where things stand, 2026-10-04
+# Open issues — where things stand, 2026-10-03
 
-## 2026-10-04 — the Mitra twin (simulator) and what it found
+## 2026-10-03 (night) — the Mitra twin (simulator) and what it found
 
 A laptop Gazebo twin of this rover: github.com/Rakeshreddysr2401/mitra_sim
 (private). The laptop is only the WORLD (measured body, lidar, depth camera,
@@ -141,3 +141,6 @@ errors, queue) and `objects_remembered`; `fleet.sh check` prints them.
 ## Housekeeping
 
 - The Pi 5 sudo password was typed into a chat session on 2026-09-26: change it.
+- 2026-10-03 tidy of all repos and machines (SYSTEM_OVERVIEW.md §5, C1–C13): done. Left
+  for the owner: delete `~/mitra_sim.handcopy-2026-10-03` on the Jetson (identical to
+  the clone now at `~/mitra_sim`), and decide whether the older `rover_sim` is retired.

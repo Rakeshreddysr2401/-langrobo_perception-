@@ -10,7 +10,7 @@ copy pushed from this repo, so it can be wiped and rebuilt from here.
 
 It used to hold four RViz configs and three launcher scripts, and its copy of the
 config drifted from the repo's — which made "I fixed the RViz config" untrue on
-the only machine that renders it. The old ones are archived in `~/old-rviz/` and
+the only machine that renders it. The old ones are archived in `~/old/old-rviz/` (with the other leftovers, 2026-10-03) and
 nothing reads them.
 
 ## Rebuilding it from scratch

@@ -119,16 +119,16 @@ check → spoken report.
 | `src/langrobo_ros/` | the ROS shim: `agent_node.py`, `ros2_bridge.py`, launch, systemd; wake-word models |
 | `src/pi5_voice_pkg/` | STT, TTS, Bluetooth audio owner |
 | `scripts/` | `fleet.sh` (whole robot), `run_*.sh` (systemd entry points), voice/wake-word tools |
-| 16 top-level `.md` | CLAUDE, README, HOW_IT_WORKS, ARCHITECTURE_LLD, FIND_AND_GO, INTEGRATION_GAPS, OPERATIONS, TODO, voice ×4, TELEGRAM, NETWORKING, MAC_MINI_TASKS, INTENT_ROUTING_PLAN |
+| 12 top-level `.md` + `docs/voice/` | CLAUDE, README, HOW_IT_WORKS, ARCHITECTURE_LLD, FIND_AND_GO, INTEGRATION_GAPS, OPERATIONS, TODO, TELEGRAM, NETWORKING, MAC_MINI_TASKS, INTENT_ROUTING_PLAN; voice ×4 in `docs/voice/` |
 
 ### Laptop
 
 | where | what | source of truth |
 |---|---|---|
 | `~/rover_live.sh`, `~/rover_live.rviz` | the RViz launcher + config | **this repo**, `phase2/rviz/`. Pushed by `./rover view`; identical today |
-| `/workspace/mitra_sim` (27 files) | the twin: Gazebo world + measured body + sensors (`./mitra up/rviz/goal/scenario/test`), `jetson/sim_stack.sh` (the Jetson half), tests, `docs/STATUS.md` | its own repo |
+| `/workspace/mitra_sim` (27 files; also cloned on the Jetson at `~/mitra_sim`) | the twin: Gazebo world + measured body + sensors (`./mitra up/rviz/goal/scenario/test`), `jetson/sim_stack.sh` (the Jetson half), tests, `docs/STATUS.md` | its own repo |
 | `/workspace/ros2_ws/src/rover_sim` | the older sim (mecanum, own nav2, sim/real contract gate) | its own repo |
-| `~/langrobo/rover_sim`, `~/old-rviz`, `~/laptop_view.rviz.bak`, `~/build ~/install ~/log`, `~/frames_*.pdf`, `~/LAPTOP.md` | leftovers. `~/langrobo/rover_sim` says itself it was merged in July | nothing reads them |
+| `~/old/` | leftovers archived 2026-10-03 (old sim copy, old RViz configs, stray colcon output, a stale LAPTOP.md); see its README.txt | nothing reads them |
 | `~/ros2_ws` (mycobot_ros2, ros2_fundamentals_examples) | learning / future arm material | unrelated to the rover |
 
 ## 5. Is it clean? The health check
@@ -137,11 +137,11 @@ check → spoken report.
 
 - **All three git trees are clean.** Jetson and Pi 5 are in sync with their
   remotes, and mitra_sim is clean on `main`.
-- **Pi 5 tests: 434 passed in 18 s.** pyflakes finds one unused import.
+- **Pi 5 tests: 434 passed in 18 s.** pyflakes is clean apart from one deliberate `noqa` probe.
 - **Nothing has drifted between copies:** the deployed teleop
   (`~/langrobo_teleop/teleop_web.py`) matches `phase1/teleop/`, the laptop's
-  RViz files match `phase2/rviz/`, and `~/mitra_sim/jetson/` on the Jetson
-  matches the twin repo.
+  RViz files match `phase2/rviz/`, and `~/mitra_sim` on the Jetson is now a
+  clone of the twin repo.
 - **Clear boundaries:** `langrobo_core` imports no rclpy (it is testable
   anywhere), the measurements have one source (`description/params.yaml`),
   and the laptop holds no source of truth for the real robot.
@@ -153,23 +153,25 @@ check → spoken report.
   two real bugs (far goals failing, a turn ending 0.2 cm from a box), both
   fixed in 302de1b.
 
-### What is not clean (small fixes, none urgent)
+### What was not clean, and what was done (all 13 resolved 2026-10-03)
 
-| # | where | issue | fix |
+| # | where | issue | done |
 |---|---|---|---|
-| C1 | Jetson `ARCHITECTURE.md` | **Stale.** It says `fusion.py` (now `fusion2`) and "NavFn + Regulated Pure Pursuit" (now Smac lattice + MPPI). It never mentions goal_exec, reach, pixel_to_goal, depth/turn gates, fused_obstacles or the twin. It points to the archived TODO for open faults | refresh §0 and the node list; point at OPEN_ISSUES.md |
-| C2 | Jetson `OPEN_ISSUES.md`, mitra_sim `docs/STATUS.md` | headed **2026-10-04**, but the work happened on 2026-10-03 (commit times 04:00–08:46 +0530) | change the dates to 2026-10-03 |
-| C3 | Jetson `README.md` | "Where it stands (2026-09-26)": nothing about close-quarters, the photo memory or the twin | one line each, plus the date |
-| C4 | Laptop `rover_sim` | **4 commits ahead of origin, never pushed** | push (only a laptop copy exists) |
-| C5 | Two sims, one name | Pi 5 `fleet.sh sim` still starts the old `rover_sim` (mecanum, own nav2). The twin that tests the real stack is `mitra_sim`, which the Pi 5's CLAUDE.md describes separately | decide: retire `rover_sim`, or say plainly in `fleet.sh` which one to use for what |
-| C6 | `~/mitra_sim/jetson/` on the Jetson | an untracked, hand-copied deploy of the twin's Jetson half (matches today; will drift) | have `sim_stack.sh` warn if it differs from the twin repo, or clone the twin repo here |
-| C7 | Pi 5 repo root | a committed `Screenshot 2026-10-02 at 8.57.04 AM.png` (the name has a non-ASCII space); `ESP_32_frimware/` holds only a LibreOffice lock file; `.env.bak.*` ×2 with live keys | move the screenshot to `docs/` or delete it; delete the lock dir; delete or secure the `.env` backups |
-| C8 | Pi 5 `TODO.md` | headed "branch `dev-1.3.8`", but the branch is `dev-1.4.1` | update the header |
-| C9 | Pi 5 `object_memory.py` / `survey.py` | the background survey is off and memory is now the photo log (2026-10-02), but approach/agent_node/bridge still import and wire object memory | keep it if the photo log is still on trial; otherwise remove the dead path |
-| C10 | Pi 5 `INTEGRATION_GAPS.md` §1 | lists `/vision/detections_3d` as ⬜ unanswered, but the Jetson has `phase4/nodes/detections_3d.py` | check, then update the row |
-| C11 | Pi 5 `tools/approach.py:566` | unused `Twist` import (pyflakes) | delete |
-| C12 | Laptop home | the leftovers in §4 | archive into `~/old/` |
-| C13 | Doc sprawl | 11 top-level docs here and 16 on the Pi 5. The voice docs alone are four files (≈1,500 lines) | not now; when voice settles, fold VOICE_* + WAKE_WORD into one |
+| C1 | Jetson `ARCHITECTURE.md` | stale: `fusion.py`, NavFn + RPP, "not an EKF" (contradicting its own §5), none of goal_exec / reach / pixel_to_goal / gates / the twin, open faults pointed at the archived TODO | ✅ §0 stack, §1 diagram, §2 topics, §4 node table refreshed; points at OPEN_ISSUES.md and here |
+| C2 | Jetson `OPEN_ISSUES.md`, mitra_sim `docs/STATUS.md` | headed 2026-10-04, work done 2026-10-03 | ✅ both say 2026-10-03 (commit 53c3a99's message still says 10-04; history is not rewritten) |
+| C3 | Jetson `README.md` | status table dated 2026-09-26 | ✅ dated 2026-10-03; close quarters, the brain (B1–B3) and the twin added |
+| C4 | Laptop `rover_sim` | 4 commits never pushed | ✅ pushed (`dev-0.1.1`, 06b8951) |
+| C5 | two sims | `fleet.sh sim` starts the OLDER `rover_sim`; the twin is `mitra_sim` | ✅ `fleet.sh` header + its `sim` output and the Pi 5 CLAUDE.md say which is which. Retiring `rover_sim` stays the owner's call |
+| C6 | `~/mitra_sim` on the Jetson | hand copy of the twin's `jetson/` | ✅ now a git clone; `sim_stack.sh up` warns when it is not a clone, has local edits, or is behind origin; `sim_stack.sh` is executable in git (mitra_sim f74337a). The old copy is at `~/mitra_sim.handcopy-2026-10-03` (identical; delete it when you like) |
+| C7 | Pi 5 repo root | stray screenshot, `ESP_32_frimware/` lock-file dir, `.env*` world-readable (644) with live keys | ✅ screenshot removed (it was an empty Studio page); dir moved to Pi 5 `~/old/`; `.env` and both backups `chmod 600` (kept, not deleted) |
+| C8 | Pi 5 `TODO.md` | header said `dev-1.3.8` | ✅ `dev-1.4.1` |
+| C9 | Pi 5 `object_memory.py` / `survey.py` | looked dead | ✅ **not dead**: the survey is an opt-in feature (`LANGROBO_PHOTO_SURVEY=1`, default off), `survey.py` also owns the vision-tool slot every photo prompt uses, and approach uses object_memory's helpers. The comments in `look.py` / `approach.py` that said every photo feeds memory now say it is opt-in |
+| C10 | Pi 5 `INTEGRATION_GAPS.md` §1 | listed `/vision/detections_3d` etc. as unanswered | ✅ marked closed by removal: the brain no longer reads detections_3d, target or music (tools gone); the Jetson publisher is opt-in (`./rover detect`) and returns with B4 |
+| C11 | Pi 5 `tools/approach.py:566` | "unused" `Twist` import | ✅ **false finding**: it is a deliberate availability probe marked `# noqa: F401`; pyflakes ignores noqa. Left as is |
+| C12 | Laptop home | leftovers | ✅ moved to `~/old/` with a README.txt (nothing deleted; `~/LAPTOP.md` was a stale copy that differed from `phase2/LAPTOP.md`) |
+| C13 | doc sprawl | 16 top-level docs on the Pi 5 | ✅ the four voice docs moved to Pi 5 `docs/voice/`; all 31 files referencing them follow. 12 top-level docs remain there |
+
+Commits: Jetson (this one), Pi 5 0cd4503, mitra_sim f74337a, rover_sim pushed. Pi 5 tests 434/434 after.
 
 ### What is clean in code but open in behaviour
 
@@ -196,6 +198,6 @@ to it, with an arrival check. The work has moved from "does it work" to
 "is it safe in clutter and fast enough to talk to". The open problems are
 physical (low objects, tight gaps, CPU load, a gyro on a fragile link, power)
 and the VLM's speed. The new twin is the tool for testing the first two
-without risking the robot. The code is in good shape. What needs tidying is
-documentation drift (C1–C3, C8, C10) and a few leftovers across machines
-(C4–C7, C12).
+without risking the robot. The code is in good shape, and the tidying found
+on 2026-10-03 (C1–C13) is done. What is left is behaviour, not housekeeping:
+the list above and OPEN_ISSUES.md.
