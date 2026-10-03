@@ -33,7 +33,7 @@ The order it is being built in, from the README and INTELLIGENCE_PLAN.md:
 |---|---|---|---|
 | **Jetson Orin Nano** | 192.168.1.15 | `~/rover` → `-langrobo_perception-`, `rover-v1.1.7` | **the body's brain**: sensors, pose, map, nav2, exact moves, pixel→goal. Everything runs in one Docker container (`rover`, image `orin-nav:1.1`) |
 | **Pi 5** | 192.168.1.16 | `~/ros2_ws` → `pi5_ros2_ws`, `dev-1.4.1` | **the mind**: LangGraph brain (3 agents), voice (STT/TTS/wake word), Telegram, teleop web page, micro-ROS agent for the ESP32 |
-| **Laptop** | DHCP (192.168.1.17 today) | `/workspace/mitra_sim` → `mitra_sim`, `main` | **a window and a twin**: RViz for the real robot, plus the Gazebo "Mitra twin" world |
+| **Laptop** | DHCP (moves: .17 earlier today) | `/workspace/mitra_sim` → `mitra_sim`, `main` | **a window and a twin**: RViz for the real robot, plus the Gazebo "Mitra twin" world |
 | | | `/workspace/ros2_ws/src/rover_sim` → `rover_sim`, `dev-0.1.1` | the older Gazebo sim (mecanum body, its own nav2). Still what `fleet.sh sim` starts |
 | Mac mini | DHCP, `singireddys-mac-mini.local:8080` | (none) | llama.cpp: Gemma 4 12B, LLM + VLM, `--jinja --parallel 4` |
 | ESP32 | micro-ROS over WiFi UDP 8888 | firmware in `~/rover/phase1/firmware/` | 4-wheel PID, encoders, 500 ms cmd_vel watchdog |
@@ -66,6 +66,7 @@ The order it is being built in, from the README and INTELLIGENCE_PLAN.md:
    ┌───────────────▼─────────────────────────────┐
    │ Laptop  RViz (~/rover_live.sh + .rviz)      │
    │         mitra_sim Gazebo twin, DOMAIN 42 ──► a 2nd copy of the Jetson stack (domain 42)
+   │                                        ◄─── a 2nd Pi 5 brain, twin_brain.sh (domain 42)
    └─────────────────────────────────────────────┘
 ```
 
@@ -94,6 +95,26 @@ systemd.
 `/vision/pixel_query` → `pixel_to_goal` uses *that photo's* depth and pose →
 goal → `/reach/goal` → nav2 route + `goal_exec` exact finish → arrival photo
 check → spoken report.
+
+### The twin, end to end (2026-10-03)
+
+The simulator is wired to the WHOLE robot, brain included, on ROS domain 42,
+beside the real robot on domain 0:
+
+| piece | where | what |
+|---|---|---|
+| the world | laptop, `./mitra up <world>` | Gazebo: rooms, measured body, lidar, depth + colour camera (also `aligned_depth_to_color` for pixel_to_goal), gyro, the wheels' real slide. `home_real` is furnished with real-looking household models (AWS RoboMaker, ported from the old rover_sim), judged by each model's true footprint (checked: every lidar hit within 2 cm) |
+| the body's brain | Jetson, `~/mitra_sim/jetson/sim_stack.sh up` | this repo's own nodes: depth_gate, nvblox, nav2, turn_shaper, goal_exec, reach, pixel_to_goal (state in `/tmp/mitra_state`) |
+| the mind | Pi 5, `scripts/twin_brain.sh up` | a second agent_node: own state dir (`~/.langrobo_twin`), no Telegram, no voice, own teleop switch; talk with `twin_brain.sh say "..."` |
+| all at once | Pi 5, `scripts/fleet.sh twin [up\|down\|status] [world]` | default `home_real` |
+
+**The real robot stays the default**: the twin runs only when started, and its
+domain cannot reach the real wheels. First end-to-end run (`home` world):
+"what do you see?" answered from the twin's camera; "go near the red cylinder"
+-> VLM box -> pixel_to_goal (photo depth, 0 ms) -> reach/goal_exec reached 0.5 cm
+-> arrival check saw it; true pose: 24 cm from it. The old rover_sim's useful
+parts (the household models) are now in the twin; `fleet.sh sim` still starts
+rover_sim itself until the owner retires it.
 
 ## 4. How each repo is organised
 

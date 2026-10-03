@@ -20,7 +20,7 @@ that. Built one tested layer at a time; every claim below is measured.
 | **M4 Motion control** | exact x, y, θ moves closed on the pose; firmware fixes | ✅ **live**: four-goal loop closes within 1.4 cm / 0.8° vs LiDAR truth (`./rover goto`) |
 | **M5 Safe navigation** | nav2 on the fused pose, LiDAR + depth obstacles, 5 cm margin, collision monitor | nav2 drives on fusion2; nav2 route + goal_exec finish 1.3 cm (`navto --exact`); tight gaps by `./rover pass` (3 cm margin): a 55 cm gap passed at 1.1 cm. Close quarters (2026-10-03): no blind Spin, depth into the map only when not turning, 3 cm map slice; ~50 cm gaps pass, **45 cm cannot be promised** and things under 3 cm are not seen (OPEN_ISSUES.md) |
 | **Brain (B1–B3)** | the Pi 5's LangGraph brain drives through `reach` / `goal_exec`, finds things from its own photos (`pixel_to_goal` on the held photo), checks on arrival | ✅ floor-tested 2026-09-26 → 10-02 ([INTELLIGENCE_PLAN.md](INTELLIGENCE_PLAN.md)) |
-| **Twin** | the laptop's Gazebo `mitra_sim` runs THIS code on ROS domain 42, judged on the true pose | ✅ first night 2026-10-03 found two bugs (fixed 302de1b) |
+| **Twin** | the laptop's Gazebo `mitra_sim` runs THIS code on ROS domain 42, judged on the true pose -- now with the Pi 5 brain too (`fleet.sh twin` on the Pi 5; real-looking `home_real` world) | ✅ first night 2026-10-03 found two bugs (fixed 302de1b); brain end to end: "go near the red cylinder" reached, 24 cm on the true pose ([SYSTEM_OVERVIEW.md](SYSTEM_OVERVIEW.md)) |
 
 Numbers and how each was measured: [LOCALIZATION.md](LOCALIZATION.md).
 What is still missing, measured: [LOCALIZATION_GAPS.md](LOCALIZATION_GAPS.md).
