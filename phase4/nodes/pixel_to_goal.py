@@ -94,6 +94,17 @@ THE OBJECT'S BOX, NOT ONE PIXEL (2026-09-26)
     above the floor (a flat thing) -> the old centre-pixel sample, and the
     reply says "region": false. Replies add "region": true, "points": N.
 
+    ...BUT ONLY A SLAB THAT IS A REAL SHARE OF THE BOX (2026-10-03). "Go near
+    the door": the VLM's box held the door AND the furniture in front of it,
+    and the nearest slab was 86 points (a chair leg / cot edge) of a box of
+    thousands, 0.80 m away. The goal landed inside the clutter and reach spent
+    8 attempts / 270 s on a pocket between chair legs (NAV_PLAN.md, session
+    2026-10-03 night). Now the nearest slab holding >= SLAB_MIN_FRAC of the
+    box's above-floor points is the object; when no slab does, the largest
+    one. A bottle in its box is a large share; a leg in front of a door is
+    not. The reply says which ("slab": "nearest" | "largest"), its share,
+    and the slab it passed over ("skipped": {"depth_m", "points"}).
+
 FRAME: odom, not map. approach.py's docstring and ros2_bridge.py's
 get_current_pose()/_nav_worker() were written assuming a `map` frame from a
 different, fuller perception stack (Isaac ROS detections_3d, a pan/tilt
@@ -190,6 +201,8 @@ FLOOR_Z = 0.04            # m in odom: at or under this is floor (plane 3.5 mm r
 TOP_Z = 1.5               # m: above this is not a thing on or near the floor
 CLUSTER_DEPTH = 0.10      # m of range: one object's front-to-back slab
 CLUSTER_MIN = 12          # points for a slab to count (not a speck of noise)
+SLAB_MIN_FRAC = 0.08      # ... and this share of the box's above-floor points
+                          # to be THE object (door case: 86 of thousands)
 
 
 def compute_standoff_goal(rx, ry, ox, oy, standoff):
@@ -238,6 +251,52 @@ def nearest_slab(pts: np.ndarray, cam_xy: tuple, depth_slab=None, min_n=None):
     i = ok[0]
     idx = order[i:ends[i]]
     return np.median(pts[idx], axis=0), idx
+
+
+def object_slab(pts: np.ndarray, cam_xy: tuple, depth_slab=None, min_n=None,
+                min_frac=None):
+    """The object in a box's points (N x 3, odom): the nearest dense slab that
+    holds >= min_frac of all the points, else the largest slab. Returns
+    (median point, indices, info) or (None, empty, {}); info = {"slab":
+    "nearest" | "largest", "share": fraction, "skipped": the nearest slab
+    when it was passed over, as {"range_m", "points"}}. Pure."""
+    depth_slab = CLUSTER_DEPTH if depth_slab is None else depth_slab
+    min_n = CLUSTER_MIN if min_n is None else min_n
+    min_frac = SLAB_MIN_FRAC if min_frac is None else min_frac
+    none = (None, np.zeros(0, dtype=int), {})
+    n = len(pts)
+    if n < min_n:
+        return none
+    r = np.hypot(pts[:, 0] - cam_xy[0], pts[:, 1] - cam_xy[1])
+    order = np.argsort(r)
+    rs = r[order]
+    ends = np.searchsorted(rs, rs + depth_slab, side='right')
+    counts = ends - np.arange(n)
+    ok = np.nonzero(counts >= min_n)[0]
+    if len(ok) == 0:
+        return none
+    big = np.nonzero(counts >= max(min_n, min_frac * n))[0]
+    if len(big):
+        i, kind = big[0], 'nearest'
+    else:
+        i, kind = int(np.argmax(counts)), 'largest'
+    idx = order[i:ends[i]]
+    info = {"slab": kind, "share": round(len(idx) / n, 3)}
+    # the biggest slabs, non-overlapping, nearest first: what the choice was between
+    cands, taken = [], np.zeros(n, dtype=bool)
+    for j in np.argsort(-counts):
+        if len(cands) == 3 or counts[j] < min_n:
+            break
+        if taken[j:ends[j]].any():
+            continue
+        taken[j:ends[j]] = True
+        cands.append((round(float(rs[j]), 2), int(counts[j])))
+    info["candidates"] = sorted(cands)
+    first = ok[0]
+    if first != i and rs[first] < rs[i] - depth_slab:
+        info["skipped"] = {"range_m": round(float(rs[first]), 2),
+                           "points": int(counts[first])}
+    return np.median(pts[idx], axis=0), idx, info
 
 
 def _yaw_from_quat(q) -> float:
@@ -433,10 +492,12 @@ class PixelToGoal(Node):
         tr = cam_to_odom.transform.translation
         pts = cam @ _quat_matrix(cam_to_odom.transform.rotation).T + np.array([tr.x, tr.y, tr.z])
         keep = (pts[:, 2] > FLOOR_Z) & (pts[:, 2] < TOP_Z)
-        centre, idx = nearest_slab(pts[keep], (tr.x, tr.y))
+        centre, idx, info = object_slab(pts[keep], (tr.x, tr.y))
         if centre is None:
             return None
-        return (float(centre[0]), float(centre[1]), float(centre[2])), len(idx), float(np.median(z[keep][idx]))
+        info["box_points"] = int(keep.sum())
+        return ((float(centre[0]), float(centre[1]), float(centre[2])), len(idx),
+                float(np.median(z[keep][idx])), info)
 
     def _sample_depth(self, depth: np.ndarray, ui: int, vi: int) -> tuple:
         """Median depth (mm) near (ui, vi), trying each window in
@@ -523,8 +584,13 @@ class PixelToGoal(Node):
         if box is not None:
             region = self._ground_box(depth, box, (fx, fy, cx, cy), cam_to_odom)
         if region is not None:
-            (ox, oy, oz), n_pts, depth_m = region
-            extra_log = f'box {[round(b) for b in box]}: {n_pts} points above the floor, nearest slab'
+            (ox, oy, oz), n_pts, depth_m, slab = region
+            extra_log = (f'box {[round(b) for b in box]}: {n_pts} of {slab["box_points"]} points '
+                         f'above the floor, {slab["slab"]} slab')
+            if "skipped" in slab:
+                s = slab["skipped"]
+                extra_log += f'; passed over {s["points"]} points at {s["range_m"]} m'
+            extra_log += f'; slabs (range m, points): {slab["candidates"]}'
         else:
             depth_mm, half = self._sample_depth(depth, ui, vi)
             if depth_mm is None:
@@ -572,6 +638,7 @@ class PixelToGoal(Node):
         extra = {"at_capture": snap is not None, "region": region is not None}
         if region is not None:
             extra["points"] = n_pts
+            extra.update({k: slab[k] for k in ("slab", "share", "skipped", "candidates") if k in slab})
         if snap is not None:
             extra["capture_dt_ms"] = snap['dt_ms']
         self._reply(req_id, True, **extra,

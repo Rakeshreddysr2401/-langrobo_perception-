@@ -295,3 +295,25 @@ real objects' measurements. Rover cancelled by `/reach/cancel` after this was re
 | D2 | reach snap = nearest pose **reachable from the rover** (flood fill on the padded-footprint costmap), standoff in front of the target | 0 goals placed in a pocket |
 | D3 | reach gives up after 2 failed tries with a reason + the free direction, as a `[SYSTEM]` turn to the brain | brain re-looks instead of 8 retries |
 | D4 | measure the room (door width, chair-leg gaps, cot, desk) and set inflation / cost scaling / unknown cost from those numbers; N0 course re-run | course: time, recoveries, closest clearance vs the 2026-09-27 baseline |
+
+### D1 — built and checked live, rover not moving (2026-10-03, later)
+
+`pixel_to_goal.object_slab()`: the nearest slab holding >= 8 % of the box's
+above-floor points is the object, else the largest. Replies/logs now carry
+`slab`, `share`, `skipped` and the top-3 `candidates` (range, points).
+Tests: `phase4/tools/test_object_slab.py` (6, incl. the door-behind-a-leg
+case the old rule fails). Live check, never drives:
+`docker exec rover ... python3 /opt/rover4/tools/ground_check.py "the door"`.
+
+| asked for | chosen | share | truth |
+|---|---|---|---|
+| black office chair | 0.92 m | 15 % | the chair ✓ (at 25 % it would take the wall behind, 1.97 m ✗) |
+| woven cot | 1.42 m | 8 % (passed over 163 pts at 1.18 m) | the cot ✓ (it spans 1.38-1.58) |
+| the door (VLM box tight on it) | 1.77 m | 17-19 % | the wall/pillar edge beside the door; LiDAR: pillar 1.95 m, door 2.47-2.60 m from base_link, so ~0.6 m short, but on open floor in front of the door, not in clutter |
+
+So 8 % stays: it is what keeps open-frame objects (chairs) right. The door's
+leftover error is the box catching the door frame, and an angled door spreading
+over two 10 cm slabs (2.42 m: 412 pts + 2.52 m: 1440 pts). Next for big targets: the
+brain says "large" (door/wall/cupboard) and pixel_to_goal merges adjacent
+slabs, then takes the largest. Left for after D2/D3, because the 0.6 m now
+lands on reachable floor.
