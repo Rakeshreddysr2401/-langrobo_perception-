@@ -351,3 +351,26 @@ in yet.) Everything else stays on the camera. Live, under the desk: "the wall" -
 LiDAR 1.24 m (camera 1.08 m = the bin and legs in front; thin legs at 0.44 m
 passed over); "the white bin" -> camera 0.42 m. Door drive test next, with fresh
 batteries (the earlier search turns stalled at 0 deg on the old ones).
+
+### "It can rotate, why does it block?" -- start occupied beside a chest (2026-10-03, ~22:00)
+
+Goal 2.23 m away; reach gave up after 8 attempts in 64 s, every one "start
+occupied". Measured at the spot (`/goal_exec/obstacles`, saved as
+`phase3/tools/fixture_chest_right_2026-10-03.npy`):
+
+| | |
+|---|---|
+| around the body | chest of drawers 4.9 cm off the right side; left open; 25 cm ahead, 22 cm behind |
+| LiDAR / camera layers under the body | 0 / 0 cells -- the "touching" is the planner's 4 cm padding (0.04 since the S-gap test) plus 2.5 cm cell rounding |
+| straight moves | all close in (that is all escape tried) |
+| turn left 90 in place | sweep 1.2 cm, ends 6.1 cm off -- fits; right 90: 0.9 / 5.7 |
+
+Two faults in reach, both from the padding going 0.01 -> 0.04 today:
+`ESCAPE_NEAR` was still 3 cm (so 4.9 cm was "not pinned" although the planner
+refused it), and escape knew only straight moves. Now: pinned below 5 cm
+(padding + 1 cm); when no straight move opens space, the turn in place
+(+-30/60/90) whose sweep keeps goal_exec's 1 cm and whose end opens the most
+space, ties toward the goal, done by goal_exec (it re-checks the swing about
+its learned pivot); and after escaping a refused START, plan again at once.
+Tests: `phase3/tools/test_escape.py` (real points: turns left; a wall the whole
+length of the side or a corridor: no turn).
