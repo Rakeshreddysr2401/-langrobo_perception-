@@ -22,8 +22,8 @@ All machines and repos on one page: [SYSTEM_OVERVIEW.md](SYSTEM_OVERVIEW.md). Re
 | drift correction | **slam_toolbox**, online async mapping, owns `map → odom` | scan-matches every scan against the walls it has seen, so the correction is continuous, where cuVSLAM's loop closure only fires on a recognised place (15–27 closures a session after §23, docs/archive/READINESS.md) — and the two cannot both own the frame, so cuVSLAM's is switched off (`SLAM=false`). No map is kept across power-off, by choice |
 | mapping | **nvblox** — TSDF → ESDF → 2D slice, GPU | the Orin has the GPU for it, and the ESDF slice is what nav2's costmap layer consumes directly |
 | planning | **nav2** — Smac **lattice** planner (2.5 cm motion primitives, `phase3/config/lattice_diff_*.json`), **MPPI** controller, Spin removed from the BTs | the lattice plans only motions this skid-steer can drive, MPPI follows them against the full footprint. (NavFn + Regulated Pure Pursuit until 2026-09-28, commit 6aa4c98; NAV_PLAN.md) |
-| exact moves | **goal_exec** (one exact x, y, θ move, learned pivot slide) under **reach** (nav2 route → exact finish, retry with look / pass / wait) | nav2 gets near; the last centimetres and the turns are closed on the fused pose. This is what the Pi 5 brain drives through |
-| obstacles | nvblox fused map (`fused_obstacles.py`) for exact moves; nvblox + LiDAR costmaps for nav2; depth into nvblox only when not turning (`depth_gate`) | a frame painted mid-turn smeared objects 3–10 cm (2026-10-03) |
+| exact moves | **goal_exec** (one exact x, y, θ move, learned pivot slide) under **reach** (nav2 route → exact finish, retry with look / pass / wait; on "no path" the way back along its own trail) | nav2 gets near; the last centimetres and the turns are closed on the fused pose. This is what the Pi 5 brain drives through |
+| obstacles | nvblox fused map with the marks of moved things erased (`ghost_clear`, below) — for exact moves (`fused_obstacles.py`) and nav2's camera layer; LiDAR costmap layer beside it; depth into nvblox only when not turning (`depth_gate`) | a frame painted mid-turn smeared objects 3–10 cm (2026-10-03); nvblox never forgets, so people left permanent marks (2026-10-04) |
 | brain bridge | `image_bridge` (JPEG for `look()`), `pixel_to_goal` (a VLM pixel on a held photo → odom goal) | the Pi 5's LangGraph brain sees and points; the Jetson places |
 | wheels | **ESP32 + micro-ROS** over WiFi UDP, BTS7960 drivers, PID per side | the board sits on the rover; the link to it must be the thing that fails visibly |
 | teleop | a **web page on the Pi 5**, hold-to-move | any phone on the WiFi is a controller and a stop button, with no app to install |
@@ -136,7 +136,9 @@ occurrence is a glance rather than an investigation.
 
 | topic | type | rate | note |
 |---|---|---|---|
-| `/nvblox_node/static_occupancy_grid` | `OccupancyGrid` | 5 Hz | **the map.** VOLATILE |
+| `/nvblox_node/static_occupancy_grid` | `OccupancyGrid` | 5 Hz | nvblox's map, never forgets. VOLATILE. Read only by `ghost_clear` (and RViz's raw layer, off by default) |
+| `/ghost_clear/grid` | `OccupancyGrid` | 5 Hz | **the map** nav2's two costmaps and `fused_obstacles` read: nvblox minus the marks of moved things (`phase2/nodes/ghost_clear.py`). VOLATILE |
+| `/ghost_clear/erased` | `OccupancyGrid` | 1 Hz | what was erased, for RViz (pink in the blocker view) |
 | `/nvblox_node/static_map_slice` | `DistanceMapSlice` | 5 Hz | **not** an OccupancyGrid — what `NvbloxCostmapLayer` consumes |
 | `/global_costmap/costmap` | `OccupancyGrid` | 1 Hz | TRANSIENT_LOCAL |
 | `/local_costmap/costmap` | `OccupancyGrid` | 2 Hz | TRANSIENT_LOCAL |
@@ -215,16 +217,20 @@ a point 17 cm in front of itself.
 | `phase2/rviz/rover_live.rviz` | the RViz view, standard message types only |
 | `phase2/rviz/rover_live.sh` | launches RViz on the laptop with the `-d` that is load-bearing |
 | `phase2/nodes/turn_gate.py`, `depth_gate.py` | is it turning? depth to nvblox only when not (2026-10-03) |
+| **`phase2/nodes/ghost_clear.py`** + `ghost_clear_node.py` | erases camera marks of things that moved: a mark the LiDAR also hit (tall: a person), later seen through by the LiDAR; marks under the rover. A mark only the camera saw (low: a shoe) is never erased by the LiDAR. No ROS in the class; `ROVER_GHOST_CLEAR=off` passes through (2026-10-04) |
 | `phase3/config/nav2.yaml` | nav2 (Smac lattice + MPPI), with every NO-PIVOT adaptation marked |
 | `phase3/bt/*.xml` | behaviour trees with Spin removed |
 | **`phase3/nodes/goal_exec.py`** + `goal_exec_node.py` | **exact (x, y, θ) moves, no ROS in the class**; turn-and-shuffle, pass mode, learned pivot slide (state in `ROVER_STATE_DIR`, default `/logs`) |
-| `phase3/nodes/reach_node.py` | nav2 route → goal_exec finish; on failure look, straight pass, wait; far goals in ≤ 3.2 m legs |
+| `phase3/nodes/reach_node.py` | nav2 route → goal_exec finish; on failure look, straight pass, wait; far goals in ≤ 3.2 m legs; on "no path" the way back along its trail; the same failure 3× from one spot ends the goal with a reason |
+| `phase3/nodes/trail.py` | where reach drove (a carry or pose reset starts a new trail) and ~1 m waypoints back along it; no ROS (2026-10-04) |
 | `phase3/nodes/pivot_goto.py` | `./rover drive`: exact short moves planned around the off-centre pivot |
 | `phase3/nodes/turn_shaper.py` | `/cmd_vel_turn` → `/cmd_vel`, turns at the rate nav2 asked |
 | `phase3/nodes/fused_obstacles.py`, `depth_obstacles.py` | obstacles for exact moves: nvblox's fused map (default) or live depth at 1 cm (`ROVER_OBSTACLES=depth`) |
 | `phase3/nodes/wall_margin_view.py` | RViz-only costmap colouring |
+| `phase3/nodes/blocker_view.py` | RViz-only: who blocks each cell — RED both, BLUE LiDAR only, AMBER camera only, small PINK erased — near (4 m) and room (8 m), both on by default |
 | `phase3/plugins/` | `footprint_clear` costmap layer (C++): cells under the rover are free |
-| `phase3/tools/` | `goto`, `navto`, `reach`, `gap_pass` (the `./rover` drive commands), `plan_check`, `ghost_check`, simulators `sim_goal_exec` / `sim_gap_pass` / `sim_maneuver` |
+| `phase3/tools/` | `goto`, `navto`, `reach`, `gap_pass` (the `./rover` drive commands), `plan_check`, `ghost_check`, simulators `sim_goal_exec` / `sim_gap_pass` / `sim_maneuver`; offline tests `test_obstacle_sources`, `test_trail` |
+| `phase2/tools/` | `map_stats`, `ghost_watch` (camera marks / erased / kept in front of or behind the rover, live), `test_ghost_clear` (offline) |
 | `phase4/nodes/image_bridge.py` | colour → JPEG for the Pi 5's `look()` |
 | `phase4/nodes/pixel_to_goal.py` | a VLM pixel/box on a held photo → odom object + standoff goal (24 photos held) |
 | `phase4/nodes/detections_3d.py` | YOLOv8n + depth → `/vision/detections_3d`; opt-in (`./rover detect`), the brain does not read it today (B4) |

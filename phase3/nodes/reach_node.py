@@ -567,7 +567,7 @@ class Reach(GP.Pass):
                          retry='after a look' if look else 'no')
                 if not look:
                     return 'blocked', why
-                # first try blocked: look again from here, once
+                # blocked after the look: one more try, then give the way back up
             if self.stop_req:
                 return 'cancelled', ''
         self.say(attempt=attempt, phase='way_back', outcome='reached', dist_m=round(self.dist(g), 2))

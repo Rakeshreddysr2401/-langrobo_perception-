@@ -105,7 +105,7 @@ fails.**
 SLAM=false ./rover pose   # + cuVSLAM, gyro — VO >=10 Hz, gyro >=50 Hz
 ./rover fused       # + fusion -> /odom    — /odom >=15 Hz, AND the honesty check
 ./rover slam        # + slam_toolbox       — /map >=0.3 Hz, map -> odom
-./rover map         # + nvblox             — occupancy grid >=1 Hz
+./rover map         # + nvblox, ghost_clear — occupancy grid >=1 Hz, cleaned grid >=1 Hz
 ./rover nav         # + nav2               — both costmaps
 ./rover vlm         # + VLM pixel -> goal  — colour >=2 Hz, 1 listener
 ./rover detect      # + YOLO -> odom objects — publishing, target hunt listening
@@ -468,30 +468,24 @@ want to **step the graph yourself**.
 
 ### Stop it before you use Telegram — it answers your messages instead
 
-**Studio is not a passive viewer.** Its process runs the same graph, polls the
-same Telegram bot, and brings up its own `/studio_bridge` ROS node alongside
-`/agent_node`. Both then publish `/cmd_vel`, and both pick up your messages.
+**Studio is not a passive viewer.** Its process runs the same graph and brings
+up its own `/studio_bridge` ROS node beside `/agent_node`; both can publish
+`/cmd_vel`. It takes no voice or Telegram input (only `agent_node` listens to
+those), so it cannot steal a request -- but a drive started from Studio and one
+started by voice/Telegram would fight over the wheels.
 
-Measured 2026-09-10, with Studio left running from §6 and the user driving the
-rover from Telegram: the navigation was executed by **`studio_bridge`**, and it
-logged
+**Since 2026-10-04 a drive started in Studio reports back to Studio.** Before
+that, only `agent_node` registered a nav-done callback, so Studio's bridge logged
+`nav done ... listener=NONE` and threw the report away (measured 2026-09-10, and
+again 2026-10-04: the robot said it was "1.5 m from the door" after arriving).
+Now `graph_studio.py` posts the same report (`movement.nav_report`) as a new turn
+on the thread whose tool started the drive -- arrival, failure with its reason,
+and any "on arrival" errand. Pi 5 commit `a362e8a`.
 
-```
-[studio_bridge]: nav done: success=False listener=NONE
-                 msg="Navigation to 'near the white bucket' failed ..."
-```
-
-`listener=NONE` is the whole problem. Only `agent_node` registers a nav-done
-callback, so when Studio's bridge runs the navigation the completion has
-nowhere to go: the rover accepts the goal, drives (or fails to), finishes, and
-**tells nobody** — while `agent_node`, the process that would have reported it,
-never saw the goal at all. Two sessions were spent hunting a "missing report"
-that was really a report delivered to a bridge with no listener.
-
-So treat §6 as a mode, not an addition: **Studio, or the Telegram/voice brain —
-not both.** The [`rover-start`](#) flow starts Studio at the end because the
-link is usually what is wanted; if you are about to drive from Telegram, stop
-it first.
+So still treat §6 as a mode for DRIVING: **Studio, or the Telegram/voice brain --
+not both at once.** `./rover up` starts Studio at the end because the link is
+usually what is wanted; if you are about to drive from Telegram, stop it first.
+Voice can stay up beside Studio.
 
 ### Stopping it
 
@@ -531,7 +525,7 @@ effort path. Studio is for driving the graph yourself.
   pose    /gyro/base                             199.2   want 50   OK
   wheels  /wheel_state                            19.9   want 15   OK
   fused   /odom                                   20.0   want 15   OK
-  map     /nvblox_node/static_occupancy_grid       4.8   want  1   OK
+  map     /ghost_clear/grid                        4.8   want  1   OK
   nav     /global_costmap/costmap                  0.8   want0.5   OK
   nav     /local_costmap/costmap                   1.7   want  1   OK
   vlm     /camera/color/image_raw/compressed       4.5   want  2   OK

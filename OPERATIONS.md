@@ -323,6 +323,41 @@ not hold. The next stuck blob, caught with the checker, decides which layer
 to change. Turning nvblox's decay back on is NOT the fix to reach for: it also
 forgets low obstacles (nvblox.launch.py, DO NOT LET THE MAP FORGET).
 
+**Since 2026-10-04 `ghost_clear` erases the camera's marks of things that
+moved** (`phase2/nodes/ghost_clear.py`; OPEN_ISSUES S10). A camera mark the
+LiDAR also hit is tall -- a person, a chair; once a LiDAR beam returns from
+beyond it, it moved, and it is erased from `/ghost_clear/grid`, the grid nav2
+and goal_exec read. Marks under the rover are erased too. A mark only the
+camera saw (a shoe, a box under the 25 cm LiDAR plane) is never erased by the
+LiDAR; it comes back if the LiDAR hits it again or the camera keeps seeing it.
+Floor-tested with the owner the same day: legs left behind the rover erased, a
+box kept with the camera turned away.
+
+- watch it: `docker exec rover bash -lc '... python3 /opt/rover2/tools/ghost_watch.py 120'`
+  (add `back` for the box behind the rover): camera marks / erased / kept
+- RViz: the blocker view shows erased cells small and faint PINK
+- a mark that stays: run `ghost_check.py` as above. A RED (LiDAR-layer) trace
+  that stays is usually in the SHADOW of something nearer -- no beam reaches it,
+  so nothing can say it is gone (seen 2026-10-04, 1.4 m behind the rover with
+  something at 1.15 m)
+- off: `ROVER_GHOST_CLEAR=off` in the container before `./rover map` (passes
+  nvblox's grid through unchanged)
+- stuck with marks everywhere anyway: `./rover map` starts nvblox empty
+
+### RViz colours -- one meaning each (2026-10-04)
+
+| colour | meaning |
+|---|---|
+| RED | certainly blocked: camera and LiDAR agree (the walls are the same red) |
+| BLUE | LiDAR only (legs, people, chairs); the live LiDAR ring is light blue |
+| AMBER | camera only (low things under the LiDAR -- or a phantom) |
+| PINK, small, faint | erased by ghost_clear: moved away, NOT an obstacle |
+| GREEN / teal | the brain's target / the objects it found |
+| WHITE | the rover's outline |
+
+The blocker view is on for the near 4 m AND the whole 8 m room, so every cell
+the planner treats as blocked is shown, coloured by who says so.
+
 ---
 
 ## 6. Flashing the ESP32

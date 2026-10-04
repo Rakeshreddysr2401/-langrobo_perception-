@@ -25,8 +25,9 @@ round, fresh every sweep; the camera sees 3-27 cm, ahead only, and remembers.
 
 An erased mark comes back when the LiDAR hits it again, or when the camera
 has had it in view for VIEW_S while still marked -- nvblox clears a cell it
-sees past, so a mark that stays in plain view is real (a low thing put down
-where a person stood: the one case the rule gets wrong, until it is seen).
+sees past, so a mark that stays in plain view is real. The one case the rule
+gets wrong, until the camera sees it: a low thing put down exactly where a
+person stood, or where the rover itself stood.
 Beams stop FREE_MARGIN short of what they hit, more than HIT_R, so a low
 thing against a wall or a chair leg is never seen "through".
 

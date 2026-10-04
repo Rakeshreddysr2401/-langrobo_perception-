@@ -246,7 +246,9 @@ held 20 Hz throughout; no nav2 crash after the change.
    floor stops measuring clean; re-run the 12-vs-270 probe and `ghost_check.py`.
 3. **"Look again before giving up"** in reach: on "no path" / no snap, face the
    camera at the blocked area so nvblox clears what it can see past (no timed
-   forgetting — the repo's rule).
+   forgetting — the repo's rule). **Done 2026-10-04** as the way back
+   (`trail.py`, 3b15b5e: look down the route it drove, retrace it in nav2 hops)
+   and `ghost_clear` (0efdf58: the LiDAR erases marks of things that moved).
 4. Re-drive the session's goals: pocket → far side (goal 2), through the gap,
    click-on-obstacle. Exit bar: long goals reach first time, 0 Start occupied.
 5. Then **N7 speed governor**, **N8 build-and-go**, **N9 motor effort**.
