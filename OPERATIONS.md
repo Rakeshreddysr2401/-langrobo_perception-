@@ -356,7 +356,11 @@ box kept with the camera turned away.
 | WHITE | the rover's outline |
 
 The blocker view is on for the near 4 m AND the whole 8 m room, so every cell
-the planner treats as blocked is shown, coloured by who says so.
+the planner treats as blocked is shown, coloured by who says so. The room view
+is drawn in 10 cm squares (each takes its most important colour: red, blue,
+amber, pink) so it reads at whole-room zoom; the near view keeps every 2.5 cm
+cell and draws over it -- zoom in near the rover for the detail. (At 2.5 cm a
+cell is ~2 px zoomed out, and only the LiDAR ring showed, 2026-10-04.)
 
 ---
 

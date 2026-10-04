@@ -60,6 +60,29 @@ def classify(lidar: np.ndarray, camera: np.ndarray) -> dict:
             "both": np.flatnonzero(li & ca)}
 
 
+# The room view in 10 cm squares: at whole-room zoom (~90 px/m) a 2.5 cm cell
+# is 2 pixels and only the 4 px LiDAR ring could be seen (owner, 2026-10-04:
+# "only able to see blue"). Each square takes its most important colour:
+# both, then LiDAR (a person's legs must never hide behind a low thing), then
+# camera, then erased. The near view keeps 2.5 cm, drawn just above this one.
+ROOM_BLOCK = 4                                    # cells per side: 10 cm at 2.5 cm
+PRIORITY = ("erased", "camera", "lidar", "both")  # low -> high
+
+
+def coarsen(groups: dict, w: int, h: int, k: int) -> dict:
+    """groups (name -> flat cell indices in a w x h grid) in k x k blocks: name
+    -> flat BLOCK indices in a ceil(w/k) x ceil(h/k) grid, one colour per block
+    (the highest in PRIORITY). Pure."""
+    bw, bh = -(-w // k), -(-h // k)
+    code = np.zeros(bw * bh, dtype=np.int8)
+    for c, name in enumerate(PRIORITY, 1):
+        idx = np.asarray(groups.get(name, ()), dtype=np.int64)
+        if idx.size:
+            b = (idx // w // k) * bw + (idx % w) // k
+            np.maximum.at(code, b, c)
+    return {name: np.flatnonzero(code == c) for c, name in enumerate(PRIORITY, 1)}
+
+
 def crop_to(grid: np.ndarray, grid_origin: tuple, origin: tuple, size: tuple, res: float) -> np.ndarray:
     """The (h, w) window of grid (rows = y) whose origin is `origin`, by position;
     cells outside grid are 0. Same resolution. Pure."""
@@ -122,21 +145,27 @@ class BlockerView(Node):
         else:
             groups["erased"] = np.zeros(0, dtype=np.int64)
         out = MarkerArray()
+        # room: 10 cm squares, readable zoomed out; near: every 2.5 cm cell,
+        # drawn higher so it shows over the room view around the rover
+        if scope == "global":
+            shown, cell, gw, z = coarsen(groups, w, h, ROOM_BLOCK), res * ROOM_BLOCK, -(-w // ROOM_BLOCK), 0.01
+        else:
+            shown, cell, gw, z = groups, res, w, 0.03
         for i, (name, color) in enumerate((("lidar", BLUE), ("camera", AMBER), ("both", RED),
                                            ("erased", PINK))):
             m = Marker()
             m.header = li.header
             m.ns, m.id, m.type = f"blocked_{name}", i, Marker.CUBE_LIST
-            m.action = Marker.ADD if len(groups[name]) else Marker.DELETE
+            m.action = Marker.ADD if len(shown[name]) else Marker.DELETE
             m.pose.orientation.w = 1.0
             # erased: half-size and faint, so it reads as "not really there"
-            m.scale.x = m.scale.y = res * (0.5 if name == "erased" else 1.0)
+            m.scale.x = m.scale.y = cell * (0.5 if name == "erased" else 1.0)
             m.scale.z = 0.02
             m.color = color
-            idx = groups[name]
-            xs = ox + (idx % w + 0.5) * res
-            ys = oy + (idx // w + 0.5) * res
-            m.points = [Point(x=float(x), y=float(y), z=0.01) for x, y in zip(xs, ys)]
+            idx = shown[name]
+            xs = ox + (idx % gw + 0.5) * cell
+            ys = oy + (idx // gw + 0.5) * cell
+            m.points = [Point(x=float(x), y=float(y), z=z) for x, y in zip(xs, ys)]
             out.markers.append(m)
         legend = Marker()
         legend.header.frame_id = "base_link"

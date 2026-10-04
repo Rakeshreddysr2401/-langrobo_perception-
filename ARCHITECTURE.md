@@ -227,7 +227,7 @@ a point 17 cm in front of itself.
 | `phase3/nodes/turn_shaper.py` | `/cmd_vel_turn` → `/cmd_vel`, turns at the rate nav2 asked |
 | `phase3/nodes/fused_obstacles.py`, `depth_obstacles.py` | obstacles for exact moves: nvblox's fused map (default) or live depth at 1 cm (`ROVER_OBSTACLES=depth`) |
 | `phase3/nodes/wall_margin_view.py` | RViz-only costmap colouring |
-| `phase3/nodes/blocker_view.py` | RViz-only: who blocks each cell — RED both, BLUE LiDAR only, AMBER camera only, small PINK erased — near (4 m) and room (8 m), both on by default |
+| `phase3/nodes/blocker_view.py` | RViz-only: who blocks each cell — RED both, BLUE LiDAR only, AMBER camera only, small PINK erased — near (4 m, every 2.5 cm cell) and room (8 m, 10 cm squares so it reads zoomed out), both on by default |
 | `phase3/plugins/` | `footprint_clear` costmap layer (C++): cells under the rover are free |
 | `phase3/tools/` | `goto`, `navto`, `reach`, `gap_pass` (the `./rover` drive commands), `plan_check`, `ghost_check`, simulators `sim_goal_exec` / `sim_gap_pass` / `sim_maneuver`; offline tests `test_obstacle_sources`, `test_trail` |
 | `phase2/tools/` | `map_stats`, `ghost_watch` (camera marks / erased / kept in front of or behind the rover, live), `test_ghost_clear` (offline) |
