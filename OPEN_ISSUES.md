@@ -46,6 +46,29 @@ Fixes are in the Pi 5 brain (`~/ros2_ws`) unless marked Jetson. None done yet.
 | S8 | the woven cot was called "a decorative screen", and the correction was only acknowledged | VLM limit (issue 3); nothing stores a user's correction | optional: a user correction goes into the photo log as a label |
 | S9 | "what are you looking at" while in `navigate` -> tried `scan_surroundings` | the backstop caught it and handed to `local_agent` (works as designed) | -- |
 
+**S10 — the Dad drive went the wrong way and stayed stuck (Jetson).** The goal
+(the brother, 4.1 m, (-0.73, -0.68) odom, in the other room) was back through the
+doorway the rover had just driven in by. nav2 sent it 2 m **sideways** instead
+((3.46,-0.41) -> (2.20,-2.49) in 17 s), into the pocket behind the cot, and from
+there every plan failed for 5 min (4 identical retries, backup/wait each time).
+Cause, measured on the live maps afterwards: the LiDAR SLAM map shows the
+corridor it drove in by **free**; nvblox's grid has **specks** in it (12 blobs of
+1-3 cells + larger ones, 2.5 cm cells, `/nvblox_node/static_occupancy_grid`),
+each 0.04-0.2 m from the route. Rebuilt from nvblox alone with nav2's inflation,
+the corridor costs match the real global costmap (99 = blocked wherever a speck
+is within ~0.2 m). So the way back was closed by depth leftovers -- likely the
+people who walked through the doorway (nvblox does not decay, issue 5) -- and
+nothing in reach/nav2 re-checks them: the camera faced away, so they never
+cleared. reach also never tries the path it **just drove**, which it knows is
+passable. Pictures: `docs/img/2026-10-04_dad_drive_*.png`.
+Fixes: (a) on "no path", reach turns the camera toward the blocked direction so
+nvblox re-observes and clears it, then replans; (b) a breadcrumb fallback --
+retrace the rover's own recent track (checked against the live LiDAR, not
+nvblox) toward the goal; (c) two identical "no path" from the same spot ->
+stop and report, not 4; (d) maybe: drop nvblox specks the LiDAR does not
+confirm *above the LiDAR's height only* -- but chair legs are 1-3 cells too,
+so not without a floor test.
+
 Slow turns: "move towards the door" 88 s, "go near the person" 286 s, "go near Dad" 83 s
 before its drive started -- most of it VLM round trips (issue 3).
 
