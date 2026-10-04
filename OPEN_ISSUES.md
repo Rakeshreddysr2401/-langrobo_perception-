@@ -187,6 +187,7 @@ reports maxmtu 10222 and takes MTU 9000 (only with the link down: "Device or res
 otherwise), but on a *direct* cable to the Jetson nothing over 1500 crossed in either direction, not even
 1600 bytes. Its rx counters didn't move and tcpdump on the Jetson saw only 1514-byte frames. Set back to
 1500 the same day. A ping sweep needs a laptop whose jumbo ping passes on a direct cable first.
+The procedure for that, from the Mac mini: [WAVESHARE_SWITCH_TEST.md](WAVESHARE_SWITCH_TEST.md).
 
 ## 2026-10-03 (night) — the Mitra twin (simulator) and what it found
 
