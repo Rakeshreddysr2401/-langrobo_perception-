@@ -417,7 +417,22 @@ wheels)
   echo "         firmware publishes at 20 Hz whenever it is AGENT_CONNECTED,"
   echo "         with no motion gating — so a low rate never means 'it was parked'."
   echo
-  assert_rate /wheel_state 15 "wheel_state" && { echo; echo "  Wheels are live."; exit 0; }
+  # The rate proves the ESP32 PUBLISHES; the motors only turn if it also
+  # SUBSCRIBES to /cmd_vel. It shows up there as the micro-ROS agent's bare-DDS
+  # endpoint (fusion2 is the other subscriber, so the plain count is 2 when
+  # healthy). Without it nav2 publishes into nothing and every gate stays green.
+  esp_sub=$(rexec "ros2 topic info -v /cmd_vel 2>/dev/null | grep -A4 'Node name: _CREATED_BY_BARE_DDS_APP_' | grep -c SUBSCRIPTION" 2>/dev/null || true)
+  printf '      %-22s %7s        (want >= 1)   %s\n' 'ESP32 on /cmd_vel' "${esp_sub:-0}" \
+    "$([ "${esp_sub:-0}" -ge 1 ] && echo OK || echo FAIL)"
+  if [ "${esp_sub:-0}" -lt 1 ]; then
+    echo "  ✗ the ESP32 is not subscribed to /cmd_vel — nav2 will drive nothing."
+    echo "    It can come back on its own (2026-09-09); re-check before power-cycling."
+  fi
+  rate_ok=0; assert_rate /wheel_state 15 "wheel_state" && rate_ok=1
+  if [ "$rate_ok" = 1 ]; then
+    [ "${esp_sub:-0}" -ge 1 ] && { echo; echo "  Wheels are live."; exit 0; }
+    exit 1
+  fi
   echo
   echo "  ✗ Wheel odometry is not usable. Known state as of 2026-09-06 (TODO §24):"
   echo "      /wheel_state is SILENT — 0 Hz, not the old 1 Hz mismatch from §1."
@@ -730,7 +745,16 @@ up)
   fi
 
   echo
-  "$0" view
+  "$0" view || true
+
+  # Again, now everything is up: on 2026-09-09 the link was healthy at the
+  # first check and decayed to nothing during bring-up (STARTUP.md §4).
+  echo
+  echo "[wheels] ESP32 link — second check, after every layer is up"
+  "$0" wheels || true
+  echo
+  echo "  Before anything drives: ./rover wheels --nudge (moves ~7 cm) — a live"
+  echo "  link does not prove the motor supply is on."
   ;;
 
 voice)

@@ -264,7 +264,10 @@ docker exec rover bash -lc 'unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES
   ros2 topic hz /wheel_state; ros2 topic info /cmd_vel'
 ```
 
-Want **~20 Hz** and `/cmd_vel` **Subscription count: 1**.
+Want **~20 Hz** and `/cmd_vel` **Subscription count: 2** — the ESP32 (it shows
+as `_CREATED_BY_BARE_DDS_APP_` in `ros2 topic info -v`, via the micro-ROS agent)
+and `fusion2`, which reads the commands. `./rover wheels` checks the ESP32 one by
+name, and `./rover up` runs it twice: after `vlm` and again at the very end.
 
 **20 Hz does not mean the motors have power.** On 2026-09-23 every gate passed
 — 20 Hz, subs 1, "Wheels are live" — and the wheels could not turn: the
