@@ -31,7 +31,13 @@ D1 -- ignore specks, prefer the middle of the box (866a97d, 1dc6d96).
 ## 2026-10-04 (evening) — still open after the day's fixes
 
 The day fixed S1-S5, S7, S10, the ghost marks, the RViz colours and the lost
-CLI goals (sections below). What is left, most useful first:
+CLI goals (sections below). **Tested live through Studio's API** (Pi 5
+`/tmp/studio_test.py`, the same thread calls as the Studio page): "where are
+you?" answered from the robot (B, after a wording fix, Pi 5 41dd3e4); "go near
+my dad" asked what he looks like and did not move (E); "send me a picture"
+went to the owner (C). The ghost rule and the blocker view were floor-tested
+with the owner. Unit tests: Pi 5 492, Jetson trail 7 + ghost 8 + blocker 4 +
+obstacle suite. What is left, most useful first:
 
 | # | what | evidence | next |
 |---|---|---|---|
@@ -46,6 +52,7 @@ CLI goals (sections below). What is left, most useful first:
 | E9 | **A LiDAR-layer mark in a shadow stays** | 1.4 m behind the rover, with something at 1.15 m in front of it: no beam reaches it | correct (nothing can say it is gone); clears when the blocker moves or the rover turns |
 | E10 | **The Bluetooth speaker** | `br-connection-page-timeout` after the power cut: off or out of range | switch it on; the voice service picks it up |
 | E11 | **Not pushed** | Jetson `rover-v1.1.7` 11 ahead, Pi 5 `dev-1.5.0-voice` 3 ahead of origin | push when the owner says |
+| E13 | **ssh to the Pi 5 stalls at login** | three times on 2026-10-04: the Pi answers ping, teleop and the ssh banner, but key authentication hangs for minutes, then recovers on its own. Not memory (5.3 GB free, no swap, load 1.4 at the time); twice right after restarting the brain + Studio | next time: `journalctl -u ssh` on the Pi's own console; check `UseDNS` / reverse DNS for the Jetson's address |
 | E12 | **Saved places are gone** | the power cut restarted odom; places saved before it are in the old frame | re-save the ones wanted |
 
 ## 2026-10-04 — a Studio conversation with the robot, reviewed against the logs
