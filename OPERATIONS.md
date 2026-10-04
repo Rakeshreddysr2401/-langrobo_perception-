@@ -335,7 +335,7 @@ box kept with the camera turned away.
 
 - watch it: `docker exec rover bash -lc '... python3 /opt/rover2/tools/ghost_watch.py 120'`
   (add `back` for the box behind the rover): camera marks / erased / kept
-- RViz: the blocker view shows erased cells small and faint PINK
+- RViz: the blocker view shows erased cells GREY
 - a mark that stays: run `ghost_check.py` as above. A RED (LiDAR-layer) trace
   that stays is usually in the SHADOW of something nearer -- no beam reaches it,
   so nothing can say it is gone (seen 2026-10-04, 1.4 m behind the rover with
@@ -344,21 +344,24 @@ box kept with the camera turned away.
   nvblox's grid through unchanged)
 - stuck with marks everywhere anyway: `./rover map` starts nvblox empty
 
-### RViz colours -- one meaning each (2026-10-04)
+### RViz colours (the blocker view, "who says so")
 
 | colour | meaning |
 |---|---|
-| RED | certainly blocked: camera and LiDAR agree (the walls are the same red) |
-| BLUE | LiDAR only (legs, people, chairs); the live LiDAR ring is light blue |
-| AMBER | camera only (low things under the LiDAR -- or a phantom) |
-| PINK, small, faint | erased by ghost_clear: moved away, NOT an obstacle |
-| GREEN / teal | the brain's target / the objects it found |
-| WHITE | the rover's outline |
+| RED | only the LiDAR says blocked (walls, legs, people -- the 25 cm plane) |
+| ORANGE | only the camera says blocked (low things under the LiDAR -- or a phantom) |
+| PURPLE | both agree |
+| GREY | erased by ghost_clear: moved away, NOT an obstacle |
+| GREEN | the brain's target |
+
+(A one-meaning-per-colour scheme -- red both, blue LiDAR, amber camera, pink
+erased -- was tried on 2026-10-04 and reverted the same day at the owner's
+request; commit 49e22a9 has it.)
 
 The blocker view is on for the near 4 m AND the whole 8 m room, so every cell
 the planner treats as blocked is shown, coloured by who says so. The room view
-is drawn in 10 cm squares (each takes its most important colour: red, blue,
-amber, pink) so it reads at whole-room zoom; the near view keeps every 2.5 cm
+is drawn in 10 cm squares (each takes its most important colour: purple, red,
+orange, grey) so it reads at whole-room zoom; the near view keeps every 2.5 cm
 cell and draws over it -- zoom in near the rover for the detail. (At 2.5 cm a
 cell is ~2 px zoomed out, and only the LiDAR ring showed, 2026-10-04.)
 

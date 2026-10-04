@@ -10,14 +10,14 @@
         -> /rover_view/blockers_room  visualization_msgs/MarkerArray  (room, ~0.8 Hz)
         -> /rover_view/target         visualization_msgs/MarkerArray  (latched)
 
-    RED     both agree: certainly blocked (the same red as the walls)
-    BLUE    only the LiDAR says blocked (a plane at 25 cm: legs, people, chairs)
-    AMBER   only the camera says blocked (low things under the LiDAR -- and
+    RED     only the LiDAR says blocked (a plane at 25 cm: walls, legs, people)
+    ORANGE  only the camera says blocked (low things under the LiDAR -- and
             phantoms: reflections on the glossy floor, a tilted camera)
-    PINK    (small, faint) a camera mark ghost_clear ERASED: something that
-            reached the LiDAR plane (a person) and has since moved away
-            (phase2/nodes/ghost_clear.py, /ghost_clear/erased). Not a blocker
-            any more -- shown so you can see it happen
+    PURPLE  both agree
+    GREY    a camera mark ghost_clear ERASED: something that reached the LiDAR
+            plane (a person) and has since moved away (phase2/nodes/ghost_clear.py,
+            /ghost_clear/erased). Not a blocker any more -- shown so you can see
+            it happen
     GREEN   the object the brain picked (sphere) and the goal pose (arrow),
             labelled "<what>: <source> <depth> m"
 
@@ -41,16 +41,14 @@ from std_msgs.msg import ColorRGBA, String
 from visualization_msgs.msg import Marker, MarkerArray
 
 LETHAL = 100                                      # nav2 publishes lethal (254) as 100
-# ONE meaning per colour across the whole RViz view (owner, 2026-10-04):
-# blue = the LiDAR (its live ring is light blue), amber = the camera, red =
-# certainly blocked (as the walls), pink = erased; distinct for colour-blind
-# eyes, and readable on both the dark background and the light floor.
-RED = ColorRGBA(r=1.0, g=0.19, b=0.19, a=0.95)
-BLUE = ColorRGBA(r=0.12, g=0.37, b=1.0, a=0.9)
-AMBER = ColorRGBA(r=1.0, g=0.70, b=0.0, a=0.9)
-PINK = ColorRGBA(r=1.0, g=0.36, b=0.88, a=0.5)
+# The owner's original colours (a one-meaning-per-colour scheme was tried on
+# 2026-10-04 and reverted the same day at the owner's request).
+RED = ColorRGBA(r=0.95, g=0.15, b=0.15, a=0.9)
+ORANGE = ColorRGBA(r=1.0, g=0.6, b=0.0, a=0.9)
+PURPLE = ColorRGBA(r=0.65, g=0.2, b=0.9, a=0.9)
 GREEN = ColorRGBA(r=0.1, g=0.9, b=0.3, a=0.95)
 WHITE = ColorRGBA(r=1.0, g=1.0, b=1.0, a=1.0)
+GREY = ColorRGBA(r=0.8, g=0.8, b=0.8, a=0.6)
 
 
 def classify(lidar: np.ndarray, camera: np.ndarray) -> dict:
@@ -119,8 +117,8 @@ class BlockerView(Node):
             QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE))
         self._target_pub = self.create_publisher(MarkerArray, "/rover_view/target", latched)
         self.create_subscription(String, "/vision/pixel_result", self._on_result, 10)
-        self.get_logger().info("blocker_view up: RED both, BLUE LiDAR only, AMBER camera only, "
-                               "PINK erased (moved away), GREEN target")
+        self.get_logger().info("blocker_view up: RED LiDAR, ORANGE camera only, PURPLE both, "
+                               "GREY erased (moved away), GREEN target")
 
     def _on_grid(self, scope: str, layer: str, msg: OccupancyGrid) -> None:
         self._grids[(scope, layer)] = msg
@@ -151,15 +149,14 @@ class BlockerView(Node):
             shown, cell, gw, z = coarsen(groups, w, h, ROOM_BLOCK), res * ROOM_BLOCK, -(-w // ROOM_BLOCK), 0.01
         else:
             shown, cell, gw, z = groups, res, w, 0.03
-        for i, (name, color) in enumerate((("lidar", BLUE), ("camera", AMBER), ("both", RED),
-                                           ("erased", PINK))):
+        for i, (name, color) in enumerate((("lidar", RED), ("camera", ORANGE), ("both", PURPLE),
+                                           ("erased", GREY))):
             m = Marker()
             m.header = li.header
             m.ns, m.id, m.type = f"blocked_{name}", i, Marker.CUBE_LIST
             m.action = Marker.ADD if len(shown[name]) else Marker.DELETE
             m.pose.orientation.w = 1.0
-            # erased: half-size and faint, so it reads as "not really there"
-            m.scale.x = m.scale.y = cell * (0.5 if name == "erased" else 1.0)
+            m.scale.x = m.scale.y = cell
             m.scale.z = 0.02
             m.color = color
             idx = shown[name]
@@ -175,8 +172,8 @@ class BlockerView(Node):
         legend.pose.orientation.w = 1.0
         legend.scale.z = 0.06
         legend.color = WHITE
-        legend.text = (f"blocked: RED both {len(groups['both'])} | BLUE lidar {len(groups['lidar'])}"
-                       f" | AMBER camera {len(groups['camera'])} || PINK erased {len(groups['erased'])}")
+        legend.text = (f"blocked: RED lidar {len(groups['lidar'])} | ORANGE camera {len(groups['camera'])}"
+                       f" | PURPLE both {len(groups['both'])} || GREY erased {len(groups['erased'])}")
         if scope == "local":
             out.markers.append(legend)
         self._pubs[scope].publish(out)
