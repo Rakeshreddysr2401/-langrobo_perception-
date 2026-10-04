@@ -28,6 +28,26 @@ with furniture in front (takes the furniture); only `approach` sends `what=`
 **Keep regardless** (proven tonight): the camera re-calibration (add9474) and
 D1 -- ignore specks, prefer the middle of the box (866a97d, 1dc6d96).
 
+## 2026-10-04 (evening) — still open after the day's fixes
+
+The day fixed S1-S5, S7, S10, the ghost marks, the RViz colours and the lost
+CLI goals (sections below). What is left, most useful first:
+
+| # | what | evidence | next |
+|---|---|---|---|
+| E1 | **Studio arrival report not yet seen live** | the posting path is tested (a run posted to a scratch thread succeeded); no real drive started from Studio has reported back yet | drive from Studio ("go near the box"), watch the [SYSTEM] turn arrive in the thread: `/tmp/studio_test.py` on the Pi 5 does it through the API. Teleop must be AUTO |
+| E2 | **The way back, after its fixes, not re-run** | live 2026-10-04: started as designed (2 hops, 1.41 m nearer), then a real tight spot; the 45 s hop limit and the honest note came after | a blocked-doorway drive with the owner; expect a goal over in < MAX_S and a note that matches the failure |
+| E3 | **S6: a small turn stalls beside furniture** | a -27 deg turn beside the cot moved 1.5 deg, twice (goal_exec "turn stuck") | floor test with the rover beside the cot; swing check vs deadband |
+| E4 | **The Jetson is overloaded** (= issue 1) | load 12-14 on 6 cores today; nav2 needed two bringups; depth stopped 7.8 s mid-approach; ghost_clear adds ~15% of a core | the heavy Python nodes first (fusion2, lidar_odom); nvpmodel is the owner's call (power supply) |
+| E5 | **The vision model is slow** (= issue 3) | camera turns took 83-286 s in the 2026-10-04 conversation | Mac side: model / server flags (`--swa-full`, speculative decoding) |
+| E6 | **People cannot be recognised** | "go to my dad" now asks what he looks like (S5) -- safe, not smart | a face/person-ID step, owner's choice whether to build it |
+| E7 | **S8: corrections are not remembered** | "that screen is a cot" was only acknowledged | label a photo-log entry from a correction |
+| E8 | **ghost_clear at walls** | a few marks right AT walls 2+ m away were erased (a slanting wall's return from beyond them) | if the rover ever touches a low thing against a far wall: `ROVER_GHOST_CLEAR=off` and report |
+| E9 | **A LiDAR-layer mark in a shadow stays** | 1.4 m behind the rover, with something at 1.15 m in front of it: no beam reaches it | correct (nothing can say it is gone); clears when the blocker moves or the rover turns |
+| E10 | **The Bluetooth speaker** | `br-connection-page-timeout` after the power cut: off or out of range | switch it on; the voice service picks it up |
+| E11 | **Not pushed** | Jetson `rover-v1.1.7` 11 ahead, Pi 5 `dev-1.5.0-voice` 3 ahead of origin | push when the owner says |
+| E12 | **Saved places are gone** | the power cut restarted odom; places saved before it are in the old frame | re-save the ones wanted |
+
 ## 2026-10-04 — a Studio conversation with the robot, reviewed against the logs
 
 Studio thread `01a104f3`, 08:56-09:11, rover on the fused pose; checked against
