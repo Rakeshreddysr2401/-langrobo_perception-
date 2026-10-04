@@ -367,6 +367,9 @@ Visualization Manager:
     # only (low things under the 25 cm LiDAR plane -- and phantoms: reflections,
     # a tilted camera), small faint PINK = erased by ghost_clear (moved away).
     # One meaning per colour in this whole view. Legend with counts behind the rover.
+    # BOTH on by default (owner, 2026-10-04: "no hidden things"): the planner
+    # plans on the whole 8 x 8 m room, and without "room" the Walls layer drew
+    # everything there red -- a camera-only box looked like a wall.
     # "near" is the costmap the rover drives on; "room" is the 8 x 8 m one. ──
     - Class: rviz_default_plugins/MarkerArray
       Enabled: true
@@ -381,7 +384,7 @@ Visualization Manager:
         Value: /rover_view/blockers
       Value: true
     - Class: rviz_default_plugins/MarkerArray
-      Enabled: false
+      Enabled: true
       Name: Blockers - who says so (room)
       Namespaces:
         {}
