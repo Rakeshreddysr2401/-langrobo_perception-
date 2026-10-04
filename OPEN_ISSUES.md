@@ -167,6 +167,27 @@ real 9K jumbo. Traps found on the way (memory note): the D555 refuses pings > 14
 data is jumbo; it takes ~2 min to boot; plain `rs-enumerate-devices` in the container has no DDS (use
 `LD_LIBRARY_PATH=/root/librealsense/install/lib`).
 
+**2026-10-04 retest with the owner -- the switch drops every frame over ~1.5 kB.** Both cables were proven
+first, each on its own direct to the camera: the RealSense cable, and an unbranded Cat6+ that sent 45,105
+x 8968-byte payloads in 5 s, IR/depth 30 Hz, 0 errors, and real IR/colour/depth images (checked by eye).
+Then Jetson -> Cat6+ -> switch -> RealSense cable -> D555:
+
+| run | link (Jetson side) | largest frame from camera | topics |
+|---|---|---|---|
+| ports A, camera not power-cycled | 1000 Mb/s, 0 errors | 1384-byte payload; **0 jumbo** in 10 s | IMU 200.9 Hz; IR1, IR2, depth, colour, aligned: **no data** |
+| ports B (both cables moved), D555 PoE-cycled | 1000 Mb/s, 0 errors | 702-byte frame; **0 jumbo** in 10 s | IMU 201.8 Hz; every image topic **no data**; driver "notification sample(s) lost" x34, "control channel not ready" |
+
+Two ports and two runs, proven cables, and the same result: small packets pass and nothing large ever
+does. That is explanation (1) above. Explanation (2), a 100 Mb/s camera leg, would still let *some*
+9010-byte frames through, and none ever arrived. Return reason: the switch does not forward jumbo
+frames, which its wiki advertises (9216 bytes).
+
+**The Pi 5 cannot be the test partner for a ping sweep.** Its eth0 (macb, kernel 6.8.0-1065-raspi)
+reports maxmtu 10222 and takes MTU 9000 (only with the link down: "Device or resource busy"
+otherwise), but on a *direct* cable to the Jetson nothing over 1500 crossed in either direction, not even
+1600 bytes. Its rx counters didn't move and tcpdump on the Jetson saw only 1514-byte frames. Set back to
+1500 the same day. A ping sweep needs a laptop whose jumbo ping passes on a direct cable first.
+
 ## 2026-10-03 (night) — the Mitra twin (simulator) and what it found
 
 A laptop Gazebo twin of this rover: github.com/Rakeshreddysr2401/mitra_sim
