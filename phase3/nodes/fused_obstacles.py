@@ -33,7 +33,7 @@ from nav_msgs.msg import OccupancyGrid
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Header
 
-GRID = '/nvblox_node/static_occupancy_grid'
+GRID = '/ghost_clear/grid'      # nvblox minus moved things (phase2/nodes/ghost_clear.py)
 PASSED = '/depth_gate/passed'    # depth_gate.py: a frame went to nvblox
 RANGE = 2.5                      # m around the rover
 OCC = 50                         # occupancy >= this is an obstacle (nvblox: 0 / 100 / -1)

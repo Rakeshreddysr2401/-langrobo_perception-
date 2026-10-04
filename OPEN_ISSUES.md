@@ -37,6 +37,17 @@ Fixes are in the Pi 5 brain (`~/ros2_ws`) unless marked Jetson.
 Studio restarted); S7 + S10 in `3b15b5e` (reach: way back along its trail, look
 first, stop after 3 identical failures; live-tested, see the commit). The `rover
 wheels` check now also checks the ESP32 is subscribed to `/cmd_vel` (`2c29381`).
+**Ghost marks fixed 2026-10-04 (owner's choice: the LiDAR rule):**
+`phase2/nodes/ghost_clear.py` sits between nvblox and nav2 / goal_exec / reach
+(`/ghost_clear/grid`): a camera mark the LiDAR also hit is tall (a person);
+when the LiDAR sees through it, it is erased; marks under the rover are
+erased; a mark only the camera saw (a shoe) is never erased by the LiDAR.
+Floor-tested with the owner: legs left behind the rover after a turn were
+erased (no LiDAR there now); a box under the LiDAR beam stayed kept (45 marks,
+0 erased) with the camera turned 104 deg away. 15% of a core. Watch it:
+`phase2/tools/ghost_watch.py`; RViz: `/ghost_clear/erased`; off:
+`ROVER_GHOST_CLEAR=off`. Not yet seen: a few wall cells at 2+ m erased (a
+slanting wall's return from beyond them) -- watch for low things at walls.
 **Still open:** S6 (a small turn stalls beside furniture) needs a floor test; S8
 (user corrections) not started; the ghost marks themselves (below) -- the way
 back routes around them only when a look clears them. On 2026-10-04 the rover

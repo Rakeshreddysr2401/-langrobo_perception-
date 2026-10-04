@@ -150,6 +150,9 @@ def generate_launch_description():
                 #
                 # 0.0 disables it. The cost is that a moving object leaves a
                 # permanent ghost; the room does not move.
+                # Those ghosts are erased DOWNSTREAM since 2026-10-04, by
+                # phase2/nodes/ghost_clear.py: a mark the LiDAR also saw (tall:
+                # a person) and now sees through. Low things stay remembered.
                 'decay_tsdf_rate_hz': 0.0,
                 'decay_dynamic_occupancy_rate_hz': 0.0,
 

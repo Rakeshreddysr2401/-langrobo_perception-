@@ -523,7 +523,7 @@ global_costmap:
         # planner sees is unchanged; only the crashing code is gone.
         plugin: nav2_costmap_2d::StaticLayer
         enabled: true
-        map_topic: /nvblox_node/static_occupancy_grid
+        map_topic: /ghost_clear/grid    # nvblox minus moved things (phase2/nodes/ghost_clear.py)
         map_subscribe_transient_local: false   # nvblox publishes it volatile
         subscribe_to_updates: false
         trinary_costmap: true
@@ -754,7 +754,7 @@ local_costmap:
         # planner sees is unchanged; only the crashing code is gone.
         plugin: nav2_costmap_2d::StaticLayer
         enabled: true
-        map_topic: /nvblox_node/static_occupancy_grid
+        map_topic: /ghost_clear/grid    # nvblox minus moved things (phase2/nodes/ghost_clear.py)
         map_subscribe_transient_local: false   # nvblox publishes it volatile
         subscribe_to_updates: false
         trinary_costmap: true

@@ -573,6 +573,11 @@ map)
   echo "      built on /odom, not raw cuvslam: nvblox writes depth wherever the"
   echo "      pose claims the robot is, so a teleport smears the map permanently."
   dexec "ros2 launch $SRC2/launch/nvblox.launch.py > /tmp/map.log 2>&1"
+  # nvblox never forgets; ghost_clear erases the marks of things that moved
+  # (people), checked by the LiDAR -- never a low thing only the camera saw.
+  # nav2, goal_exec and reach read ITS grid (phase2/nodes/ghost_clear.py).
+  kill_match 'ghost_clear_node[.]py'
+  dexec "python3 $SRC2/nodes/ghost_clear_node.py > /tmp/ghost_clear.log 2>&1"
   # nvblox allocates GPU hash tables and warms up its integrators before it
   # publishes anything; checked too early it reads 0 Hz and looks broken.
   sleep 25
@@ -582,6 +587,7 @@ map)
   # nvblox_msgs/DistanceMapSlice, while the nav_msgs/OccupancyGrid RViz and
   # nav2 want is this one.
   assert_rate /nvblox_node/static_occupancy_grid 1 "2D occupancy grid" || true
+  assert_rate /ghost_clear/grid 1 "grid, moved things erased" || true
   # frames the turn gate handed to nvblox (depth_gate.py); back_projected_depth is a
   # debug picture at its own pace and read 3 Hz while nvblox integrated 9.7 (save_rates)
   assert_rate /depth_gate/passed 5 "depth to the map" || true
@@ -598,7 +604,7 @@ nav)
   need_container
   echo "  checking the pose and the map are up before planning on them..."
   assert_rate /odom 15 "fused odom" || die "no fused pose — run ./rover fused"
-  assert_rate /nvblox_node/static_occupancy_grid 1 "map" || die "no map — run ./rover map"
+  assert_rate /ghost_clear/grid 1 "map" || die "no map — run ./rover map"
   kill_match 'nav2_supervis[e]|nav2[.]launch[.]py'   # the supervisor and launch first, or they restart what follows
   kill_match 'nav2_|lifecycle_manager|controller_server|planner_server|bt_navigator|behavior_server|velocity_smoother'
   echo "[nav] nav2 — plan a route on the nvblox map and drive it"
@@ -1107,7 +1113,7 @@ status)
       "wheels:/wheel_state:15" \
       "fused:/odom:15" \
       "slam:/map:0.3" \
-      "map:/nvblox_node/static_occupancy_grid:1" \
+      "map:/ghost_clear/grid:1" \
       "nav:/global_costmap/costmap:0.5" \
       "nav:/local_costmap/costmap:1" \
       "map:/depth_gate/passed:5" \

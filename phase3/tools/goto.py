@@ -60,6 +60,12 @@ def main():
     print(f'  goal {g.header.frame_id}: ({gx:+.3f}, {gy:+.3f}, {math.degrees(gth):+.1f} deg)'
           + (f'   [relative {x:+.2f} m, {y:+.2f} m, {math.degrees(th):+.0f} deg]' if frame == 'rel' else ''))
     print('  THIS DRIVES THE ROVER. Ctrl-C cancels.')
+    # Seeing the node's subscription is not the node seeing us: one goal sent
+    # at once was lost (2026-10-04, twice -- no goal in its log, nothing
+    # moved). Let discovery finish on its side before the one publish.
+    end = time.time() + 0.5
+    while time.time() < end:
+        rclpy.spin_once(n, timeout_sec=0.05)
     pub.publish(g)
     t0, seen = time.time(), 0
     try:
