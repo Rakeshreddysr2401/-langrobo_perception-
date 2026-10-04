@@ -28,6 +28,27 @@ with furniture in front (takes the furniture); only `approach` sends `what=`
 **Keep regardless** (proven tonight): the camera re-calibration (add9474) and
 D1 -- ignore specks, prefer the middle of the box (866a97d, 1dc6d96).
 
+## 2026-10-04 — a Studio conversation with the robot, reviewed against the logs
+
+Studio thread `01a104f3`, 08:56-09:11, rover on the fused pose; checked against
+Jetson `reach` / `goal_exec` / `pixel_to_goal` logs and Pi 5 `/tmp/langgraph_dev.log`.
+Fixes are in the Pi 5 brain (`~/ros2_ws`) unless marked Jetson. None done yet.
+
+| # | what the robot did | what really happened (evidence) | fix |
+|---|---|---|---|
+| S1 | "Where are you now?" -> "about 1.5 m from the door" | it had **arrived** at 09:00:30, 4.4 cm (reach). Studio log: `nav done ... listener=NONE` -- the arrival was thrown away. The Dad drive's failure (09:16, "gave up after 4 attempts") was thrown away too, so "say good morning" could never run | Studio registers the nav-done + system-turn callbacks like agent_node (issue 8), or Studio refuses to drive and says so |
+| S2 | "check your location again" -> `move_robot S` (a STOP), then "I am positioned near the door" | no tool reports where the robot is or whether a drive is running; `get_robot_status` only says camera + body. It guessed, and stopped the robot to do it | `get_robot_status` adds pose, the active drive (label, distance left) and the last drive's result |
+| S3 | "send me the picture" -> "I have sent a photo to Rakesh" | the tool **failed**: `I don't know 'Boss' on Telegram`. Nothing was sent | "Boss"/"me" resolves to the owner; the failure text says "NOT sent -- tell the user" (as scan_surroundings does) |
+| S4 | "go near the person" -> after **286 s**: "couldn't measure the distance ... too close, too far, or reflective" | it **had driven 2.5 m** to her (reached 09:04:53, 7.5 cm). The arrival photo then lost its depth (`no_depth_near_stamp: 7849 ms`, `moved_before_depth`), the VLM took 45 s, the hold expired; the retry photo no longer showed her (she moved). The reply hid the drive and blamed reflectivity | the reply says what happened: "I got close; she moved out of view." Re-ground on the fresh photo without a second 45 s locate when the robot is still. Jetson: why depth stopped for 7.8 s after the drive (open issue 1) |
+| S5 | "go near my Dad" -> "I have located your father" | the robot cannot recognise people. Photo recall picked the floral-dress woman's spot (same pixel 56,164, same 2.74 m as 09:03), then the search took the first man it saw, 4.1 m away. It passed "the man who is my Dad" to the VLM verbatim | person identity: ask the user what Dad looks like (or say it cannot tell who is who) before driving. A tool rule, not a prompt hope |
+| S6 | door: first attempt "goal_exec stalled: turn stuck -26.8 deg" | Jetson: a -27 deg turn beside the cot moved 1.5 deg, twice; escape timed out, pass failed; reach gave up at 41 s. The search from where it stood then reached the door in 14 s | Jetson: why a small turn stalls next to furniture (swing check vs. deadband) -- reproduce beside the cot |
+| S7 | Dad drive: 316 s of "no path: planner found none" | the goal 4.1 m away (through the doorway) had no plan, 4 attempts; nobody was told (S1) | after S1, the failure reaches the user; reach could say "no path" after 2 tries, not 4 |
+| S8 | the woven cot was called "a decorative screen", and the correction was only acknowledged | VLM limit (issue 3); nothing stores a user's correction | optional: a user correction goes into the photo log as a label |
+| S9 | "what are you looking at" while in `navigate` -> tried `scan_surroundings` | the backstop caught it and handed to `local_agent` (works as designed) | -- |
+
+Slow turns: "move towards the door" 88 s, "go near the person" 286 s, "go near Dad" 83 s
+before its drive started -- most of it VLM round trips (issue 3).
+
 ## 2026-10-03 (late) — Pi 5 ssh/IDE, ports, real-rover bring-up
 
 Focus is the **real rover only**; the Mitra twin / Gazebo is parked (owner reviews it later).
