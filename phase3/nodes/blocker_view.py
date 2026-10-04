@@ -4,6 +4,7 @@
     /local_costmap/lidar_layer    nav_msgs/OccupancyGrid  (nav2's LiDAR layer, near the rover)
     /local_costmap/nvblox_layer   nav_msgs/OccupancyGrid  (nav2's camera layer, near the rover)
     /global_costmap/{lidar,nvblox}_layer                  (the same for the 8 x 8 m room view)
+    /ghost_clear/erased           nav_msgs/OccupancyGrid  (camera marks erased as moved away)
     /vision/pixel_result          std_msgs/String JSON    (pixel_to_goal's answer)
         -> /rover_view/blockers       visualization_msgs/MarkerArray  (near, ~1.7 Hz)
         -> /rover_view/blockers_room  visualization_msgs/MarkerArray  (room, ~0.8 Hz)
@@ -13,6 +14,10 @@
     ORANGE  only the camera says blocked (low things under the LiDAR -- and
             phantoms: reflections on the glossy floor, a tilted camera)
     PURPLE  both agree
+    GREY    a camera mark ghost_clear ERASED: something that reached the LiDAR
+            plane (a person) and has since moved away (phase2/nodes/ghost_clear.py,
+            /ghost_clear/erased). Not a blocker any more -- shown so you can see
+            it happen
     GREEN   the object the brain picked (sphere) and the goal pose (arrow),
             labelled "<what>: <source> <depth> m"
 
@@ -41,6 +46,7 @@ ORANGE = ColorRGBA(r=1.0, g=0.6, b=0.0, a=0.9)
 PURPLE = ColorRGBA(r=0.65, g=0.2, b=0.9, a=0.9)
 GREEN = ColorRGBA(r=0.1, g=0.9, b=0.3, a=0.95)
 WHITE = ColorRGBA(r=1.0, g=1.0, b=1.0, a=1.0)
+GREY = ColorRGBA(r=0.8, g=0.8, b=0.8, a=0.6)
 
 
 def classify(lidar: np.ndarray, camera: np.ndarray) -> dict:
@@ -79,9 +85,15 @@ class BlockerView(Node):
                 self.create_subscription(
                     OccupancyGrid, f"/{scope}_costmap/{layer}_layer",
                     lambda m, s=scope, l=layer: self._on_grid(s, l, m), latched)
+        # ghost_clear publishes volatile: a latched (transient-local) reader would not match
+        self._erased = None
+        self.create_subscription(
+            OccupancyGrid, "/ghost_clear/erased", lambda m: setattr(self, "_erased", m),
+            QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE))
         self._target_pub = self.create_publisher(MarkerArray, "/rover_view/target", latched)
         self.create_subscription(String, "/vision/pixel_result", self._on_result, 10)
-        self.get_logger().info("blocker_view up: RED LiDAR, ORANGE camera only, PURPLE both, GREEN target")
+        self.get_logger().info("blocker_view up: RED LiDAR, ORANGE camera only, PURPLE both, "
+                               "GREY erased (moved away), GREEN target")
 
     def _on_grid(self, scope: str, layer: str, msg: OccupancyGrid) -> None:
         self._grids[(scope, layer)] = msg
@@ -98,8 +110,16 @@ class BlockerView(Node):
         cam = crop_to(np.asarray(ca.data, dtype=np.int16).reshape(ca.info.height, ca.info.width),
                       (ca.info.origin.position.x, ca.info.origin.position.y), (ox, oy), (w, h), res)
         groups = classify(np.asarray(li.data, dtype=np.int16), cam.ravel())
+        er = self._erased
+        if er is not None and abs(er.info.resolution - res) < 1e-6:
+            e = crop_to(np.asarray(er.data, dtype=np.int16).reshape(er.info.height, er.info.width),
+                        (er.info.origin.position.x, er.info.origin.position.y), (ox, oy), (w, h), res)
+            groups["erased"] = np.flatnonzero(e.ravel() >= LETHAL)
+        else:
+            groups["erased"] = np.zeros(0, dtype=np.int64)
         out = MarkerArray()
-        for i, (name, color) in enumerate((("lidar", RED), ("camera", ORANGE), ("both", PURPLE))):
+        for i, (name, color) in enumerate((("lidar", RED), ("camera", ORANGE), ("both", PURPLE),
+                                           ("erased", GREY))):
             m = Marker()
             m.header = li.header
             m.ns, m.id, m.type = f"blocked_{name}", i, Marker.CUBE_LIST
@@ -122,7 +142,7 @@ class BlockerView(Node):
         legend.scale.z = 0.06
         legend.color = WHITE
         legend.text = (f"blocked: RED lidar {len(groups['lidar'])} | ORANGE camera {len(groups['camera'])}"
-                       f" | PURPLE both {len(groups['both'])}")
+                       f" | PURPLE both {len(groups['both'])} || GREY erased {len(groups['erased'])}")
         if scope == "local":
             out.markers.append(legend)
         self._pubs[scope].publish(out)
