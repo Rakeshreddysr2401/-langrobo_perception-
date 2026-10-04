@@ -20,6 +20,10 @@ EACH ATTEMPT
     far  (> EXACT_RANGE)  nav2 to the goal, then goal_exec's exact finish
     near (<= EXACT_RANGE) goal_exec straight away (turn, straight line, 5 cm)
     fails ->
+      0. "no path": the WAY BACK first (trail.py) -- look down the route the
+         rover drove, then retrace it in ~1 m nav2 hops to its point nearest
+         the goal. The same failure SAME_FAILS times running from one spot
+         ends the goal: more rounds would be the same move again
       1. stop; clear both costmaps (stale marks from people close gaps)
       2. LOOK: face the goal if it is off to the side, then ±25 deg -- the
          camera sees 87 deg and nothing at its nose; this fills in both
@@ -52,6 +56,7 @@ from std_msgs.msg import Empty, String
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'tools'))
 import gap_pass as GP  # noqa: E402
+import trail as TR  # noqa: E402
 from goal_exec import FRONT as GE_FRONT, REAR as GE_REAR, SIDE, wrap  # noqa: E402
 
 EXACT_RANGE = 1.2      # m: closer than this, goal_exec alone (its MAX_LEG is 1.5)
@@ -107,6 +112,18 @@ NAV2_ARRIVED_M = 0.15
 # within ~10 cm, not ~1 cm. Short goals (<= EXACT_RANGE), which go to
 # goal_exec from the start, keep its 1 cm docking.
 FINISH_NEAR = 0.10
+# The way back (trail.py): seconds facing down the trail before driving it, so
+# the camera can clear stale marks it sees past (nvblox clears a cell only by
+# seeing beyond it, 0.4-3 m out); and at most this many per goal.
+WAY_BACK_LOOK_S = 4.0
+WAY_BACKS = 2
+# a hop is ~1 m: nav2 gets this long, not NAV_TIMEOUT -- live test 2026-10-04,
+# two blocked hops at 120 s each took the goal to 541 s
+WAY_BACK_HOP_S = 45.0
+# The same failure from the same spot this many times in a row ends the goal:
+# one repeat is allowed (a person in the way moves on during the wait), more
+# is the same move again.
+SAME_FAILS = 3
 NAV_LOG = Path('/tmp/nav.log')
 
 
@@ -144,7 +161,15 @@ class Reach(GP.Pass):
         # the planner's own costmap: a snapped goal must be one IT accepts
         self.create_subscription(OccupancyGrid, '/global_costmap/costmap', lambda m: setattr(self, 'gcm', m), latched)
         self.create_subscription(Empty, '/reach/cancel', lambda _: setattr(self, 'stop_req', True), 10)
+        # where reach has driven: its own drives only, so a carry is not a road
+        self.trail = TR.Trail()
+        self.pursuing = False
         self.get_logger().info('reach up: /reach/goal (RViz 2D Goal Pose)')
+
+    def _odom(self, m):
+        super()._odom(m)
+        if self.pursuing:
+            self.trail.add(self.pose[0], self.pose[1])
 
     def _goal(self, m):
         self.pending = m
@@ -189,7 +214,7 @@ class Reach(GP.Pass):
                 c.call_async(ClearEntireCostmap.Request())
         self.spin_for(0.5)
 
-    def run_nav2(self, g):
+    def run_nav2(self, g, timeout=NAV_TIMEOUT):
         if not self.nav.wait_for_server(timeout_sec=3):
             return 'failed', 'nav2 not up'
         try:
@@ -210,7 +235,7 @@ class Reach(GP.Pass):
         res = gh.get_result_async()
         while not res.done():
             self.spin_for(0.1)
-            if self.stop_req or time.time() - t0 > NAV_TIMEOUT:
+            if self.stop_req or time.time() - t0 > timeout:
                 gh.cancel_goal_async()
                 self.spin_for(0.5)
                 # say WHY it ran out of time: a far goal whose route kept
@@ -510,6 +535,44 @@ class Reach(GP.Pass):
         self.say(attempt=attempt, phase='approach', outcome=r, gained_m=round(gained, 2), why=why)
         return gained >= self.APPROACH_GAIN
 
+    def way_back(self, attempt, g, deadline):
+        """Retrace the trail toward g (trail.py) until deadline (time.time()).
+        Returns ('reached' | 'none' | 'blocked' | 'cancelled', why) -- why is
+        the blocked hop's failure."""
+        hops = self.trail.way_back(self.pose, g)
+        if not hops:
+            self.say(attempt=attempt, phase='way_back', outcome='none', why='no trail leads nearer the goal')
+            return 'none', ''
+        end = hops[-1]
+        self.say(attempt=attempt, phase='way_back', hops=len(hops),
+                 to=[round(end[0], 2), round(end[1], 2)],
+                 gain_m=round(self.dist(g) - math.hypot(g[0] - end[0], g[1] - end[1]), 2))
+        for k, h in enumerate(hops, 1):
+            for look in (True, False):
+                if self.stop_req:
+                    return 'cancelled', ''
+                if time.time() > deadline:
+                    return 'blocked', 'out of time for this goal'
+                if look:
+                    # face the hop and hold still: the camera re-sees the way
+                    self.dobs.set_active(True)
+                    self.face(math.atan2(h[1] - self.pose[1], h[0] - self.pose[0]))
+                    self.spin_for(WAY_BACK_LOOK_S)
+                    self.dobs.set_active(False)
+                hop, _, _ = self.fit(h)
+                r, why = self.run_nav2(hop, timeout=WAY_BACK_HOP_S)
+                if r == 'reached' or self.stop_req:
+                    break
+                self.say(attempt=attempt, phase='way_back', hop=k, outcome=r, why=why,
+                         retry='after a look' if look else 'no')
+                if not look:
+                    return 'blocked', why
+                # first try blocked: look again from here, once
+            if self.stop_req:
+                return 'cancelled', ''
+        self.say(attempt=attempt, phase='way_back', outcome='reached', dist_m=round(self.dist(g), 2))
+        return 'reached', ''
+
     def look_and_pass_far(self, attempt, g):
         """Face the goal, look both ways (outline-checked), then measure a
         straight pass from here, longest first and never past the goal; crawl
@@ -574,9 +637,11 @@ class Reach(GP.Pass):
         # Depth is subscribed only while RECOVERING (escape / look / pass use
         # it; nav2 and goal_exec do not): ~30% of a core for the whole drive
         # before (2026-09-28, load 9 on 6 cores, MPPI starved to 8.7 Hz).
+        self.pursuing = True
         try:
             self._pursue(m)
         finally:
+            self.pursuing = False
             self.dobs.set_active(False)
 
     def _pursue(self, m):
@@ -598,6 +663,8 @@ class Reach(GP.Pass):
         # same drive test had a goal 0.76 m behind in open floor refused 7
         # times on its line (squeeze, wait, same line) and never tried nav2.
         go_nav2 = False
+        prev_fail, same = None, 1   # last failed attempt (why, (x, y)); how many alike in a row
+        way_backs, way_note = 0, ''
         for attempt in range(1, MAX_ATTEMPTS + 1):
             self.dobs.set_active(False)             # driving: nav2 / goal_exec need none
             if self.stop_req or time.time() - t0 > MAX_S:
@@ -670,6 +737,18 @@ class Reach(GP.Pass):
                 go_nav2 = True
                 self.say(attempt=attempt, phase='recover', why=why + ' -- nav2 next')
                 continue
+            # The same failure from the same spot, recovered from and back
+            # again: another round is the same move again. 2026-10-04: four
+            # "no path" from one spot behind a cot, 316 s, before reach gave up.
+            same = same + 1 if TR.same_failure(prev_fail, why, self.pose[:2]) else 1
+            if same >= SAME_FAILS:
+                self.stop()
+                self.say(result='failed', attempt=attempt,
+                         why=f'no way from here: {why} -- {same} times from the same spot',
+                         secs=round(time.time() - t0), tried=tried,
+                         **({'note': way_note} if way_note else {}))
+                return
+            prev_fail = (why, self.pose[:2])
             self.say(attempt=attempt, phase='recover', why=why)
             # ── recover: stop, clear, look, then pass if narrow, else wait ──
             self.stop()
@@ -688,6 +767,15 @@ class Reach(GP.Pass):
             # no route to the goal: look both ways and try a straight pass from
             # HERE first; only if no line fits, go as near as a route goes
             looked = False
+            if 'no path' in why and way_backs < WAY_BACKS:
+                way_backs += 1
+                out, hop_why = self.way_back(attempt, g, t0 + MAX_S)
+                if out == 'reached':
+                    continue
+                if out == 'cancelled' or self.stop_req:
+                    break
+                if out == 'blocked':
+                    way_note = TR.way_back_note(hop_why)
             if 'no path' in why:
                 out = self.look_and_pass_far(attempt, g)
                 if out == 'reached':
@@ -715,7 +803,8 @@ class Reach(GP.Pass):
             self.spin_for(WAIT_S)
         self.stop()
         self.say(result='cancelled' if self.stop_req else 'failed',
-                 why=f'gave up after {len(tried)} attempts, {time.time() - t0:.0f} s', tried=tried)
+                 why=f'gave up after {len(tried)} attempts, {time.time() - t0:.0f} s', tried=tried,
+                 **({'note': way_note} if way_note and not self.stop_req else {}))
 
 
 def main():
