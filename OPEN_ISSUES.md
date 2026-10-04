@@ -32,7 +32,19 @@ D1 -- ignore specks, prefer the middle of the box (866a97d, 1dc6d96).
 
 Studio thread `01a104f3`, 08:56-09:11, rover on the fused pose; checked against
 Jetson `reach` / `goal_exec` / `pixel_to_goal` logs and Pi 5 `/tmp/langgraph_dev.log`.
-Fixes are in the Pi 5 brain (`~/ros2_ws`) unless marked Jetson. None done yet.
+Fixes are in the Pi 5 brain (`~/ros2_ws`) unless marked Jetson.
+**Fixed 2026-10-04:** S1-S5 in Pi 5 `a362e8a` (492 tests pass; deployed, brain +
+Studio restarted); S7 + S10 in `3b15b5e` (reach: way back along its trail, look
+first, stop after 3 identical failures; live-tested, see the commit). The `rover
+wheels` check now also checks the ESP32 is subscribed to `/cmd_vel` (`2c29381`).
+**Still open:** S6 (a small turn stalls beside furniture) needs a floor test; S8
+(user corrections) not started; the ghost marks themselves (below) -- the way
+back routes around them only when a look clears them. On 2026-10-04 the rover
+was boxed in by marks under its own outline (LiDAR nearest 31 cm) and only a
+map restart (`./rover map`) freed it. Clearing them for real is a choice for
+the owner: nvblox decay off is deliberate (launch file, "DO NOT LET THE MAP
+FORGET"), so the options are a slow decay, nvblox's dynamic mode, or clearing
+marks the rover's own body has driven over.
 
 | # | what the robot did | what really happened (evidence) | fix |
 |---|---|---|---|
