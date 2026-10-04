@@ -41,7 +41,7 @@ obstacle suite. What is left, most useful first:
 
 | # | what | evidence | next |
 |---|---|---|---|
-| E1 | **Studio arrival report not yet seen live** | the posting path is tested (a run posted to a scratch thread succeeded); no real drive started from Studio has reported back yet | drive from Studio ("go near the box"), watch the [SYSTEM] turn arrive in the thread: `/tmp/studio_test.py` on the Pi 5 does it through the API. Teleop must be AUTO |
+| E1 | ~~Studio arrival report not yet seen live~~ **passed 2026-10-04** | Studio "go near the box": drove (1.1 m), and 22 s later "[SYSTEM] Navigation succeeded ... I can see the box ... 0.5 m away" arrived in the Studio thread by itself; "where are you?" then said "arrived 37 s ago". Cosmetic: the arrival check reads "the box in front of me in front of me" (the description is quoted inside a sentence that says it again) | trim "in front of me"-style phrases in `approach.arrival_check` |
 | E2 | **The way back, after its fixes, not re-run** | live 2026-10-04: started as designed (2 hops, 1.41 m nearer), then a real tight spot; the 45 s hop limit and the honest note came after | a blocked-doorway drive with the owner; expect a goal over in < MAX_S and a note that matches the failure |
 | E3 | **S6: a small turn stalls beside furniture** | a -27 deg turn beside the cot moved 1.5 deg, twice (goal_exec "turn stuck") | floor test with the rover beside the cot; swing check vs deadband |
 | E4 | **The Jetson is overloaded** (= issue 1) | load 12-14 on 6 cores today; nav2 needed two bringups; depth stopped 7.8 s mid-approach; ghost_clear adds ~15% of a core | the heavy Python nodes first (fusion2, lidar_odom); nvpmodel is the owner's call (power supply) |
