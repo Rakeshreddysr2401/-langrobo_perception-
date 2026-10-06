@@ -1,5 +1,14 @@
 # Open issues — where things stand, 2026-10-04
 
+## 2026-10-07 — bench mode: rover taken apart for cleaning (same build returns)
+
+| item | finding | status |
+|---|---|---|
+| D555, direct cable to the Jetson | no switch: `enP8p1s0` MTU 9000, IR 29.9 Hz, depth 29.9 Hz, emitter off. Confirms the Waveshare switch was the jumbo-frame fault | works |
+| LiDAR, ESP32, BT speaker | not connected (taken apart) | `./rover up` stops at `lidar` by design until the rebuild |
+| camera to brain without a pose | the `vlm` layer refuses without `/odom`, so `image_bridge.py` was started by hand: colour 4.6 Hz received on the Pi 5. `look()` works; nothing can drive | bench only |
+| PyCharm Gateway, MacBook (.6) to Pi 5 | Pi side is fine: the 2026-10-06 21:01 session connected and opened `~/ros2_ws`; it ended at the power cut (log ends in NULs). `.idea` files checked, not corrupted. The Pi announces itself as `rakhi24-desktop` (resolves only as `.local`), and an old Gateway entry pointed at the dead .22 | **owner, on the Mac:** key login + `Host pi5` (HostName 192.168.1.16) in `~/.ssh/config`, delete old Gateway entries, connect with key pair to 192.168.1.16, PyCharm 252.26830.27, `/home/rakhi24/ros2_ws` |
+
 ## TRIAL in place: LiDAR grounding for doors / walls (G1) -- verify or remove
 
 **What it does:** when the brain asks to approach a door, wall, cupboard, wardrobe,
