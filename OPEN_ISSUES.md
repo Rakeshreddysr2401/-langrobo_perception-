@@ -198,6 +198,17 @@ otherwise), but on a *direct* cable to the Jetson nothing over 1500 crossed in e
 1500 the same day. A ping sweep needs a laptop whose jumbo ping passes on a direct cable first.
 The procedure for that, from the Mac mini: [WAVESHARE_SWITCH_TEST.md](WAVESHARE_SWITCH_TEST.md).
 
+**2026-10-07 retest, direct cable Jetson `enP8p1s0` <-> Pi 5 `eth0` -- jumbo frames DO work; the note above is overturned.**
+Pi 5 set with `sudo ip link set eth0 down; ... mtu 9000; ... up` (temporary, run over WiFi SSH); Jetson given a
+temporary 192.168.2.70/24 on `enP8p1s0` (Pi 5 eth0 is 192.168.2.10/24), removed afterwards. Both links 1000 Mb/s.
+Ping with DF set: payloads 1472/1600/2000/4000/8000/8972 all 5/5 Jetson->Pi, 1472/1600/4000/8972 all 5/5 Pi->Jetson,
+RTT 0.6 ms at 8972. Then 2000 x 8972-byte pings at 2 ms spacing: 2000/2000, 0 errors/drops; the Ethernet port carried
+18 MB (2110 packets, ~8.6 kB each) while WiFi sent 107 kB, and WiFi's MTU is 1500 so DF jumbo cannot route there.
+Before the Pi 5 was at 9000, everything over 1472 failed, so the earlier "nothing over 1500 crossed" was most likely
+the MTU not actually applied (NetworkManager's `netplan-eth0` has mtu `auto`; check `ip link show eth0` after setting).
+**So the Pi 5 IS a valid jumbo test partner** for the switch sweep (WAVESHARE_SWITCH_TEST.md) -- no laptop needed.
+The Pi 5's MTU 9000 lasts until reboot.
+
 ## 2026-10-03 (night) — the Mitra twin (simulator) and what it found
 
 A laptop Gazebo twin of this rover: github.com/Rakeshreddysr2401/mitra_sim
