@@ -209,6 +209,14 @@ the MTU not actually applied (NetworkManager's `netplan-eth0` has mtu `auto`; ch
 **So the Pi 5 IS a valid jumbo test partner** for the switch sweep (WAVESHARE_SWITCH_TEST.md) -- no laptop needed.
 The Pi 5's MTU 9000 lasts until reboot.
 
+**2026-10-07, same pair through the Waveshare switch -- the switch has a hard 1500-byte limit. Final.**
+Jetson and Pi 5 each on a switch port, both MTU 9000, both 1000 Mb/s, same addresses. DF ping payloads Jetson->Pi:
+1472 passes (3/3); 1480, 1500, 1518, 1550, 1600, 2000, 4000, 8972 all 0/3. Pi->Jetson: 1472 passes; 1500, 1600, 8972
+all 0/3. The owner's own run: 1472 10/10, 8972 0/10. The cutoff is exactly a standard 1518-byte Ethernet frame
+(1500-byte IP packet), so the switch does not do jumbo at all, whatever the wiki says. Every part other than the switch
+is proven (both cables, D555, Jetson, Pi 5). **Return/replace the switch; any replacement must be tested with this
+same ping (`ping -M do -s 8972`) before the camera goes on it.**
+
 ## 2026-10-03 (night) — the Mitra twin (simulator) and what it found
 
 A laptop Gazebo twin of this rover: github.com/Rakeshreddysr2401/mitra_sim
