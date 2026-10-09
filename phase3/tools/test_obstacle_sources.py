@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """test_obstacle_sources.py — offline checks of fused_obstacles + turn_gate.
 
-    python3 phase3/tools/test_obstacle_sources.py      (no robot, no ROS graph)
+    python3 phase3/tools/test_obstacle_sources.py      (in the container: imports nav_msgs; no robot, no ROS graph)
 
 fused_obstacles: each occupied cell is its four corners; a cell under the
 rover is ignored, one just past its side is kept; a grid without a recent

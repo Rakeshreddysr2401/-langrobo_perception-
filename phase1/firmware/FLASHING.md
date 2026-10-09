@@ -1,5 +1,35 @@
 # Flashing the ESP32
 
+## Serial transport (2026-10-07)
+
+The ESP32 now reaches the Pi 5 over its **USB cable**, not WiFi. The switch is
+`#define UROS_SERIAL 1` at the top of the sketch:
+
+- **1 (default)** -- micro-ROS on `Serial` at 115200; the Pi 5 agent opens
+  `/dev/ttyUSB0` (`~/ros2_ws/scripts/run_microros.sh`). WiFi and OTA are not
+  compiled in, and **every debug print is compiled out**: the cable carries
+  micro-ROS frames only, so the serial-monitor check below no longer applies
+  (verify with `./rover wheels` instead). No WiFi password needed.
+- **0** -- the old WiFi UDP link + OTA + debug prints, as described below. Run
+  the Pi 5 agent with `run_microros.sh udp` to match.
+
+**Flash from the Pi 5 itself** (no laptop, no IDE; set up 2026-10-07 with
+arduino-cli at `~/.local/bin`, esp32 core 3.3.12 trimmed to the classic ESP32,
+ESP32Encoder 5.0.0, micro_ros_arduino jazzy in `~/Arduino/libraries`):
+
+```bash
+sudo systemctl stop langrobo-microros          # the agent holds the port
+mkdir -p /tmp/rover_firmware_v2 && scp rakhi-jetson.local:rover/phase1/firmware/rover_firmware_v2.ino /tmp/rover_firmware_v2/
+arduino-cli compile --fqbn esp32:esp32:esp32 /tmp/rover_firmware_v2
+arduino-cli upload  --fqbn esp32:esp32:esp32:UploadSpeed=921600 -p /dev/ttyUSB0 /tmp/rover_firmware_v2
+sudo systemctl start langrobo-microros
+```
+
+The agent resets the ESP32 every time it starts (`run_microros.sh`): over serial
+the board does not recover on its own from an agent that went away mid-session.
+Benign at boot: eight `gpio_pullup_en ... input-only pad has no internal PU`
+lines from ESP32Encoder on pins 34-39 -- the pull-ups are off by design.
+
 ## Why this needs doing
 
 **One line changed on 2026-08-15: `/wheel_state` is now a RELIABLE publisher.**

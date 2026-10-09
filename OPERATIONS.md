@@ -181,7 +181,9 @@ ros2 topic echo /rover_diag --once      # the board's own report
 (2 = connected). **If `loop()` is in the hundreds, the firmware is fine and the
 problem is the network.** That distinction used to cost a day.
 
-Jitter with a healthy `loop()` means WiFi. Check signal:
+The ESP32 is on the Pi 5's USB cable since 2026-10-07, so its own link has no
+WiFi in it; `/wheel_state` still crosses the **Pi 5 <-> Jetson WiFi** to get
+here. Jitter at the Jetson with a steady 20 Hz on the Pi 5 means that WiFi. Check signal:
 
 ```bash
 iw dev wlP1p1s0 link | grep -iE 'signal|bitrate'
@@ -255,6 +257,20 @@ subscribing to nothing. Use `./rover view` from the Jetson, or `bash
 over ssh into a login screen renders into a void and exits 0. The launcher
 refuses in that case and says so rather than reporting success; log in there and
 re-run, or start it on the laptop by hand with the command above.
+
+**The laptop key (`rover-laptop`).** The launcher checks the laptop's ssh host
+key under the alias `rover-laptop`, not under its DHCP address -- keyed by IP,
+every new address was an unknown host, BatchMode refused it, and the search
+walked past the laptop (2026-10-09, at .5). Written once, per Jetson:
+
+```bash
+ssh-keyscan -t ed25519 <laptop ip> | sed 's/^[^ ]*/rover-laptop/' > /tmp/lk
+ssh-keygen -lf /tmp/lk     # must match the Pi 5's: ssh-keygen -lF rakhi24.local
+cat /tmp/lk >> ~/.ssh/known_hosts
+```
+
+"Did not answer ssh within 15 s" is the WiFi (or that key), never a login
+problem; the launcher says which.
 
 It does **not** decide that by looking for an `Xwayland` process any more. GNOME
 starts Xwayland on demand, so a freshly logged-in laptop has none and used to be

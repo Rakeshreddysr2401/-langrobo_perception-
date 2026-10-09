@@ -4,7 +4,9 @@
 //  Hardware : ESP32 DevKit V1, 2x BTS7960 (IBT-2), 4x Rhino GB37 encoder DC
 //             motors (12V, 180/193 RPM, 1:30 gear), differential drive
 //             (2 motors per side, paralleled onto ONE BTS7960 per side).
-//  Transport: WiFi UDP -> micro_ros_agent on Pi5 (192.168.1.16:8888)
+//  Transport: USB serial -> micro_ros_agent on Pi5 (/dev/ttyUSB0 @115200)
+//             (UROS_SERIAL 1, since 2026-10-07). UROS_SERIAL 0 = the old WiFi
+//             UDP link to 192.168.1.16:8888, with OTA.
 //
 //  ── ARCHITECTURE (why it's accurate + nav2-ready) ────────────────────────────
 //  The PID control loop runs on its OWN FreeRTOS task (core 1, high priority) at a
@@ -39,7 +41,7 @@
 //
 //  ── SAFETY ───────────────────────────────────────────────────────────────────
 //  500 ms /cmd_vel watchdog (silence -> stop). Motors driven ONLY while the agent
-//  is connected AND a fresh command exists. WiFi agent-reconnect state machine.
+//  is connected AND a fresh command exists. Agent-reconnect state machine.
 //
 //  ── TOOLCHAIN (ESP32 Arduino core 3.x + micro_ros_arduino) ──────────────────
 //   * core 3.x LEDC is by-PIN: ledcAttach(pin,freq,res) + ledcWrite(pin,duty).
@@ -58,8 +60,16 @@
 //  LIBRARIES: micro_ros_arduino (jazzy) + ESP32Encoder (madhephaestus)
 // ============================================================
 
+// 1 = micro-ROS over the USB cable to the Pi5 (CP2102, 115200 baud). The
+// cable then carries ONLY micro-ROS frames, so every debug print below is
+// compiled out -- one stray byte on that line corrupts the XRCE stream.
+// 0 = WiFi UDP to the Pi5 + OTA, with debug prints on the serial monitor.
+#define UROS_SERIAL 1
+
+#if !UROS_SERIAL
 #include <WiFi.h>
 #include <ArduinoOTA.h>
+#endif
 #include <ESP32Encoder.h>
 #include <math.h>
 
@@ -73,7 +83,16 @@
 #include <geometry_msgs/msg/vector3.h>
 #include <geometry_msgs/msg/quaternion.h>   // 4 doubles -> the four wheels
 
-// ── WiFi + agent ─────────────────────────────────────────────────────────────
+#if UROS_SERIAL
+#define LOGF(...)  do {} while (0)
+#define LOGLN(x)   do {} while (0)
+#else
+#define LOGF(...)  Serial.printf(__VA_ARGS__)
+#define LOGLN(x)   Serial.println(x)
+#endif
+
+// ── WiFi + agent (UROS_SERIAL 0 only) ────────────────────────────────────────
+#if !UROS_SERIAL
 //  Fill WIFI_PASS locally before flashing. Do NOT commit real credentials.
 const char* WIFI_SSID  = "Airtel_Singireddy's";
 const char* WIFI_PASS  = "YOUR_WIFI_PASSWORD";   // <-- set locally
@@ -82,6 +101,7 @@ const uint16_t AGENT_PORT = 8888;
 const char* OTA_HOSTNAME = "rover-esp32";
 // OTA left UNAUTHENTICATED for bench work — set a password before deployment:
 // #define OTA_PASSWORD "choose-something"
+#endif
 
 // ── Motor driver pins (BTS7960) ──────────────────────────────────────────────
 #define L_RPWM 18
@@ -135,7 +155,7 @@ volatile float gKi = 2.0f;
 volatile float gMinDuty = 0.08f;            // static-friction breakaway
 float integL = 0.0f, integR = 0.0f;         // PID integrators (control task only)
 
-#define DEBUG_SERIAL 1     // 1 = control task prints IN/OUT at ~2 Hz @115200
+#define DEBUG_SERIAL (!UROS_SERIAL)  // control task prints IN/OUT at ~2 Hz @115200 (WiFi build only)
 
 // ── Shared state (single-core: loop + control task both on core 1 -> aligned
 //    32-bit float/uint reads are atomic; volatile is enough, no mutex needed) ──
@@ -299,7 +319,7 @@ void controlTask(void* /*arg*/) {
 #if DEBUG_SERIAL
         if (++dbg >= (CONTROL_HZ / 2)) {   // ~2 Hz -> confirms the loop really runs at 50 Hz
             dbg = 0;
-            Serial.printf("IN vx=%.2f wz=%.2f | OUT velL=%.2f velR=%.2f | odom(x=%.2f y=%.2f th=%.2f) dt=%.3f\n",
+            LOGF("IN vx=%.2f wz=%.2f | OUT velL=%.2f velR=%.2f | odom(x=%.2f y=%.2f th=%.2f) dt=%.3f\n",
                           tvx, twz, velL, velR, odomX, odomY, odomTh, dt);
         }
 #endif
@@ -325,7 +345,7 @@ void pidGainsCb(const void* msgIn) {   // live tuning: Vector3 x=Kp y=Ki z=minMo
     gKp = kp; gKi = ki; gMinDuty = md;
     if (changed) {
         integL = integR = 0.0f;
-        Serial.printf("[PID] set Kp=%.3f Ki=%.3f minDuty=%.3f\n", gKp, gKi, gMinDuty);
+        LOGF("[PID] set Kp=%.3f Ki=%.3f minDuty=%.3f\n", gKp, gKi, gMinDuty);
     }
 }
 
@@ -335,7 +355,7 @@ void pidGainsCb(const void* msgIn) {   // live tuning: Vector3 x=Kp y=Ki z=minMo
 // "start counting from here".
 void resetOdomCb(const void* /*msgIn*/) {
     odomResetReq = true;
-    Serial.println("[odom] reset requested");
+    LOGLN("[odom] reset requested");
 }
 
 // ── micro-ROS entity lifecycle ───────────────────────────────────────────────
@@ -349,7 +369,7 @@ void resetOdomCb(const void* /*msgIn*/) {
 // itself). Never drop /wheel_ticks.
 #define INIT_OR_FAIL(call, what) do {                                   \
     if ((call) != RCL_RET_OK) {                                         \
-        Serial.printf("[uROS] FAILED to create %s — entity limit?\n", what); \
+        LOGF("[uROS] FAILED to create %s — entity limit?\n", what); \
         return false;                                                   \
     }                                                                   \
 } while (0)
@@ -416,7 +436,7 @@ bool createEntities() {
     timeSynced = false;
 #endif
     lastCmdMs = millis();
-    Serial.printf("[uROS] entities live (time sync %s) — IN /cmd_vel /pid_gains, OUT /wheel_state\n",
+    LOGF("[uROS] entities live (time sync %s) — IN /cmd_vel /pid_gains, OUT /wheel_state\n",
                   timeSynced ? "OK" : "off");
     return true;
 }
@@ -432,14 +452,14 @@ void destroyEntities() {
     rclc_executor_fini(&executor);
     rcl_node_fini(&node);
     rclc_support_fini(&support);
-    Serial.println("[uROS] entities destroyed");
+    LOGLN("[uROS] entities destroyed");
 }
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
 void setup() {
     Serial.begin(115200);
     delay(500);
-    Serial.println("=== Rover ESP32 v2 (BTS7960 + encoders, RT control task) ===");
+    LOGLN("=== Rover ESP32 v2 (BTS7960 + encoders, RT control task) ===");
 
     // BTS7960 enables HIGH
     pinMode(L_REN, OUTPUT); pinMode(L_LEN, OUTPUT);
@@ -453,7 +473,7 @@ void setup() {
     pwmOK &= ledcAttach(L_LPWM, PWM_FREQ, PWM_RES);
     pwmOK &= ledcAttach(R_RPWM, PWM_FREQ, PWM_RES);
     pwmOK &= ledcAttach(R_LPWM, PWM_FREQ, PWM_RES);
-    Serial.printf("[PWM] attach %s\n", pwmOK ? "OK" : "FAILED — motors won't drive");
+    LOGF("[PWM] attach %s\n", pwmOK ? "OK" : "FAILED — motors won't drive");
     stopMotors();
 
     // Encoders (PCNT hardware quadrature). Pull-ups OFF (push-pull @3V3).
@@ -464,14 +484,17 @@ void setup() {
     encRR.attachFullQuad(ENC_RR_A, ENC_RR_B);
     encLF.clearCount(); encLR.clearCount();
     encRF.clearCount(); encRR.clearCount();
-    Serial.println("[ENC] 4x quadrature attached");
+    LOGLN("[ENC] 4x quadrature attached");
 
     // Real-time control task on core 1, priority above the Arduino loop so it
     // preempts any micro-ROS/WiFi stall and holds a solid 50 Hz.
     xTaskCreatePinnedToCore(controlTask, "control", 8192, NULL, 2, NULL, 1);
-    Serial.println("[CTRL] 50 Hz control task started (core 1)");
+    LOGLN("[CTRL] 50 Hz control task started (core 1)");
 
-    Serial.printf("[WiFi] agent %s:%d\n", AGENT_IP, AGENT_PORT);
+#if UROS_SERIAL
+    set_microros_transports();   // default serial transport: Serial @115200
+#else
+    LOGF("[WiFi] agent %s:%d\n", AGENT_IP, AGENT_PORT);
     set_microros_wifi_transports((char*)WIFI_SSID, (char*)WIFI_PASS, (char*)AGENT_IP, AGENT_PORT);
     WiFi.setSleep(false);
 
@@ -481,9 +504,10 @@ void setup() {
 #endif
     ArduinoOTA.onStart([]() { controlEnabled = false; stopMotors(); });
     ArduinoOTA.begin();
+#endif
 
     agentState = WAITING_AGENT;
-    Serial.println("[READY] waiting for micro-ROS agent");
+    LOGLN("[READY] waiting for micro-ROS agent");
 }
 
 // ── Loop — micro-ROS messaging only (control lives in the task) ──────────────
@@ -500,7 +524,9 @@ void loop() {
         }
     }
 
+#if !UROS_SERIAL
     ArduinoOTA.handle();
+#endif
     switch (agentState) {
     case WAITING_AGENT:
         controlEnabled = false;   // task holds motors stopped
@@ -509,7 +535,7 @@ void loop() {
         break;
 
     case AGENT_AVAILABLE:
-        if (createEntities()) { agentState = AGENT_CONNECTED; controlEnabled = true; Serial.println("[uROS] CONNECTED"); }
+        if (createEntities()) { agentState = AGENT_CONNECTED; controlEnabled = true; LOGLN("[uROS] CONNECTED"); }
         else                  { destroyEntities(); agentState = WAITING_AGENT; }
         break;
 
@@ -558,7 +584,7 @@ void loop() {
         controlEnabled = false;
         destroyEntities();
         agentState = WAITING_AGENT;
-        Serial.println("[uROS] agent lost — reconnecting");
+        LOGLN("[uROS] agent lost — reconnecting");
         break;
     }
     delay(1);

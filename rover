@@ -696,9 +696,13 @@ up)
 
   echo
   echo "[pi5] teleop + agent_node"
-  procs=$(timeout 8 ssh -o BatchMode=yes -o ConnectTimeout=4 "$LAPTOP_USER@$PI5_HOST" \
-    'pgrep -af "teleop_we[b]|agent_[n]ode"' 2>/dev/null || true)
-  if [ -n "$procs" ]; then
+  # SSH_OK first: on weak WiFi this ssh times out, and an empty answer used to
+  # read as "not running" while both were up (2026-10-09).
+  procs=$(timeout 15 ssh -o BatchMode=yes -o ConnectTimeout=8 "$LAPTOP_USER@$PI5_HOST" \
+    'echo SSH_OK; pgrep -af "teleop_we[b]|agent_[n]ode"' 2>/dev/null || true)
+  if [ -z "$procs" ]; then
+    echo "      ? could not ssh to the Pi 5 ($PI5_HOST) within 15 s -- slow WiFi? Not checked."
+  elif echo "$procs" | grep -q teleop_web && echo "$procs" | grep -q agent_node; then
     echo "      teleop + agent_node running"
   else
     echo "      ✗ teleop and/or agent_node not found on the Pi 5 — check it by hand"
@@ -714,7 +718,7 @@ up)
   # timeout + -n: this ssh does not return on its own, the launched server
   # holds the channel's fds open. Safe to cut — start_studio.sh is detached.
   timeout 15 ssh -n -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" \
-    'setsid nohup ~/ros2_ws/scripts/start_studio.sh > /tmp/langgraph_dev.log 2>&1 < /dev/null &' \
+    'setsid nohup ~/ros2_ws/scripts/start_studio.sh >> /tmp/langgraph_dev.log 2>&1 < /dev/null &' \
     2>/dev/null || true
   studio_ok=""
   for i in 1 2 3 4 5 6; do
@@ -868,6 +872,19 @@ view)
     echo "    Either run ./rover slam, or set Fixed Frame to 'odom' in the"
     echo "    Displays panel — everything except the room still draws there."
   fi
+  # Check the laptop's host key under ONE name, not under whatever DHCP address
+  # it has today. Keyed by IP, every new address was an unknown host, BatchMode
+  # refused it, and the search walked past the laptop (2026-10-09: .5, after
+  # .10 and .17). The entry is written once, after checking the fingerprint
+  # against a machine that already knows the laptop (OPERATIONS.md, "laptop key").
+  LSSH="-o BatchMode=yes"
+  if ssh-keygen -F rover-laptop >/dev/null 2>&1; then
+    LSSH="$LSSH -o HostKeyAlias=rover-laptop"
+  else
+    echo "  ! no 'rover-laptop' host key: a laptop on a new address will be refused."
+    echo "    Add it once: ssh-keyscan -t ed25519 <laptop ip> | sed 's/^[^ ]*/rover-laptop/' >> ~/.ssh/known_hosts"
+    echo "    (check the fingerprint first: ssh-keygen -lf on the line, against the Pi 5's known_hosts)"
+  fi
   ip="${LAPTOP_IP:-}"
   if [ -z "$ip" ]; then
     printf "  looking for the laptop"
@@ -875,7 +892,7 @@ view)
       cand="192.168.1.$i"
       [ "$cand" = "$(hostname -I | tr ' ' '\n' | grep '^192\.168\.1\.' | head -1)" ] && continue
       if timeout 1 bash -c "echo > /dev/tcp/$cand/22" 2>/dev/null; then
-        if timeout 6 ssh -o BatchMode=yes -o ConnectTimeout=3 "$LAPTOP_USER@$cand" \
+        if timeout 6 ssh $LSSH -o ConnectTimeout=3 "$LAPTOP_USER@$cand" \
              'test -f ~/rover_live.sh' 2>/dev/null; then
           ip="$cand"; break
         fi
@@ -891,7 +908,7 @@ view)
   # drifted from the repo's and made "I fixed the RViz config" untrue on the
   # only machine that renders it. The repo is the single source; the laptop is
   # a display.
-  scp -q -o BatchMode=yes "$(dirname "$0")/phase2/rviz/rover_live.rviz" \
+  scp -q $LSSH "$(dirname "$0")/phase2/rviz/rover_live.rviz" \
       "$LAPTOP_USER@$ip:~/rover_live.rviz" 2>/dev/null \
     && echo "  config synced from the repo" \
     || echo "  ! could not sync the config — the laptop may be showing an old one"
@@ -912,24 +929,32 @@ view)
   # auth cookie waiting in the runtime dir? That cookie is precisely what the
   # on-demand path sets up in advance, and starting rviz2 against it is what
   # spawns Xwayland.
-  xw=$(timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$ip" 'pgrep -a Xwayland 2>/dev/null | head -1' 2>/dev/null)
+  xw=$(timeout 15 ssh $LSSH "$LAPTOP_USER@$ip" 'pgrep -a Xwayland 2>/dev/null | head -1' 2>/dev/null || true)
   if [ -n "$xw" ]; then
     disp=$(echo "$xw" | grep -oE ' :[0-9]+' | head -1 | tr -d ' ' || true)
     auth=$(echo "$xw" | sed -nE 's/.* -auth ([^ ]+).*/\1/p')
   else
-    probe=$(timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$ip" '
+    # SSH_OK first: an empty answer must not read as "nobody is logged in"
+    # when it really means the ssh timed out (2026-10-09, Jetson on weak WiFi).
+    probe=$(timeout 15 ssh $LSSH "$LAPTOP_USER@$ip" '
+      echo SSH_OK
       for s in $(loginctl list-sessions --no-legend 2>/dev/null | awk "{print \$1}"); do
         [ "$(loginctl show-session "$s" -p Active --value 2>/dev/null)" = yes ] || continue
         case "$(loginctl show-session "$s" -p Type --value 2>/dev/null)" in
           wayland|x11) echo GRAPHICAL; break ;;
         esac
       done
-      ls /run/user/$(id -u)/.mutter-Xwaylandauth.* 2>/dev/null | head -1' 2>/dev/null)
+      ls /run/user/$(id -u)/.mutter-Xwaylandauth.* 2>/dev/null | head -1' 2>/dev/null || true)
     case "$probe" in
       *GRAPHICAL*) ;;
-      *)
+      *SSH_OK*)
         echo "  ✗ nobody is logged in at the laptop desktop."
         echo "    RViz cannot render into a login screen. Log in there, then re-run."
+        exit 1
+        ;;
+      *)
+        echo "  ✗ the laptop at $ip did not answer ssh within 15 s."
+        echo "    Slow WiFi (ping it from here) or a refused host key -- not a login problem."
         exit 1
         ;;
     esac
@@ -950,23 +975,27 @@ view)
   # --restart` is how you actually apply a config change.
   if [ "${2:-}" = "--restart" ]; then
     echo "  --restart: stopping rviz2 so the synced config is re-read"
-    timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$ip" 'pkill -x rviz2' 2>/dev/null || true
-    sleep 2
+    # Wait until it is GONE: rviz2 takes several seconds to exit, and a fixed
+    # `sleep 2` found it still there, said "already running" and restarted
+    # nothing (2026-10-09). SIGKILL after 10 s.
+    timeout 30 ssh $LSSH "$LAPTOP_USER@$ip" \
+      'pkill -x rviz2; for i in $(seq 20); do pgrep -x rviz2 >/dev/null || exit 0; sleep 0.5; done; pkill -9 -x rviz2; sleep 1' \
+      2>/dev/null || true
   fi
 
   # pgrep -x, never -f: -f matches our own ssh command line and always "succeeds".
-  if timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$ip" 'pgrep -x rviz2 >/dev/null' 2>/dev/null; then
+  if timeout 15 ssh $LSSH "$LAPTOP_USER@$ip" 'pgrep -x rviz2 >/dev/null' 2>/dev/null; then
     echo "  already running — look at the laptop screen"
     echo "  (config changed? it is only read at startup: ./rover view --restart)"
   else
-    timeout 25 ssh -o BatchMode=yes "$LAPTOP_USER@$ip" \
+    timeout 30 ssh $LSSH "$LAPTOP_USER@$ip" \
       "DISPLAY=${disp:-:0} XAUTHORITY=$auth XDG_RUNTIME_DIR=/run/user/\$(id -u) \
        setsid nohup bash ~/rover_live.sh >/tmp/rviz.log 2>&1 </dev/null & sleep 12" >/dev/null 2>&1
-    if timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$ip" 'pgrep -x rviz2 >/dev/null' 2>/dev/null; then
+    if timeout 15 ssh $LSSH "$LAPTOP_USER@$ip" 'pgrep -x rviz2 >/dev/null' 2>/dev/null; then
       echo "  started"
     else
       echo "  ✗ rviz2 did not stay up. Its error is ON THE LAPTOP:"
-      timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$ip" 'tail -8 /tmp/rviz.log' 2>/dev/null | sed 's/^/      /'
+      timeout 15 ssh $LSSH "$LAPTOP_USER@$ip" 'tail -8 /tmp/rviz.log' 2>/dev/null | sed 's/^/      /'
       exit 1
     fi
   fi
@@ -974,7 +1003,7 @@ view)
   # Running is not the same as receiving. A blank RViz still shows as running.
   echo "  subscriptions (0 means it is connected to nothing):"
   for t in /robot_description /scan /map /fusion/path; do
-    c=$(timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$ip" \
+    c=$(timeout 15 ssh $LSSH "$LAPTOP_USER@$ip" \
         "source /opt/ros/jazzy/setup.bash; export ROS_DOMAIN_ID=0; unset ROS_DISCOVERY_SERVER; \
          timeout 6 ros2 topic info $t 2>/dev/null | grep -oP 'Subscription count: \K[0-9]+'" 2>/dev/null || true)
     printf "      %-42s %s\n" "$t" "${c:-0}"

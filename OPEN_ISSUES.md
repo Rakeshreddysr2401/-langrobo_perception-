@@ -1,4 +1,20 @@
-# Open issues — where things stand, 2026-10-04
+# Open issues — where things stand, 2026-10-09
+
+## 2026-10-09 — bring-up after the rebuild (ESP32 on USB), and a weak-WiFi evening
+
+`./rover up` from cold: every layer gate passed (camera -> vlm), wheels 20 Hz over the
+ESP32's new USB cable to the Pi 5. Then the Jetson's WiFi decided the evening.
+
+| item | finding | status |
+|---|---|---|
+| **Jetson WiFi** | `Airtel_Singireddy's` 5 GHz, **-72 dBm (47 %), tx 6 Mbit/s**, sending ~2.3 Mbit/s of ROS data. ssh logins 15-30 s, ping up to 1.3 s, then ~1 min with no route at all. From the Pi 5 `/scan`, `/odom`, colour all 0 Hz while the Jetson's own rates were fine. Recovered by itself (~40 ms ping): every `fleet.sh check` line OK | the cure is signal (robot / AP placement) or the Pi 5 <-> Jetson cable (2026-10-07: jumbo-clean) |
+| depth while the link was bad | **4.9 Hz** at the Jetson (IR 21.8, load 20); **18 Hz** once the WiFi recovered (load 16). Writers blocked on an unreachable reader is the likely cost -- not proven | re-measure on a healthy link; issue 1 stands |
+| `rakhi-jetson.local` lost after the power cycle | avahi; `sudo systemctl restart avahi-daemon` on the Jetson (passwordless) fixed it; one later miss from the Pi 5 was the dead link | known (Pi 5 robot-start skill) |
+| `./rover view`: laptop at a new address (.5) never found | host key checked per IP -> unknown host -> BatchMode refused. **Fixed:** keyed by the alias `rover-laptop` (OPERATIONS.md §5 "The laptop key") | fixed, tested from scratch |
+| `./rover view`: exits silently after "config synced" | two `$(ssh ...)` under `set -eo pipefail` with a failing last command (`pgrep` / `ls` finding nothing) -- the on-demand-Xwayland path (TODO 35) could never run. Same trap as #9 | fixed (`|| true`) |
+| `./rover view`: "nobody is logged in" on a timed-out ssh; `[pi5]`: "agent_node not found" on a timed-out ssh | an empty answer read as a fact. Both now say SSH_OK first, so a timeout says "did not answer", and timeouts are 15 s | fixed |
+| `./rover view --restart` restarted nothing | `pkill` + `sleep 2`; rviz2 takes longer to exit, so "already running". Now waits until gone (SIGKILL at 10 s) | fixed, tested |
+| wheel encoders, parked | `/wheel_ticks` + `/wheel_state` 20 Hz at the Jetson, four steady counts, fusion2 silent. Directions only show on a nudge | owner: `./rover wheels --nudge` with the rover watched |
 
 ## 2026-10-07 — bench mode: rover taken apart for cleaning (same build returns)
 

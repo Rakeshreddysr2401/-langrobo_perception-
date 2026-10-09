@@ -346,7 +346,7 @@ All of it is systemd on the Pi 5, which §5 never actually named:
 |---|---|
 | `langrobo-brain` | the LangGraph `agent_node` |
 | `langrobo-teleop` | the `:8091` hold-to-move web page |
-| `langrobo-microros` | the **ESP32 <-> Pi 5 WiFi UDP bridge** — see §4 and TODO §33 |
+| `langrobo-microros` | the **ESP32 <-> Pi 5 bridge**, over the ESP32's USB cable since 2026-10-07 (`/dev/ttyUSB0`; was WiFi UDP 8888) — see §4 and TODO §33 |
 | `langrobo-discovery` | Fast DDS Discovery Server, the Pi 5 <-> Jetson meeting point |
 
 After changing anything under `~/ros2_ws/src/langrobo_core`, the brain must be
@@ -385,8 +385,8 @@ the graph while stepping it.
 
 Use `dev.sh` when the brain is **stopped** and Studio is your only client —
 that is what it is written for, and its header warns against running it
-alongside `langrobo-brain` because both drive `/cmd_vel` and both bind
-micro-ROS UDP 8888. `start_studio.sh` is the variant for the situation we are
+alongside `langrobo-brain` because both drive `/cmd_vel` and both open
+the micro-ROS agent on the ESP32's serial port. `start_studio.sh` is the variant for the situation we are
 actually in: `agent_node` already running, so **no** micro-ROS agent, plain
 SUBNET discovery to match the running brain, and a separate episodic store.
 Read §6's warning about two `/cmd_vel` publishers before using either.

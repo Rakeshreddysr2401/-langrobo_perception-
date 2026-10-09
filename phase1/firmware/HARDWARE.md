@@ -57,7 +57,8 @@ Differential-drive (skid-steer) rover, 4 driven wheels:
 
 - **Compute:** Jetson Orin (perception/nav) + Raspberry Pi 5 (brain + micro-ROS agent).
 - **MCU:** ESP32 DevKit V1 — runs `rover_firmware_v2.ino`, talks micro-ROS over
-  **WiFi UDP** to the agent on the Pi5 (`192.168.1.16:8888`). ESP32 IP `192.168.1.11`.
+  **USB serial** to the agent on the Pi5 (`/dev/ttyUSB0`, 115200, since 2026-10-07;
+  `UROS_SERIAL 0` in the firmware = the old WiFi UDP link to `192.168.1.16:8888`).
 - **Motor drivers:** 2× **BTS7960 (IBT-2)** H-bridges — one per side, each driving
   the two motors of that side in parallel.
 - **Motors:** 4× **Rhino GB37 12V geared encoder motors** (see §3).

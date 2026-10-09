@@ -36,7 +36,7 @@ The order it is being built in, from the README and INTELLIGENCE_PLAN.md:
 | **Laptop** | DHCP (moves: .17 earlier today) | `/workspace/mitra_sim` → `mitra_sim`, `main` | **a window and a twin**: RViz for the real robot, plus the Gazebo "Mitra twin" world |
 | | | `/workspace/ros2_ws/src/rover_sim` → `rover_sim`, `dev-0.1.1` | the older Gazebo sim (mecanum body, its own nav2). Still what `fleet.sh sim` starts |
 | Mac mini | DHCP, `singireddys-mac-mini.local:8080` | (none) | llama.cpp: Gemma 4 12B, LLM + VLM, `--jinja --parallel 4` |
-| ESP32 | micro-ROS over WiFi UDP 8888 | firmware in `~/rover/phase1/firmware/` | 4-wheel PID, encoders, 500 ms cmd_vel watchdog |
+| ESP32 | micro-ROS over USB serial to the Pi 5 (`/dev/ttyUSB0`) | firmware in `~/rover/phase1/firmware/` | 4-wheel PID, encoders, 500 ms cmd_vel watchdog |
 | D555 camera | 192.168.11.55 (PoE, own subnet) | (none) | stereo IR, depth, colour, **and the gyro** (OPEN_ISSUES #2) |
 | RPLidar C1 | USB on the Jetson | driver built by `lidar/build.sh` | 360° scans at 10 Hz. The pose reference |
 
@@ -51,7 +51,7 @@ The order it is being built in, from the README and INTELLIGENCE_PLAN.md:
    │   chat · local_agent · navigate    │   navigate + vision slot 3 │ Gemma (VLM)  │
    │  stt_node · tts_node (voice)       │ ◄───────────────────────── └──────────────┘
    │  teleop_web.py :8091 (MANUAL/AUTO) │
-   │  micro-ROS agent ◄─────────────────┼──── WiFi UDP 8888 ──── ESP32 (wheels)
+   │  micro-ROS agent ◄─────────────────┼──── USB serial ──────── ESP32 (wheels)
    └───────────────┬────────────────────┘                          ▲ /cmd_vel
                    │ ROS 2 DDS, domain 0, plain multicast            │ /wheel_state
    ┌───────────────▼────────────────────────────────────────────────┴───┐
