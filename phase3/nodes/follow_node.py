@@ -2,7 +2,10 @@
 """follow_node.py — "follow me" / "come to me", live (phase3/nodes/follow.py).
 
     /follow/start    std_msgs/String JSON {} or {"id": 3} (a /vision/people id)
-                     or {"stop_at_gap": true}: come to me -- done once at GAP
+                     or {"stop_at_gap": true}: come to me -- done once at GAP;
+                     an optional "req" is echoed in every status line of that
+                     follow, so a caller can tell its own follow's lines (the
+                     Pi 5 bridge, like goal_stamp on /goal_exec/status)
     /follow/cancel   std_msgs/Empty
         -> /cmd_vel          while following, and a stop when it ends
            /follow/status    JSON on every change and at 2 Hz while following:
@@ -76,6 +79,7 @@ class FollowNode(Node):
         self.active = False          # a follow (or a start) not yet ended and reported
         self.started = 0.0
         self.stop_at_gap = False
+        self.req = None
         self.paused_since = None
         self.last_key = None
         self.last_report = 0.0
@@ -146,6 +150,7 @@ class FollowNode(Node):
             self.reach_cancel.publish(Empty())
         self.f = Follower()                    # no result left over from the last follow
         self.stop_at_gap = bool(d.get('stop_at_gap'))
+        self.req = d.get('req')
         self.pending = {'id': d.get('id'), 'since': time.time()}
         self.active = True
         if self.people_sub is None:
@@ -268,6 +273,10 @@ class FollowNode(Node):
         d = self.f.status()
         if self.dry:
             d['dry_run'] = True
+        if self.req:
+            d['req'] = self.req
+        if self.stop_at_gap:
+            d['come'] = True
         if extra:
             d.update(extra)
         key = (d['state'], d.get('result'), d.get('target'), bool(d.get('blocked')), d.get('paused'))
