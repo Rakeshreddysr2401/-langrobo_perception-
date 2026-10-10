@@ -40,17 +40,17 @@ it is safe to run any time. `fleet.sh check` then proves every link with data.
 **Voice:** it lives on the Pi 5 as the `langrobo-voice` systemd user unit
 (starts at boot). `./rover voice` starts it if it is not running — never a
 second copy — and prints the providers, the wake setting, and which speaker +
-mic the Pi 5's audio owner picked (any paired Bluetooth device). Say "Mitra"
-in the sentence; only speech containing the name becomes a turn.
+mic the Pi 5's audio owner picked. Since 2026-10-10 the **mic is the USB AM-C28
+array** and the **boAt Stone is the speaker** (Bluetooth A2DP). Speech-to-text is
+Sarvam (Telugu or English → English); if Sarvam fails, Parakeet transcribes English
+on the Pi 5. Say "Mitra" in the sentence to be sure it becomes a turn; other
+sentences are judged by the brain. Details: the Pi 5 repo
+`docs/voice/VOICE_LAB_2026-10.md`.
 
-**The voice trap: a mic that is too quiet fails silently and looks like a dead
-brain.** The Bluetooth HFP mic delivers speech at rms ~0.024 against a
-`min_utterance_rms` of 0.05, so the VAD segments your speech correctly and the
-gate then throws every utterance away — nothing reaches Sarvam, nothing reaches
-the brain, and the only evidence is a `dropped: too quiet` line on
-`/voice/debug_vad`. `bt_mic_gain: 4.0` (Pi 5 `voice_params.yaml`) fixes it, and
-`stt_node` re-applies it 5 s after startup because `tts_node`'s HFP profile
-switch re-creates the PipeWire source and wipes it. To check a suspicion:
+**If it seems deaf:** the mic is plugged into the Pi 5, not here — check
+`/voice/debug_vad` and `/voice/debug_transcript`. (The old trap — the Stone's
+Bluetooth mic too quiet for a 0.05 loudness gate — is gone: that gate is off and
+the Stone no longer listens.) To check a suspicion:
 
 ```bash
 docker exec rover bash -lc 'unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE; \
