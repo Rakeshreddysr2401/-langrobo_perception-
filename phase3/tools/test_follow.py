@@ -104,6 +104,30 @@ def test_box():
     assert front < 1.0, f"drove into the box: front edge at {front:.2f}"
 
 
+def test_wall_slows_and_holds_off():
+    # a wall across the way at x = 1.5, the person behind it at 3.0
+    wall = np.array([[1.5, j * 0.02] for j in range(-30, 31)])
+    f, log = run(lambda t: (3.0, 0.0), 20.0, obstacles=wall)
+    front = max(p[0] for _, p, *_ in log) + fl.FRONT
+    gap = 1.5 - front
+    assert fl.FRONT_MARGIN - 0.05 <= gap <= fl.FRONT_MARGIN + 0.1, f"stopped {gap:.2f} m from the wall"
+    # no stop-go creeping: once it has slowed below 0.05 m/s it never speeds up again
+    slow = next(i for i, (t, _, vx, _, _) in enumerate(log) if t > 1 and vx < 0.05)
+    vs = [vx for _, _, vx, _, _ in log[slow:]]
+    assert all(b <= a + 1e-9 for a, b in zip(vs, vs[1:])), "stop-go near the wall"
+    assert f.result == "blocked", f.status()
+
+
+def test_sudden_obstacle_caps_at_once():
+    f = fl.Follower()
+    f.start(0.0, [person_msg(1, 3.0, 0.0, 0, 0, (0, 0, 0))])
+    f.vx = 0.3                                   # cruising
+    box = np.array([[0.55, 0.0]])                # 0.37 m past the front edge
+    vx, _ = f.step(0.05, (0.0, 0.0, 0.0), box)
+    # smoothing alone would allow 0.3 - A_MAX * dt = 0.28 here
+    assert vx <= (0.55 - fl.FRONT - fl.FRONT_MARGIN) / fl.STOP_T + 1e-9, vx
+
+
 def test_gone():
     f, log = run(lambda t: (2.0, 0.0), 10.0, visible=lambda t: t < 2.0)
     assert f.state == "done" and f.result == "lost", f.status()

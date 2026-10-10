@@ -25,11 +25,16 @@ MOTION (vx, wz; no reversing — the camera looks forward):
   - both rate-limited (A_MAX, AW_MAX): no lurches.
 
 SAFETY (every step, before anything is commanded):
-  - the corridor ahead: outline width + SIDE_MARGIN, from the front edge out
-    to how far this speed travels in STOP_T plus FRONT_MARGIN, against the
-    LiDAR + fused-map points (base_link). Points within PERSON_R of the target
-    are the target, not an obstacle. Blocked -> vx 0 (turning still allowed
-    if the turn is clear); blocked for BLOCKED_S -> stop, 'blocked';
+  - a speed governor on the corridor ahead (outline width + SIDE_MARGIN,
+    LiDAR + fused-map points in base_link): the free distance from the front
+    edge to the nearest point in it allows (free - FRONT_MARGIN) / STOP_T m/s,
+    so it slows smoothly and holds FRONT_MARGIN off. Under V_MIN allowed ->
+    blocked: vx 0 (turning still allowed if the turn is clear); blocked for
+    BLOCKED_S -> stop, 'blocked'. Points within PERSON_R of the target are the
+    target, not an obstacle. (The first version stopped hard from full speed
+    when something entered a corridor sized by the WANTED speed -- 0.39 m off
+    a wall in test_follow. The governor slows instead: a hard stop from
+    0.3 m/s slides these wheels, and slides corrupt the pose.)
   - turning: nothing within the outline's turning circle + TURN_MARGIN;
   - a single jump of the target's position by more than JUMP_M from where it
     should be is ignored once (a stale colour frame met fresh depth, floor
@@ -54,8 +59,9 @@ AW_MAX = 2.0          # rad/s^2
 DIST_DEADBAND = 0.12  # m around GAP: no drive
 TURN_DEADBAND = math.radians(6)
 DRIVE_MAX_ERR = math.radians(40)
-STOP_T = 1.0          # s of travel at this speed that must be clear
-FRONT_MARGIN = 0.10   # m beyond that
+STOP_T = 1.0          # s: drive no faster than the free distance ahead allows in this time
+FRONT_MARGIN = 0.25   # m always kept clear in front
+V_MIN = 0.03          # m/s: a governor below this is "blocked"
 SIDE_MARGIN = 0.05    # m each side of the outline
 TURN_MARGIN = 0.03    # m beyond the outline's turning circle
 PERSON_R = 0.40       # m around the target: the person, not an obstacle
@@ -167,7 +173,11 @@ class Follower:
         if pts is not None and len(pts):
             pts = pts[np.hypot(pts[:, 0] - tb[0], pts[:, 1] - tb[1]) > PERSON_R]
 
-        ok, why = self.corridor_clear(pts, max(vx, self.vx))
+        free = self.free_ahead(pts)
+        v_cap = max(0.0, free - FRONT_MARGIN) / STOP_T
+        ok = v_cap >= V_MIN or vx == 0.0          # nothing wanted = nothing blocked
+        why = f'something {free:.2f} m ahead' if not ok else ''
+        vx = min(vx, v_cap)
         if not ok:
             vx = 0.0
             self.blocked_since = self.blocked_since or t
@@ -181,7 +191,8 @@ class Follower:
                               # 2026-10-10: 0.17 m/s with them at 0.95 m, decelerating)
         else:
             self.blocked_since = None
-            vx = max(self.vx - A_MAX * dt, min(self.vx + A_MAX * dt, vx))   # gentle
+            vx = max(self.vx - A_MAX * dt, min(self.vx + A_MAX * dt, vx))   # gentle...
+            vx = min(vx, v_cap)          # ...but never past what the free distance allows
         # a stop for safety is immediate; everything else is rate limited
         wz = max(self.wz - AW_MAX * dt, min(self.wz + AW_MAX * dt, wz))
         if not self.turn_clear(pts):
@@ -191,16 +202,15 @@ class Follower:
         return vx, wz
 
     @staticmethod
-    def corridor_clear(pts, vx):
-        """Anything in the outline's width + SIDE_MARGIN, from the front edge to
-        vx * STOP_T + FRONT_MARGIN ahead?"""
+    def free_ahead(pts, horizon=3.0):
+        """Free distance (m) from the front edge to the nearest point in the
+        outline's width + SIDE_MARGIN; horizon when nothing is there."""
         if pts is None or not len(pts):
-            return True, ''
-        reach = FRONT + max(vx, 0.0) * STOP_T + FRONT_MARGIN
-        hit = (pts[:, 0] > FRONT - 0.02) & (pts[:, 0] < reach) & (np.abs(pts[:, 1]) < SIDE + SIDE_MARGIN)
-        if hit.any():
-            return False, f'something {float(np.min(pts[hit, 0]) - FRONT):.2f} m ahead'
-        return True, ''
+            return horizon
+        hit = (pts[:, 0] > FRONT - 0.02) & (np.abs(pts[:, 1]) < SIDE + SIDE_MARGIN)
+        if not hit.any():
+            return horizon
+        return max(0.0, min(horizon, float(np.min(pts[hit, 0])) - FRONT))
 
     @staticmethod
     def turn_clear(pts):
