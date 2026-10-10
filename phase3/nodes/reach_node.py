@@ -20,7 +20,12 @@ EACH ATTEMPT
     far  (> EXACT_RANGE)  nav2 to the goal, then goal_exec's exact finish
     near (<= EXACT_RANGE) goal_exec straight away (turn, straight line, 5 cm)
     fails ->
-      0. "no path": the WAY BACK first (trail.py) -- look down the route the
+      0. "no path" or narrow: the TIGHT ROUTE first (tight_route.py) -- turns
+         and short drives that fit the outline, searched on the raw points,
+         driven one goal_exec move at a time, re-planned after each. nav2's
+         lattice cannot turn in place near a wall; this can
+         (2026-10-10, the bedroom door). Then:
+         "no path": the WAY BACK (trail.py) -- look down the route the
          rover drove, then retrace it in ~1 m nav2 hops to its point nearest
          the goal. The same failure SAME_FAILS times running from one spot
          ends the goal: more rounds would be the same move again
@@ -36,6 +41,7 @@ EACH ATTEMPT
 """
 import json
 import math
+import os
 import signal
 import sys
 import time
@@ -56,8 +62,9 @@ from std_msgs.msg import Empty, String
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'tools'))
 import gap_pass as GP  # noqa: E402
+import tight_route as TRT  # noqa: E402
 import trail as TR  # noqa: E402
-from goal_exec import FRONT as GE_FRONT, REAR as GE_REAR, SIDE, wrap  # noqa: E402
+from goal_exec import FRONT as GE_FRONT, REAR as GE_REAR, SIDE, GoalExec, wrap  # noqa: E402
 
 EXACT_RANGE = 1.2      # m: closer than this, goal_exec alone (its MAX_LEG is 1.5)
 MAX_ATTEMPTS = 8
@@ -125,6 +132,22 @@ WAY_BACK_HOP_S = 45.0
 # is the same move again.
 SAME_FAILS = 3
 NAV_LOG = Path('/tmp/nav.log')
+# The tight route (tight_route.py). Rounds per goal; moves per round; the
+# target is the goal within TIGHT_REACH, else the farthest fitting point
+# toward it. After every move the rover holds still TIGHT_SETTLE_S:
+# depth_gate passes frames again 0.8 s after a turn, and nvblox must take one
+# before the map shows what the turn brought into view -- that is how the
+# glossy-floor speck in the door gap went away (2026-10-10).
+TIGHT_ROUNDS = 2
+TIGHT_MOVES = 10
+TIGHT_REACH = (2.5, 2.1, 1.7, 1.3)
+TIGHT_SETTLE_S = 1.5
+# A plan the camera's map does not allow (LiDAR-only, see tight_round) drives
+# at most this far before it looks and plans again; and gives up after this
+# many moves goal_exec refused on the camera's points.
+TIGHT_LIDAR_LEG = 0.5
+TIGHT_REFUSALS = 2
+PIVOT_FILE = Path(os.environ.get('ROVER_STATE_DIR', '/logs')) / 'goal_exec_pivot.json'
 
 
 def yaw_of(q):
@@ -632,6 +655,99 @@ class Reach(GP.Pass):
         """Turn in place toward bearing (odom), outline-checked; for the look."""
         GP.look_to(self, bearing)
 
+    # ── tight route: no route on the map -> turns and short drives that fit ──
+    # tight_route.py has the why (2026-10-10, the bedroom door). Two point
+    # sets: ALL (LiDAR + the fused camera map, what goal_exec decides on) and
+    # the LiDAR alone. A plan on ALL is driven as planned. When ALL has none,
+    # a plan on the LiDAR alone may still be right: the camera map holds
+    # glossy-floor specks that go away once the camera looks at them (the
+    # door gap's one 7 cm speck did, after the first turn). Such a plan only
+    # picks the DIRECTION: each move still goes through goal_exec, which
+    # refuses one that touches any camera point, so a real shoe still stops
+    # it; drives are cut to TIGHT_LIDAR_LEG, and every move is followed by a
+    # look and a new plan.
+    def tight_target(self, g):
+        """(x, y) odom: the goal if within reach, else the farthest point
+        toward it that fits; None if none does."""
+        d = self.dist(g)
+        if d <= TIGHT_REACH[0]:
+            return g[0], g[1]
+        bearing = math.atan2(g[1] - self.pose[1], g[0] - self.pose[0])
+        ux, uy = math.cos(bearing), math.sin(bearing)
+        for r in TIGHT_REACH:
+            cand, _, gap = self.fit((self.pose[0] + r * ux, self.pose[1] + r * uy, bearing))
+            if not (gap == gap and gap < self.SNAP_GAP):
+                return cand[0], cand[1]
+        return None
+
+    def tight_round(self, attempt, g, deadline):
+        """Up to TIGHT_MOVES moves toward the tight target, until deadline
+        (time.time(), the goal's MAX_S). Returns 'reached' (at the target: try
+        the goal again), 'none' (no plan from the start), 'failed' (moved,
+        then stuck, or out of time) or 'cancelled'."""
+        try:
+            ge = GoalExec(P_prior=json.loads(PIVOT_FILE.read_text()))
+        except (OSError, ValueError):
+            ge = GoalExec()                      # unlearned: plans with more margin
+        self.dobs.set_active(True)
+        moves, refused = 0, 0
+        while moves < TIGHT_MOVES:
+            self.spin_for(TIGHT_SETTLE_S)
+            if self.stop_req:
+                return 'cancelled'
+            if time.time() > deadline:
+                self.say(attempt=attempt, phase='tight', outcome='failed', why='out of time for this goal')
+                return 'none' if not moves else 'failed'
+            tgt = self.tight_target(g)
+            if tgt is None:
+                self.say(attempt=attempt, phase='tight', outcome='none', why='no point toward the goal fits')
+                return 'none' if not moves else 'failed'
+            if math.hypot(tgt[0] - self.pose[0], tgt[1] - self.pose[1]) <= TRT.GOAL_TOL:
+                self.say(attempt=attempt, phase='tight', outcome='reached', moves=moves,
+                         dist_m=round(self.dist(g), 2))
+                return 'reached'
+            c, s = math.cos(self.pose[2]), math.sin(self.pose[2])
+            dx, dy = tgt[0] - self.pose[0], tgt[1] - self.pose[1]
+            tb = (c * dx + s * dy, -s * dx + c * dy)
+            lidar = self.outside_body(np.vstack(self.scans)) if self.scans else np.zeros((0, 2))
+            camera = self.outside_body(self.dobs.points_base(self.pose))
+            every = np.vstack([lidar, camera]) if len(camera) else lidar
+            steps, info = TRT.plan(every, tb, ge, budget_s=3.0)
+            mode = 'all'
+            if steps is None:
+                steps, info = TRT.plan(lidar, tb, ge, budget_s=3.0)
+                mode = 'lidar'
+            self.say(attempt=attempt, phase='tight', mode=mode if steps else 'none',
+                     plan=TRT.describe(steps) if steps else '', ms=info.get('ms'),
+                     expanded=info.get('expanded'), why=info.get('why', ''),
+                     target=[round(tgt[0], 2), round(tgt[1], 2)])
+            if not steps:
+                return 'none' if not moves else 'failed'
+            kind, v = steps[0]
+            # the camera map just switched on may not have arrived yet: then
+            # ALL was the LiDAR alone, and is driven like a LiDAR plan
+            if mode == 'all' and self.dobs.age() > 3.0:
+                mode = 'lidar'
+            if mode == 'lidar' and kind == 'drive':
+                v = math.copysign(min(abs(v), TIGHT_LIDAR_LEG), v)
+            if kind == 'turn':
+                r, why = self.run_goal_exec_turn(wrap(self.pose[2] + v))
+            else:
+                p = self.pose
+                r, why = self.run_goal_exec((p[0] + v * math.cos(p[2]), p[1] + v * math.sin(p[2]), p[2]))
+            moves += 1
+            self.say(attempt=attempt, phase='tight', move=TRT.describe([(kind, v)]), outcome=r, why=why)
+            if r == 'cancelled' or self.stop_req:
+                return 'cancelled'
+            if r != 'reached':
+                refused += 1
+                if refused >= TIGHT_REFUSALS:
+                    return 'failed'
+                # refused (on a camera point, or what the move brought into
+                # view): look -- the settle at the top of the loop -- and plan
+                # again from what it sees now
+        return 'failed'
+
     # ── one goal, until reached ─────────────────────────────────────────────
     def pursue(self, m):
         # Depth is subscribed only while RECOVERING (escape / look / pass use
@@ -665,6 +781,7 @@ class Reach(GP.Pass):
         go_nav2 = False
         prev_fail, same = None, 1   # last failed attempt (why, (x, y)); how many alike in a row
         way_backs, way_note = 0, ''
+        tight_rounds = 0
         for attempt in range(1, MAX_ATTEMPTS + 1):
             self.dobs.set_active(False)             # driving: nav2 / goal_exec need none
             if self.stop_req or time.time() - t0 > MAX_S:
@@ -764,6 +881,18 @@ class Reach(GP.Pass):
             jammed = why.startswith('narrow') or 'stuck' in why or 'no path' in why
             if self.escape(attempt) and not jammed:
                 continue
+            # no route on the map, or nav2 cannot fit: turns and short drives
+            # on the raw points (tight_round). Before the way back: on
+            # 2026-10-10 the way back ran twice, nav2 failed after each, and
+            # the goal ended "3 times from the same spot" without one move
+            # through the door the rover had just driven out of.
+            if jammed and tight_rounds < TIGHT_ROUNDS:
+                tight_rounds += 1
+                out = self.tight_round(attempt, g, t0 + MAX_S)
+                if out == 'reached':
+                    continue
+                if out == 'cancelled' or self.stop_req:
+                    break
             # no route to the goal: look both ways and try a straight pass from
             # HERE first; only if no line fits, go as near as a route goes
             looked = False

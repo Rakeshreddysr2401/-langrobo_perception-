@@ -386,3 +386,40 @@ it: beside the chest, reach's own points (LiDAR + depth memory, 29,828) put
 the body 3.7 cm off; turns in place swept 0.1-1.2 cm; a 3-point turn (left 45,
 forward 10 cm, left 60) ended 10.8 cm clear on those points; MPPI's costmap
 pads 0.02 while the planner's pads 0.04 (unchanged).
+
+## Session 2026-10-10 (evening) — the bedroom door: turn and go (tight route)
+
+Owner: "go inside that door and go outside", then from the hall "come to me".
+Both failed with room to spare; owner: "it can take left rotation and move".
+
+| | measured (no motion) |
+|---|---|
+| the gap past the open door leaf | 77 cm (rover 38); leaf 30 cm ahead; rover's left side 5 cm from a wall corner, so a left turn in place stops at ~25 deg |
+| nav2 ComputePathToPose, every goal through the gap | error 208 NO_VALID_PATH; at footprint_padding 0.01 (set live, put back to 0.04) only a 5.3 m loop -- the lattice turns on 0.4 m and pays 5x to turn in place |
+| what closed it in the costmap | one camera-only 3-cell speck on the glossy floor (owner: nothing there); later, from the hall, the camera map drew the dark leaf 10-15 cm thicker than the LiDAR's line |
+| "come to me" from the hall | VLM found the owner 3 m away through the door; reach: nav2 "no path" x3, two way-back hops, failed after 188 s with no move toward them |
+
+A search over goal_exec's own moves found **F10 L45 F160** in 0.4 s; driven
+through `/goal_exec` one step at a time (owner watching): every step reached
+(0.4-1.1 cm), out of the door. The speck was gone from goal_exec's view once
+the first turn put it in front of the camera.
+
+**Built** (`rover-v1.1.10-tight-route`): `phase3/nodes/tight_route.py` -- A* over
+turns (15/30/45/90) and straight drives (5 cm-1 m, reverse <= 10 cm, x3 cost),
+each checked with goal_exec's own turn_clear / drive_clear (learned pivot) at
+2 cm, one more than goal_exec drives at. reach: on "no path" / narrow / stuck,
+`tight_round()` runs BEFORE the way back: plan on LiDAR + camera map; if none,
+plan on the LiDAR alone, which only picks the direction (drives cut to 50 cm,
+goal_exec still refuses any move touching a camera point); one move, 1.5 s
+still, plan again; 2 refusals, 10 moves or the goal's MAX_S end it.
+
+Tests: `phase3/tools/test_tight_route.py` (8: both door fixtures, side doorway
+F115 L90 F105, 44 cm slot through / 40 refused, a wall, checks identical to
+goal_exec's over 2000 random cases), `test_reach_tight.py` (4: phantom speck
+-> out of the door; real speck -> stops before it, never inside; deadline;
+cancel). Jetson: slowest plan 1.9 s (budget 3).
+
+**Open:** floor test of "come to me" through the door with reach's tight
+round; the camera map's thick dark door (from the hall) may still make the
+LiDAR-only plan the one used; the brain should aim "go through the door"
+past the opening, not at the leaf (Pi 5).
