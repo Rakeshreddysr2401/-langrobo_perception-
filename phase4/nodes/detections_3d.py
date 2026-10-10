@@ -20,6 +20,20 @@ Contract rules (ros2_bridge.on_detections on the Pi5):
   - labels are lowercase COCO class names.
   - freshness is judged by receive time on the Pi5 — publish steadily.
 
+And people WITH IDS, for "follow me" (2026-10-10; person_tracker.py), published
+every tick while anyone subscribes, empty or not (silence = dead camera):
+
+  /vision/people   std_msgs/String   JSON:
+    {"frame": "odom", "stamp": 1791590000.0,
+     "people": [{"id": 3, "x": 2.31, "y": -0.42, "vx": 0.4, "vy": 0.0,
+                 "dist": 1.62, "bearing": -0.21, "conf": 0.81,
+                 "lost_s": 0.0, "box": [u1, v1, u2, v2]}, ...]}
+      x, y      odom floor position (smoothed); vx, vy its velocity, m/s
+      dist      m from base_link; bearing rad, + = to the rover's left
+      lost_s    0 = seen in this frame; >0 = hidden, kept up to 1.5 s
+      box       pixels of the latest detection (absent dist/bearing: no
+                base_link TF yet)
+
 YOLO runs ON DEMAND (2026-07-18): it is the single biggest CPU cost on the
 6-core Orin, so it only runs at full detect_rate when something needs it (a
 target hunt is set, or a subscriber is on detections_3d/target_result);
@@ -75,6 +89,8 @@ torch.backends.cudnn.enabled = False  # cuDNN version mismatch on Jetson (same a
 from ultralytics import YOLO
 
 from tf2_ros import Buffer, TransformListener
+
+from person_tracker import PersonTracker
 
 
 def _decode_image(msg: Image) -> np.ndarray | None:
@@ -145,6 +161,12 @@ class Detections3DNode(Node):
         # image_bridge (the `vlm` layer) publishes that topic, and a second
         # publisher on it would be indistinguishable from a flapping camera.
         self.declare_parameter("look_feed_rate", 0.0)
+        # People with ids, for "follow me" (2026-10-10) — see person_tracker.py.
+        # A person box down to person_low_conf is kept, but only to CONTINUE a
+        # track (half hidden behind a chair); it never starts one.
+        self.declare_parameter("people_topic", "/vision/people")
+        self.declare_parameter("person_low_conf", 0.2)
+        self.declare_parameter("base_frame", "base_link")
 
         p = lambda n: self.get_parameter(n).value
         self._conf_min = float(p("confidence"))
@@ -155,6 +177,10 @@ class Detections3DNode(Node):
         self._smooth_alpha = float(p("smooth_alpha"))
         self._smooth_jump = float(p("smooth_jump_m"))
         self._smooth_ttl = float(p("smooth_ttl_s"))
+        self._person_low_conf = float(p("person_low_conf"))
+        self._base_frame = p("base_frame")
+        self._people = PersonTracker()
+        self._base_tf = None      # base_frame <- depth optical; static, looked up once
 
         self.get_logger().info(f"Loading YOLO {p('model')} on {p('device')}...")
         self._model = YOLO(p("model"))
@@ -186,6 +212,7 @@ class Detections3DNode(Node):
         self._target = ""
         self.create_subscription(String, "/vision/target", self._on_target, 10)
         self._target_pub = self.create_publisher(String, "/vision/target_result", 10)
+        self._people_pub = self.create_publisher(String, p("people_topic"), 10)
 
         look_rate = float(p("look_feed_rate"))
         if look_rate > 0:
@@ -261,7 +288,8 @@ class Detections3DNode(Node):
         a live subscriber on either detection output. Cheap to poll."""
         return (bool(self._target)
                 or self._pub.get_subscription_count() > 0
-                or self._target_pub.get_subscription_count() > 0)
+                or self._target_pub.get_subscription_count() > 0
+                or self._people_pub.get_subscription_count() > 0)
 
     def _smooth(self, label, mp):
         """EMA-smooth a label's map position so downstream goals stop chasing noise.
@@ -361,13 +389,17 @@ class Detections3DNode(Node):
 
         # YOLO once per tick; everything downstream shares the boxes.
         boxes = []
+        persons = []      # (conf, xyxy) down to person_low_conf, for the tracker
         for r in self._model(img, device=self._device, verbose=False):
             for b in r.boxes:
                 conf = float(b.conf[0])
+                label = self._model.names[int(b.cls[0])].lower()
+                xyxy = tuple(map(int, b.xyxy[0]))
+                if label == "person" and conf >= self._person_low_conf:
+                    persons.append((conf, xyxy))
                 if conf < self._conf_min:
                     continue
-                boxes.append((self._model.names[int(b.cls[0])].lower(), conf,
-                              tuple(map(int, b.xyxy[0]))))
+                boxes.append((label, conf, xyxy))
 
         # Path 1 — target finder (no TF needed; the no-map fallback).
         if self._target:
@@ -386,61 +418,18 @@ class Detections3DNode(Node):
         if dep is None:
             return
 
-        ci, di = self._color_info, self._depth_info
-        fx_c, fy_c, cx_c, cy_c = ci.k[0], ci.k[4], ci.k[2], ci.k[5]
-        fx_d, fy_d, cx_d, cy_d = di.k[0], di.k[4], di.k[2], di.k[5]
-
         t = tf.transform.translation
         q = tf.transform.rotation
 
+        def to_odom(pt):
+            return _quat_rotate(q.x, q.y, q.z, q.w, pt) + np.array([t.x, t.y, t.z])
+
         objects = []
-        for label, conf, (u1, v1, u2, v2) in boxes:
-            u_c, v_c = (u1 + u2) // 2, (v1 + v2) // 2
-            # Map the color pixel into the depth image via angle equality
-            # (intrinsics-normalised coordinates; baseline ≈ 0).
-            u_d = int((u_c - cx_c) / fx_c * fx_d + cx_d)
-            v_d = int((v_c - cy_c) / fy_c * fy_d + cy_d)
-            if not (0 <= u_d < dep.shape[1] and 0 <= v_d < dep.shape[0]):
+        for label, conf, box in boxes:
+            pt = self._box_point(dep, box)
+            if pt is None:
                 continue
-            h = self._patch
-            patch = dep[max(0, v_d - h):v_d + h + 1,
-                        max(0, u_d - h):u_d + h + 1].astype(np.float32)
-            patch = patch[patch > 0]
-            if patch.size >= 3:
-                z = float(np.median(patch))
-            else:
-                # Centre-patch fallback (2026-08-10). A translucent plastic bottle
-                # standing on polished marble returns NO valid depth at its centre
-                # with the IR emitter off (which it must be — see run_stack.sh), so
-                # the object was detected in 2D at conf 0.42 and then silently
-                # dropped here for want of a depth sample. The rover consequently
-                # "forgot" the bottle exactly as it got close.
-                # Widen to the whole box and take a low percentile = the NEAREST
-                # surface inside it, which is the object rather than the wall
-                # behind it. Median would bias onto that background.
-                bu1 = int((u1 - cx_c) / fx_c * fx_d + cx_d)
-                bu2 = int((u2 - cx_c) / fx_c * fx_d + cx_d)
-                bv1 = int((v1 - cy_c) / fy_c * fy_d + cy_d)
-                bv2 = int((v2 - cy_c) / fy_c * fy_d + cy_d)
-                bu1, bu2 = max(0, min(bu1, bu2)), min(dep.shape[1], max(bu1, bu2) + 1)
-                bv1, bv2 = max(0, min(bv1, bv2)), min(dep.shape[0], max(bv1, bv2) + 1)
-                if bu2 - bu1 < 2 or bv2 - bv1 < 2:
-                    continue
-                box_d = dep[bv1:bv2:2, bu1:bu2:2].astype(np.float32)
-                box_d = box_d[box_d > 0]
-                if box_d.size < 5:
-                    continue
-                z = float(np.percentile(box_d, 20))
-            if dep.dtype == np.uint16:
-                z /= 1000.0                      # mm → m
-            if not (self._min_range < z < self._max_range):
-                continue
-            # Deproject in the depth optical frame, then → map.
-            pt = np.array([(u_d - cx_d) / fx_d * z,
-                           (v_d - cy_d) / fy_d * z,
-                           z])
-            mp = _quat_rotate(q.x, q.y, q.z, q.w, pt) + np.array([t.x, t.y, t.z])
-            sx, sy, sz = self._smooth(label, mp)
+            sx, sy, sz = self._smooth(label, to_odom(pt))
             objects.append({
                 "label": label,
                 "x": round(sx, 3),
@@ -453,6 +442,95 @@ class Detections3DNode(Node):
             self._pub.publish(String(data=json.dumps(
                 {"frame": self._target_frame, "stamp": time.time(),
                  "objects": objects})))
+
+        # Path 3 — people with ids (person_tracker.py). Published EVERY tick,
+        # empty or not, so a follower can treat silence as a dead camera.
+        if self._people_pub.get_subscription_count() == 0:
+            return
+        base = self._lookup_base_tf(depth_msg.header.frame_id)
+        dets = []
+        for conf, box in persons:
+            pt = self._box_point(dep, box)
+            if pt is None:
+                continue
+            mp = to_odom(pt)
+            d = {"x": float(mp[0]), "y": float(mp[1]), "conf": conf,
+                 "box": list(box)}
+            if base is not None:
+                bt, bq = base.transform.translation, base.transform.rotation
+                rel = (_quat_rotate(bq.x, bq.y, bq.z, bq.w, pt)
+                       + np.array([bt.x, bt.y, bt.z]))
+                d["dist"] = round(float(np.hypot(rel[0], rel[1])), 3)
+                d["bearing"] = round(float(np.arctan2(rel[1], rel[0])), 3)
+            dets.append(d)
+        stamp = depth_msg.header.stamp.sec + depth_msg.header.stamp.nanosec * 1e-9
+        people = self._people.update(dets, stamp)
+        self._people_pub.publish(String(data=json.dumps(
+            {"frame": self._target_frame, "stamp": time.time(),
+             "people": people})))
+
+    def _lookup_base_tf(self, optical_frame):
+        """base_frame <- depth optical frame. A chain of static transforms, so
+        it is looked up once and kept; None until robot_state_publisher is up.
+        Gives each person a distance and bearing from the rover itself."""
+        if self._base_tf is None:
+            try:
+                self._base_tf = self._tf_buffer.lookup_transform(
+                    self._base_frame, optical_frame, rclpy.time.Time())
+            except Exception:
+                return None
+        return self._base_tf
+
+    def _box_point(self, dep, box):
+        """A detection box -> its 3D point in the depth optical frame, or None."""
+        ci, di = self._color_info, self._depth_info
+        fx_c, fy_c, cx_c, cy_c = ci.k[0], ci.k[4], ci.k[2], ci.k[5]
+        fx_d, fy_d, cx_d, cy_d = di.k[0], di.k[4], di.k[2], di.k[5]
+        u1, v1, u2, v2 = box
+        u_c, v_c = (u1 + u2) // 2, (v1 + v2) // 2
+        # Map the color pixel into the depth image via angle equality
+        # (intrinsics-normalised coordinates; baseline ≈ 0).
+        u_d = int((u_c - cx_c) / fx_c * fx_d + cx_d)
+        v_d = int((v_c - cy_c) / fy_c * fy_d + cy_d)
+        if not (0 <= u_d < dep.shape[1] and 0 <= v_d < dep.shape[0]):
+            return None
+        h = self._patch
+        patch = dep[max(0, v_d - h):v_d + h + 1,
+                    max(0, u_d - h):u_d + h + 1].astype(np.float32)
+        patch = patch[patch > 0]
+        if patch.size >= 3:
+            z = float(np.median(patch))
+        else:
+            # Centre-patch fallback (2026-08-10). A translucent plastic bottle
+            # standing on polished marble returns NO valid depth at its centre
+            # with the IR emitter off (which it must be — see run_stack.sh), so
+            # the object was detected in 2D at conf 0.42 and then silently
+            # dropped here for want of a depth sample. The rover consequently
+            # "forgot" the bottle exactly as it got close.
+            # Widen to the whole box and take a low percentile = the NEAREST
+            # surface inside it, which is the object rather than the wall
+            # behind it. Median would bias onto that background.
+            bu1 = int((u1 - cx_c) / fx_c * fx_d + cx_d)
+            bu2 = int((u2 - cx_c) / fx_c * fx_d + cx_d)
+            bv1 = int((v1 - cy_c) / fy_c * fy_d + cy_d)
+            bv2 = int((v2 - cy_c) / fy_c * fy_d + cy_d)
+            bu1, bu2 = max(0, min(bu1, bu2)), min(dep.shape[1], max(bu1, bu2) + 1)
+            bv1, bv2 = max(0, min(bv1, bv2)), min(dep.shape[0], max(bv1, bv2) + 1)
+            if bu2 - bu1 < 2 or bv2 - bv1 < 2:
+                return None
+            box_d = dep[bv1:bv2:2, bu1:bu2:2].astype(np.float32)
+            box_d = box_d[box_d > 0]
+            if box_d.size < 5:
+                return None
+            z = float(np.percentile(box_d, 20))
+        if dep.dtype == np.uint16:
+            z /= 1000.0                      # mm → m
+        if not (self._min_range < z < self._max_range):
+            return None
+        # Deproject in the depth optical frame.
+        return np.array([(u_d - cx_d) / fx_d * z,
+                         (v_d - cy_d) / fy_d * z,
+                         z])
 
 
 def main(args=None):
