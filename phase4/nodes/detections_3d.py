@@ -193,7 +193,14 @@ class Detections3DNode(Node):
         # even while YOLO inference hogs the main thread (on the loaded Orin the
         # single-threaded spin starved TF -> "map->camera not available -> publish
         # nothing" with the object in plain view). 2026-08-09.
-        self._tf_listener = TransformListener(self._tf_buffer, self, spin_thread=True)
+        # On its OWN node (2026-10-10): spin_thread adds the node it is given to a
+        # second executor, and on Jazzy a node belongs to one executor at a time --
+        # handing it `self` made that thread and main()'s rclpy.spin fight over
+        # this node, and depending on start-up timing neither delivered anything:
+        # three restarts in a row sat at "waiting for camera + TF" forever with
+        # the camera at 18 Hz (faulthandler: both executors idle in wait).
+        self._tf_node = rclpy.create_node("detections_3d_tf")
+        self._tf_listener = TransformListener(self._tf_buffer, self._tf_node, spin_thread=True)
         self._no_tf_logged = False
         # Per-label position tracks for temporal smoothing — see _smooth().
         self._track = {}          # label -> [x, y, z, last_seen_monotonic]

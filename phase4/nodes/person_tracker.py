@@ -23,6 +23,15 @@ How a frame is matched:
     half hidden behind a chair keeps their id, and a coat on a hook does not
     become a new person.
 
+One person, one detection: close up (under ~1.2 m) the body no longer fits
+the frame and YOLO returns overlapping boxes for the same person -- whole body
+and upper body -- and each box's depth lands on a different part of them, up
+to ~0.5 m apart on the floor. Floor check 2026-10-10: one person walking up to
+the rover became ids 9, 10 and 11 at once and the follower flip-flopped
+between them. YOLO's NMS keeps such pairs (one box INSIDE another has a low
+IoU), so before matching, a box mostly inside a more confident one
+(CONTAIN of the smaller box's area) is dropped.
+
 A track lost from view is kept for MAX_LOST_S with its last position, so a
 person stepping behind something for a moment comes back with the same id.
 A track is reported once it has been seen MIN_HITS times, so one stray box is
@@ -43,6 +52,7 @@ POS_ALPHA = 0.6        # weight of a new sample in the position average
 VEL_ALPHA = 0.4        # weight of a new sample in the velocity average
 MAX_SPEED = 2.5        # m/s; a faster jump is a depth glitch, not a person
 MAX_PREDICT_S = 0.5    # never coast a lost track further than this on velocity
+CONTAIN = 0.6          # a box this much inside a more confident one is the same person
 
 
 class Track:
@@ -98,6 +108,26 @@ def _assign(cost, gate):
     return [(i, j) for i, j in pairs if cost[i][j] <= gate]
 
 
+def _contained(a, b):
+    """Share of the SMALLER of boxes a, b (u1, v1, u2, v2) that lies inside the other."""
+    iw = min(a[2], b[2]) - max(a[0], b[0])
+    ih = min(a[3], b[3]) - max(a[1], b[1])
+    if iw <= 0 or ih <= 0:
+        return 0.0
+    area = lambda r: max(r[2] - r[0], 1) * max(r[3] - r[1], 1)
+    return iw * ih / min(area(a), area(b))
+
+
+def dedupe(dets):
+    """Drop a detection whose box is mostly inside a more confident one's."""
+    kept = []
+    for d in sorted(dets, key=lambda d: -d["conf"]):
+        if "box" in d and any("box" in k and _contained(d["box"], k["box"]) >= CONTAIN for k in kept):
+            continue
+        kept.append(d)
+    return kept
+
+
 class PersonTracker:
     def __init__(self):
         self._tracks = []
@@ -109,6 +139,7 @@ class PersonTracker:
         Returns the reported people, each the latest detection dict plus
         "id", smoothed "x"/"y", "vx"/"vy" and "lost_s" (0 = seen this frame).
         """
+        dets = dedupe(dets)
         preds = [tr.predict(t) for tr in self._tracks]
         cost = [[math.hypot(px - d["x"], py - d["y"]) for d in dets] for px, py in preds]
         matched_t, matched_d = set(), set()

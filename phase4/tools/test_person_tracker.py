@@ -96,6 +96,26 @@ def test_jump_is_someone_else():
     assert 2 in ids(out), out
 
 
+def test_one_person_two_boxes():
+    tr = pt.PersonTracker()
+    t = 0.0
+    for _ in range(5):        # whole body + upper body, 0.4 m apart in depth
+        whole = dict(det(1.0, 0.0, 0.85), box=[200, 0, 440, 480])
+        upper = dict(det(1.3, 0.3, 0.6), box=[220, 0, 430, 250])
+        out = tr.update([whole, upper], t); t += DT
+    assert ids(out) == [1], out
+
+
+def test_two_people_side_by_side():
+    tr = pt.PersonTracker()
+    t = 0.0
+    for _ in range(5):
+        a = dict(det(2.0, 0.3), box=[100, 50, 250, 470])
+        b = dict(det(2.0, -0.3), box=[330, 50, 480, 470])
+        out = tr.update([a, b], t); t += DT
+    assert ids(out) == [1, 2], out
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in list(globals().items()):
