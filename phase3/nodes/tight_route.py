@@ -219,6 +219,21 @@ def merge(steps):
     return out
 
 
+def poses_of(steps, start, ge):
+    """The pose after each step, from start (x, y, th): what the plan expects,
+    turns sliding about the learned pivot as goal_exec's do. For drawing."""
+    x, y, th = start
+    out = [(x, y, th)]
+    for kind, v in steps or []:
+        if kind == 'drive':
+            x, y = x + v * math.cos(th), y + v * math.sin(th)
+        else:
+            sl = R(th) @ ((np.eye(2) - R(v)) @ ge.P[1 if v > 0 else -1])
+            x, y, th = x + float(sl[0]), y + float(sl[1]), wrap(th + v)
+        out.append((x, y, th))
+    return out
+
+
 def describe(steps):
     """[('drive', 0.1), ('turn', 0.785)] -> 'F10 L45' (for the log and the brain)."""
     words = []

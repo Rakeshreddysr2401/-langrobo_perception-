@@ -22,6 +22,7 @@ import time
 from pathlib import Path
 
 import numpy as np
+from rclpy.clock import Clock
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / 'nodes'))
@@ -56,12 +57,24 @@ def to_base(w, pose):
     return np.stack([c * q[:, 0] + s * q[:, 1], -s * q[:, 0] + c * q[:, 1]], 1)
 
 
+class Pub:
+    def __init__(self):
+        self.sent = []
+
+    def publish(self, msg):
+        self.sent.append(msg)
+
+
 class FakeReach:
-    """Just what tight_round touches, as Reach has it."""
+    """Just what tight_round touches, as Reach has it -- the drawing too."""
     SNAP_GAP = RN.Reach.SNAP_GAP
+    WHITE, GREEN, AMBER, RED, CYAN = RN.Reach.WHITE, RN.Reach.GREEN, RN.Reach.AMBER, RN.Reach.RED, RN.Reach.CYAN
     outside_body = staticmethod(RN.Reach.outside_body)
+    status_text = staticmethod(RN.Reach.status_text)
     tight_round = RN.Reach.tight_round
     tight_target = RN.Reach.tight_target
+    show_tight = RN.Reach.show_tight
+    _mk = RN.Reach._mk
 
     def __init__(self, phantom, cancel_after=None):
         self.pose = np.zeros(3)
@@ -70,6 +83,7 @@ class FakeReach:
         self.stop_req = False
         self.cancel_after = cancel_after
         self.moves, self.log = 0, []
+        self.pub_mk = Pub()
         self.ge = G.GoalExec(P_prior=PIVOT)
         RN.PIVOT_FILE = Path('/nonexistent')       # GoalExec() unlearned -> patched below
         RN.GoalExec = lambda P_prior=None: G.GoalExec(P_prior=PIVOT)
@@ -81,6 +95,9 @@ class FakeReach:
 
     def spin_for(self, s):
         pass
+
+    def get_clock(self):
+        return Clock()
 
     def dist(self, g):
         return math.hypot(g[0] - self.pose[0], g[1] - self.pose[1])
@@ -142,6 +159,16 @@ def test_phantom_speck_goes_out_of_the_door():
     assert r.dist(GOAL) <= 0.13, r.pose
     plans = [d['plan'] for d in r.log if d.get('plan')]
     print(f'  phantom: reached in {r.moves} moves; plans {plans[:3]} ...')
+    # drawn: one plan per planning, path from the rover's pose, an outline
+    # (4 edges) per step end, amber while the plan is the LiDAR's alone
+    drawn = [m for m in r.pub_mk.sent if m.markers and m.markers[0].action == m.markers[0].ADD]
+    assert len(drawn) == len(plans), (len(drawn), len(plans))
+    path, boxes, tgt = drawn[0].markers
+    assert len(path.points) == len(plans[0].split()) + 1, (len(path.points), plans[0])
+    assert abs(path.points[0].x) < 1e-6 and abs(path.points[0].y) < 1e-6
+    assert len(boxes.points) == 8 * (len(path.points) - 1)
+    assert (path.color.r, path.color.g) == RN.Reach.AMBER[:2], path.color      # LiDAR-only plan
+    assert abs(tgt.pose.position.x - GOAL[0]) < 1e-6
 
 
 def test_real_speck_stops_before_it():
@@ -154,6 +181,16 @@ def test_real_speck_stops_before_it():
     refusals = [d for d in r.log if d.get('outcome') == 'failed']
     print(f'  real speck: stopped after {r.moves} moves, {len(refusals)} refusals, '
           f'at ({r.pose[0]:.2f}, {r.pose[1]:.2f})')
+
+
+def test_status_line():
+    t = RN.Reach.status_text
+    assert t({'attempt': 2, 'phase': 'tight', 'plan': 'F10 L45 F160', 'mode': 'lidar'}) == \
+        'try 2: tight -- F10 L45 F160 (lidar)'
+    assert t({'attempt': 2, 'phase': 'tight', 'move': 'L45', 'outcome': 'reached'}) == 'try 2: tight -- L45 reached'
+    assert t({'result': 'reached', 'dist_cm': 1.2}) == 'reached 1.2 cm'
+    long = t({'result': 'failed', 'why': 'no way from here: ' + 'x' * 200})
+    assert long.startswith('failed -- no way') and len(long) <= 72
 
 
 def test_no_time_no_move():

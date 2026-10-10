@@ -50,14 +50,15 @@ from pathlib import Path
 import numpy as np
 import rclpy
 from action_msgs.msg import GoalStatus
-from geometry_msgs.msg import PoseStamped, Twist
+from geometry_msgs.msg import Point, PoseStamped, Twist
 from nav2_msgs.action import ComputePathToPose, NavigateToPose
 from nav2_msgs.srv import ClearEntireCostmap
 from nav_msgs.msg import OccupancyGrid
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.action import ActionClient
 from rclpy.time import Time
-from std_msgs.msg import Empty, String
+from std_msgs.msg import ColorRGBA, Empty, String
+from visualization_msgs.msg import Marker, MarkerArray
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'tools'))
@@ -170,6 +171,9 @@ class Reach(GP.Pass):
         self.ge_goal = self.create_publisher(PoseStamped, '/goal_exec/goal', 10)
         self.ge_turn = self.create_publisher(PoseStamped, '/goal_exec/turn', 10)
         self.pub_status = self.create_publisher(String, '/reach/status', 10)
+        # RViz: what reach is doing, over the rover, and the tight route's plan
+        self.pub_mk = self.create_publisher(MarkerArray, '/reach/markers', QoSProfile(
+            depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL, reliability=ReliabilityPolicy.RELIABLE))
         self.clear_l = self.create_client(ClearEntireCostmap, '/local_costmap/clear_entirely_local_costmap')
         self.clear_g = self.create_client(ClearEntireCostmap, '/global_costmap/clear_entirely_global_costmap')
         self.pending = None
@@ -205,6 +209,74 @@ class Reach(GP.Pass):
             d['goal_stamp'] = self.goal_stamp
         self.pub_status.publish(String(data=json.dumps(d)))
         self.get_logger().info(json.dumps(d))
+        self.show_status(d)
+
+    # ── RViz (/reach/markers, display "Reach -- what it is doing") ───────────
+    # 2026-10-10: the "come to me" that failed was three "no path" and two
+    # way-back hops, readable only in /tmp/reach.log. Now a line over the
+    # rover says which step reach is on, and the tight route draws its plan:
+    # the centre's path and the outline at the end of every move (green:
+    # planned on LiDAR + camera; amber: on the LiDAR alone), and its target.
+    WHITE, GREEN, AMBER, RED, CYAN = ((1.0, 1.0, 1.0), (0.2, 0.9, 0.3), (1.0, 0.65, 0.0),
+                                      (1.0, 0.25, 0.2), (0.2, 0.85, 1.0))
+
+    def _mk(self, ns, i, typ, scale, rgb, a=1.0):
+        m = Marker()
+        m.header.frame_id, m.header.stamp = 'odom', self.get_clock().now().to_msg()
+        m.ns, m.id, m.type, m.action = ns, i, typ, Marker.ADD
+        m.scale.x = m.scale.y = m.scale.z = scale
+        m.color = ColorRGBA(r=rgb[0], g=rgb[1], b=rgb[2], a=a)
+        m.pose.orientation.w = 1.0
+        return m
+
+    @staticmethod
+    def status_text(d):
+        """One short line from a status dict."""
+        if 'result' in d:
+            s = d['result'] + (f" {d['dist_cm']} cm" if 'dist_cm' in d else '')
+            why = d.get('why') or d.get('note') or ''
+        else:
+            s = f"try {d.get('attempt', '-')}: {d.get('phase', '')}"
+            why = (d.get('plan') and f"{d['plan']} ({d.get('mode')})") or \
+                (d.get('move') and f"{d['move']} {d.get('outcome', '')}") or \
+                d.get('why') or d.get('outcome') or ''
+        s = f'{s} -- {why}' if why else s
+        return s if len(s) <= 72 else s[:69] + '...'
+
+    def show_status(self, d):
+        if self.pose is None:
+            return
+        rgb = self.GREEN if d.get('result') == 'reached' else \
+            self.RED if d.get('result') in ('failed', 'cancelled') else self.WHITE
+        m = self._mk('reach_status', 0, Marker.TEXT_VIEW_FACING, 0.07, rgb)
+        m.pose.position.x, m.pose.position.y, m.pose.position.z = self.pose[0], self.pose[1], 0.55
+        m.text = self.status_text(d)
+        self.pub_mk.publish(MarkerArray(markers=[m]))
+
+    def show_tight(self, steps, mode, target, ge):
+        """The plan from where the rover stands; steps None clears it."""
+        out = []
+        if not steps:
+            for i in range(3):
+                m = self._mk('tight', i, Marker.LINE_STRIP, 0.01, self.WHITE)
+                m.action = Marker.DELETE
+                out.append(m)
+            self.pub_mk.publish(MarkerArray(markers=out))
+            return
+        rgb = self.GREEN if mode == 'all' else self.AMBER
+        poses = TRT.poses_of(steps, tuple(self.pose), ge)
+        path = self._mk('tight', 0, Marker.LINE_STRIP, 0.015, rgb)
+        path.points = [Point(x=p[0], y=p[1], z=0.02) for p in poses]
+        boxes = self._mk('tight', 1, Marker.LINE_LIST, 0.006, rgb, 0.7)
+        corners = ((GE_FRONT, SIDE), (GE_FRONT, -SIDE), (-GE_REAR, -SIDE), (-GE_REAR, SIDE))
+        for x, y, th in poses[1:]:
+            c, s_ = math.cos(th), math.sin(th)
+            w = [Point(x=x + c * a - s_ * b, y=y + s_ * a + c * b, z=0.02) for a, b in corners]
+            for k in range(4):
+                boxes.points += [w[k], w[(k + 1) % 4]]
+        tgt = self._mk('tight', 2, Marker.SPHERE, 0.06, self.CYAN)
+        tgt.pose.position.x, tgt.pose.position.y, tgt.pose.position.z = target[0], target[1], 0.03
+        self.pub_mk.publish(MarkerArray(markers=[path, boxes, tgt]))
 
     def goal_odom(self, m):
         p, q = m.pose.position, m.pose.orientation
@@ -721,6 +793,7 @@ class Reach(GP.Pass):
                      plan=TRT.describe(steps) if steps else '', ms=info.get('ms'),
                      expanded=info.get('expanded'), why=info.get('why', ''),
                      target=[round(tgt[0], 2), round(tgt[1], 2)])
+            self.show_tight(steps, mode, tgt, ge)
             if not steps:
                 return 'none' if not moves else 'failed'
             kind, v = steps[0]
@@ -889,6 +962,7 @@ class Reach(GP.Pass):
             if jammed and tight_rounds < TIGHT_ROUNDS:
                 tight_rounds += 1
                 out = self.tight_round(attempt, g, t0 + MAX_S)
+                self.show_tight(None, '', None, None)
                 if out == 'reached':
                     continue
                 if out == 'cancelled' or self.stop_req:

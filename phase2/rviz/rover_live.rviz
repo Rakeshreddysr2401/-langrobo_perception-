@@ -320,6 +320,24 @@ Visualization Manager:
         Value: /gap_pass/markers
       Value: true
 
+    # ── what reach is doing: a line over the rover ("try 2: tight -- F10
+    # L45 F160 (lidar)"; green reached, red failed) and, when nav2 has no
+    # path, the tight route's plan -- the centre's path, the outline at the
+    # end of every move, the cyan target. Green: planned on LiDAR + camera;
+    # amber: on the LiDAR alone (each move still checked on the camera). ─
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: Reach - what it is doing
+      Namespaces:
+        {}
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /reach/markers
+      Value: true
+
     # ── the planned route, when nav2 is running ─────────────────────────
     - Alpha: 1
       Buffer Length: 1
