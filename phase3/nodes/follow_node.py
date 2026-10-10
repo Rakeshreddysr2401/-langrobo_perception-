@@ -83,6 +83,10 @@ class FollowNode(Node):
         # cmd_topic:=/follow/cmd_vel_dry is a DRY RUN: everything live, the
         # wheels untouched (nothing listens there) -- watch what it would do.
         self.declare_parameter('cmd_topic', '/cmd_vel')
+        # people_topic:=/vision/people_virtual -- phase3/tools/virtual_person.py,
+        # a floor test with nobody there; real YOLO output never mixes in.
+        self.declare_parameter('people_topic', '/vision/people')
+        self.people_topic = self.get_parameter('people_topic').value
         cmd_topic = self.get_parameter('cmd_topic').value
         self.dry = cmd_topic != '/cmd_vel'
         self.cmd = self.create_publisher(Twist, cmd_topic, 10)
@@ -105,7 +109,7 @@ class FollowNode(Node):
                                      lambda _, t=topic: self._end('taken over', f'a goal on {t}'), 10)
         self.create_subscription(String, '/goal_exec/pass',
                                  lambda _: self._end('taken over', 'a pass on /goal_exec/pass'), 10)
-        self.get_logger().info(f'follow up; gap {GAP} m; commands on {cmd_topic}'
+        self.get_logger().info(f'follow up; gap {GAP} m; people from {self.people_topic}; commands on {cmd_topic}'
                                + (' (DRY RUN: wheels untouched)' if self.dry else ''))
 
     # ── inputs ──────────────────────────────────────────────────────────────
@@ -145,7 +149,7 @@ class FollowNode(Node):
         self.pending = {'id': d.get('id'), 'since': time.time()}
         self.active = True
         if self.people_sub is None:
-            self.people_sub = self.create_subscription(String, '/vision/people', self._people, 10)
+            self.people_sub = self.create_subscription(String, self.people_topic, self._people, 10)
         self.dobs.set_active(True)
         self.paused_since = None
         self.get_logger().info(f'start {d}: waiting for /vision/people')

@@ -107,7 +107,22 @@ dexec(){ docker exec -d "$NAME" bash -lc "$ENVSET $1"; }
 rexec(){ docker exec    "$NAME" bash -lc "$ENVSET $1"; }
 running(){ [ "$(docker inspect -f '{{.State.Running}}' "$NAME" 2>/dev/null)" = "true" ]; }
 die(){ echo "  ✗ $*" >&2; exit 1; }
-kill_match(){ docker exec "$NAME" bash -lc "for p in \$(pgrep -f '$1'); do kill -9 \$p 2>/dev/null; done; true" >/dev/null 2>&1 || true; }
+# Stop what matches, GENTLY first (2026-10-10): SIGINT, up to 3 s to exit,
+# then -9 for whatever is left. Straight -9 killed nodes mid-write to FastDDS
+# shared memory; after a night of detect restarts every NEW process in the
+# container discovered the graph and received nothing (UDP-only worked), and
+# only a container restart cured it. The shell's own pid is skipped: pgrep -f
+# also matches this loop's command line, and the old version could kill its
+# own shell part-way through the list.
+kill_match(){ docker exec "$NAME" bash -lc "
+  ps=\$(pgrep -f '$1' | grep -vx \$\$); [ -z \"\$ps\" ] && exit 0
+  kill -INT \$ps 2>/dev/null
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    sleep 0.3; alive=
+    for p in \$ps; do kill -0 \$p 2>/dev/null && alive=\"\$alive \$p\"; done
+    [ -z \"\$alive\" ] && exit 0
+  done
+  kill -9 \$alive 2>/dev/null; true" >/dev/null 2>&1 || true; }
 
 # Every fixed frame on the rover -- base_link -> camera0_link, laser, wheels,
 # chassis -- from ONE robot_state_publisher serving the URDF that
@@ -1175,6 +1190,39 @@ status)
   # echo`, which TRUNCATES that JSON. health.py subscribes properly.
   echo
   rexec "python3 $SRC/nodes/health.py" || true
+  ;;
+
+follow)
+  need_container
+  # "Mitra, follow me" (phase3/nodes/follow_node.py). Needs the fused pose (it
+  # drives on it, with goal_exec's trust rules) and the people from the detect
+  # layer, which this starts if it is not running. NOT part of ./rover up.
+  # FOLLOW_DRY=1 ./rover follow: a dry run -- commands on /follow/cmd_vel_dry,
+  # which nothing drives; everything else live.
+  echo "  checking the fused pose is up before following anyone..."
+  assert_rate /odom 15 "fused odom" || die "no fused pose — run ./rover fused"
+  if ! docker exec "$NAME" pgrep -f '[d]etections_3d[.]py' >/dev/null 2>&1; then
+    "$0" detect || die "the detect layer did not come up"
+  fi
+  kill_match '[f]ollow_node[.]py'
+  if [ -n "${FOLLOW_DRY:-}" ]; then
+    echo "[follow] DRY RUN: commands on /follow/cmd_vel_dry, the wheels are not driven"
+    dexec "exec python3 $SRC3/nodes/follow_node.py --ros-args -p cmd_topic:=/follow/cmd_vel_dry > /tmp/follow.log 2>&1"
+  else
+    echo "[follow] follow_node -> /cmd_vel while following (1.0 m, <= 0.3 m/s)"
+    dexec "exec python3 $SRC3/nodes/follow_node.py > /tmp/follow.log 2>&1"
+  fi
+  sleep 4
+  echo
+  echo "  GATE follow:"
+  rexec "n=\$(ros2 topic info /follow/start 2>/dev/null | awk '/Subscription count/{print \$3}'); \
+         printf '      %-26s %5s        (want >= 1)   %s\n' 'follow listening' \"\${n:-0}\" \"\$([ \"\${n:-0}\" -ge 1 ] && echo OK || echo FAIL)\""
+  rexec "n=\$(ros2 topic info /vision/people 2>/dev/null | awk '/Publisher count/{print \$3}'); \
+         printf '      %-26s %5s        (want >= 1)   %s\n' 'people publisher' \"\${n:-0}\" \"\$([ \"\${n:-0}\" -ge 1 ] && echo OK || echo FAIL)\""
+  echo
+  echo "  Start:  ros2 topic pub --once /follow/start std_msgs/msg/String \"{data: '{}'}\""
+  echo "          ({\"stop_at_gap\": true} = come to me)   Stop: /follow/cancel (std_msgs/Empty)"
+  echo "  Status: ros2 topic echo /follow/status      Log: ./rover logs follow"
   ;;
 
 logs)
