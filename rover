@@ -125,7 +125,7 @@ if [ "$TWIN" = 1 ]; then
   HOSTLOGS="$TWIN_STATE/logs"
   HOSTMAPS="$TWIN_STATE/maps"
   [ -f "$TWIN_SRC/jetson/d555_driver.py" ] \
-    || { echo "TWIN=1: no $TWIN_SRC/jetson/d555_driver.py -- clone mitra_sim to ~/mitra_sim (branch mirror)" >&2; exit 1; }
+    || { echo "TWIN=1: no $TWIN_SRC/jetson/d555_driver.py -- clone mitra_sim to ~/mitra_sim (branch v0.0.1-visual_sim)" >&2; exit 1; }
   echo "  ── TWIN: the Mitra twin on ROS domain $DOMAIN (container $NAME). The real robot is not touched. ──"
 fi
 
