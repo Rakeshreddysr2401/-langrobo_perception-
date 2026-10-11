@@ -25,7 +25,7 @@ For the full runbook including calibration and troubleshooting see
 | Laptop (RViz) | **DHCP — moves** | `./rover view` finds it |
 
 **Single command:** `./rover up` runs every step below in order — camera,
-lidar, pose (with `SLAM=false`), fused, slam, map, nav, vlm, the ESP32 check,
+lidar, pose (with `SLAM=false`), fused, slam, map, nav, vlm, follow (not fatal), the ESP32 check,
 the Pi 5 check, Studio, and the laptop view — and prints the Studio tunnel link
 and the LangSmith project at the end. Add `--voice` to also check the Pi 5's
 voice. It restarts the container, so it's for a cold power-on — don't run
@@ -109,6 +109,7 @@ SLAM=false ./rover pose   # + cuVSLAM, gyro — VO >=10 Hz, gyro >=50 Hz
 ./rover nav         # + nav2               — both costmaps
 ./rover vlm         # + VLM pixel -> goal  — colour >=2 Hz, 1 listener
 ./rover detect      # + YOLO -> odom objects — publishing, target hunt listening
+./rover follow      # + "follow me" (starts detect too) — follow listening, people publisher
 ./rover view        # RViz on the laptop
 ```
 
@@ -171,6 +172,17 @@ ssh 192.168.1.16 'grep -n create_subscription \
 ```
 
 If `/vision/detections_3d` is not in that output, skip `detect`.
+
+**`follow` is part of `up` since 2026-10-11** ("Mitra, follow me" / "come to me";
+the Pi 5 brain has the tool on with `LANGROBO_FOLLOW=1`). It starts `detect` (YOLO
++ the person tracker -> `/vision/people`) and `follow_node`. If it fails, `up` warns
+and carries on: the robot works without it. YOLO idles until someone asks for people,
+so it costs nothing at rest; while active, measured 2026-10-11: `/odom` 20 Hz, colour
+4.5 Hz, the cleaned grid 5 Hz, `/scan` 10 Hz (unchanged), GPU ~10 %. `follow_node`
+drives only after `/follow/start`. `FOLLOW_DRY=1 ./rover follow` = commands on
+`/follow/cmd_vel_dry`, wheels untouched. The camera sits low: a person must be
+standing in view. Someone seated at the frame edge (legs and arms only) gives no
+YOLO person even at conf 0.1.
 
 **Do not stop at `nav`.** `vlm` is what lets the Pi 5 brain *see* — without it
 `look()` and `approach_described_object()` are silently dead, the brain answers

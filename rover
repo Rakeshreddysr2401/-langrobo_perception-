@@ -824,7 +824,7 @@ vlm)
 # running well — running it against a healthy stack throws the healthy state
 # away for no reason.
 up)
-  echo "═══ full bring-up: camera → lidar → pose → fused → slam → map → nav → vlm → wheels → Pi5 → Studio → view ═══"
+  echo "═══ full bring-up: camera → lidar → pose → fused → slam → map → nav → vlm → follow → wheels → Pi5 → Studio → view ═══"
   for layer in camera lidar pose fused slam map nav vlm; do
     echo
     # pose runs with SLAM=false so cuVSLAM does NOT publish map -> odom. Only
@@ -837,6 +837,15 @@ up)
     else "$0" "$layer" || die "'$layer' failed — fix it (see above) before continuing. Re-run: ./rover up"
     fi
   done
+
+  # "Mitra, follow me" (detect + follow_node). The brain has the tool on
+  # (LANGROBO_FOLLOW=1), and with this layer started by hand it failed after
+  # every power cycle (2026-10-11). Not fatal: the robot works without it.
+  # YOLO idles until someone asks for people, so it costs ~nothing at rest.
+  if [ "$TWIN" != 1 ]; then
+    echo
+    "$0" follow || echo "  ! follow did not come up -- the rest of the robot is fine; retry: ./rover follow"
+  fi
 
   echo
   echo "[wheels] ESP32 link — first check"
@@ -1005,7 +1014,9 @@ detect)
   # and an empty room is not a fault. The brain agrees -- on_detections has no
   # staleness timeout, it just observes into world_model. So gate on the node
   # being up and listening, then say what it can currently see.
-  rexec "n=\$(ros2 topic info /vision/detections_3d 2>/dev/null | awk '/Publisher count/{print \$3}'); \
+  # Asked up to 3 times: the graph lags a node that just started, and a first
+  # answer of 0 printed FAIL for a running detector (2026-10-11).
+  rexec "for i in 1 2 3; do n=\$(ros2 topic info /vision/detections_3d 2>/dev/null | awk '/Publisher count/{print \$3}'); [ \"\${n:-0}\" -ge 1 ] && break; sleep 3; done; \
          printf '      %-26s %5s        (want >= 1)   %s\n' 'detections_3d publishing' \"\${n:-0}\" \"\$([ \"\${n:-0}\" -ge 1 ] && echo OK || echo FAIL)\""
   rexec "n=\$(ros2 topic info /vision/target 2>/dev/null | awk '/Subscription count/{print \$3}'); \
          printf '      %-26s %5s        (want >= 1)   %s\n' 'target hunt listening' \"\${n:-0}\" \"\$([ \"\${n:-0}\" -ge 1 ] && echo OK || echo FAIL)\""
@@ -1357,7 +1368,8 @@ follow)
   need_container
   # "Mitra, follow me" (phase3/nodes/follow_node.py). Needs the fused pose (it
   # drives on it, with goal_exec's trust rules) and the people from the detect
-  # layer, which this starts if it is not running. NOT part of ./rover up.
+  # layer, which this starts if it is not running. Part of ./rover up since
+  # 2026-10-11 (after vlm, not fatal); run alone to restart it.
   # FOLLOW_DRY=1 ./rover follow: a dry run -- commands on /follow/cmd_vel_dry,
   # which nothing drives; everything else live.
   echo "  checking the fused pose is up before following anyone..."
