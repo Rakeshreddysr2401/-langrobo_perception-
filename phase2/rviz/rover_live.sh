@@ -10,8 +10,10 @@
 # cannot happen again.
 export DISPLAY="${DISPLAY:-:0}"
 source /opt/ros/jazzy/setup.bash
-export ROS_DOMAIN_ID=0            # must match the rover
+# must match the rover. `TWIN=1 ./rover view` sets 42 and its own config: the
+# Mitra twin's window, beside the real one.
+export ROS_DOMAIN_ID="${ROVER_RVIZ_DOMAIN:-0}"
 unset ROS_DISCOVERY_SERVER        # a stale one shows an empty graph
 unset FASTRTPS_DEFAULT_PROFILES_FILE
 export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-exec rviz2 -d "$HOME/rover_live.rviz" "$@"
+exec rviz2 -d "${ROVER_RVIZ_CONFIG:-$HOME/rover_live.rviz}" "$@"

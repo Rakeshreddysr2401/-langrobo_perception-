@@ -36,6 +36,13 @@
 #   ./rover logs <n>   tail a layer's log (camera|vo|gyro|fused|lidar|slam)
 #   ./rover stop       tear the container down
 #
+#   TWIN=1 ./rover <any of the above>
+#                      the same, on the Mitra TWIN instead of the robot: the
+#                      laptop's simulated D555 / C1 / ESP32 (mitra_sim, `./mitra
+#                      up <world>` there first), ROS domain 42, container
+#                      rover_twin, state in ~/.rover_twin. The real robot's
+#                      container, domain and logs are never touched.
+#
 # WHY LAYERS. Four machines and a camera that can be knocked offline by being
 # poked at. If everything starts at once, a failure is a wall of log with no
 # owner. Each layer here starts alone and prints its own PASS/FAIL, so the
@@ -93,6 +100,35 @@ LIDAR_PORT=${LIDAR_PORT:-/dev/ttyUSB0}
 LIDAR_TIME_OFFSET=${LIDAR_TIME_OFFSET:-0.082}
 CAM_NS=/camera/camera0
 
+# ── TWIN=1 ./rover <layer>: the SAME layers on the Mitra twin, not the robot ──
+# The laptop (mitra_sim: `./mitra up <world>`) is the HARDWARE -- a simulated
+# D555, C1 and ESP32 on the measured body, in a simulated home. Everything here
+# then runs exactly as on the robot (same scripts, nodes, configs, gates), with
+# four differences:
+#   - ROS domain $MITRA_DOMAIN (42), never 0: nothing reaches the real wheels;
+#   - its own container (rover_twin): kill_match / stop never touch the real one;
+#   - its own /logs and /maps (~/.rover_twin): learned state never mixes;
+#   - camera / lidar: driver stand-ins (~/mitra_sim/jetson/{d555,c1}_driver.py)
+#     take the laptop's frames off a virtual cable and publish the drivers' own
+#     topics; the ESP32's stand-in publishes its micro-ROS topics from the laptop.
+# The Pi 5's half is twin_brain.sh (a second agent_node on the same domain).
+TWIN=${TWIN:-0}
+DOMAIN=0
+HOSTLOGS="$REPO/logs"
+HOSTMAPS="$REPO/maps"
+if [ "$TWIN" = 1 ]; then
+  DOMAIN=${MITRA_DOMAIN:-42}
+  [ "$DOMAIN" = 0 ] && { echo "refusing: TWIN=1 on domain 0 would be the REAL robot's" >&2; exit 1; }
+  NAME=rover_twin
+  TWIN_SRC=${TWIN_SRC:-$HOME/mitra_sim}
+  TWIN_STATE=${TWIN_STATE:-$HOME/.rover_twin}
+  HOSTLOGS="$TWIN_STATE/logs"
+  HOSTMAPS="$TWIN_STATE/maps"
+  [ -f "$TWIN_SRC/jetson/d555_driver.py" ] \
+    || { echo "TWIN=1: no $TWIN_SRC/jetson/d555_driver.py -- clone mitra_sim to ~/mitra_sim (branch mirror)" >&2; exit 1; }
+  echo "  ── TWIN: the Mitra twin on ROS domain $DOMAIN (container $NAME). The real robot is not touched. ──"
+fi
+
 # The cuvslam wheel ships its own libcuvslam.so and CUDA-12 userspace libs, and
 # they must come BEFORE Isaac ROS's own build in /opt/ros/jazzy — that one is
 # compiled for Thor and will not run on this Orin.
@@ -101,7 +137,7 @@ CU12="$CU/cuvslam:$CU/nvidia/cuda_runtime/lib:$CU/nvidia/cublas/lib:$CU/nvidia/c
 
 # A stale ROS_DISCOVERY_SERVER makes nodes silently invisible to each other,
 # which looks exactly like a crashed node. Clear it on every command.
-ENVSET='unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE; export ROS_DOMAIN_ID=0; source /opt/ros/jazzy/setup.bash;'
+ENVSET="unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE; export ROS_DOMAIN_ID=$DOMAIN; source /opt/ros/jazzy/setup.bash;"
 
 dexec(){ docker exec -d "$NAME" bash -lc "$ENVSET $1"; }
 rexec(){ docker exec    "$NAME" bash -lc "$ENVSET $1"; }
@@ -146,6 +182,61 @@ tf_up(){
 
 need_container(){ running || die "no container. Run: ./rover camera"; }
 
+# TWIN: the laptop built the twin's body from ITS copy of description/ (mitra_sim
+# tools/sync_rover.sh). A re-measurement here that never reached it is a twin
+# with the camera or lidar somewhere the robot's TF says they are not.
+twin_desc_check(){
+  local mine theirs
+  mine=$(sha1sum "$REPO/description/params.yaml" | cut -c1-12)
+  theirs=$(timeout 8 ssh $LSSH "$LAPTOP_USER@$ip" 'grep -o "sha1 [0-9a-f]*" /workspace/mitra_sim/description/rover/SOURCE' 2>/dev/null | cut -d' ' -f2 || true)
+  if [ "$mine" = "$theirs" ]; then
+    echo "  twin body = this rover's description/params.yaml ($mine)"
+  else
+    echo "  ! the twin was built from params.yaml ${theirs:-?}, this rover's is $mine."
+    echo "    On the laptop: cd /workspace/mitra_sim && tools/sync_rover.sh && ./mitra build, then ./mitra up again."
+  fi
+}
+
+# The laptop is on DHCP and MOVES (.10, .17, .5 so far): find it rather than
+# hardcode it -- the host that answers ssh AND has the view script (the Jetson
+# and the Pi 5 answer ssh too). Sets $ip and $LSSH. The last address found is
+# tried first. Used by `view`, and by TWIN=1's camera/lidar (the twin's sensors
+# are on the laptop).
+find_laptop(){
+  [ -n "${ip:-}" ] && return 0
+  LSSH="-o BatchMode=yes"
+  if ssh-keygen -F rover-laptop >/dev/null 2>&1; then
+    LSSH="$LSSH -o HostKeyAlias=rover-laptop"
+  else
+    echo "  ! no 'rover-laptop' host key: a laptop on a new address will be refused."
+    echo "    Add it once: ssh-keyscan -t ed25519 <laptop ip> | sed 's/^[^ ]*/rover-laptop/' >> ~/.ssh/known_hosts"
+    echo "    (check the fingerprint first: ssh-keygen -lf on the line, against the Pi 5's known_hosts)"
+  fi
+  ip="${LAPTOP_IP:-}"
+  if [ -z "$ip" ] && [ -f "$HOME/.rover_laptop_ip" ]; then
+    local last; last=$(cat "$HOME/.rover_laptop_ip")
+    timeout 6 ssh $LSSH -o ConnectTimeout=3 "$LAPTOP_USER@$last" 'test -f ~/rover_live.sh' 2>/dev/null && ip="$last"
+  fi
+  if [ -z "$ip" ]; then
+    printf "  looking for the laptop"
+    for i in $(seq 2 40); do
+      cand="192.168.1.$i"
+      [ "$cand" = "$(hostname -I | tr ' ' '\n' | grep '^192\.168\.1\.' | head -1)" ] && continue
+      if timeout 1 bash -c "echo > /dev/tcp/$cand/22" 2>/dev/null; then
+        if timeout 6 ssh $LSSH -o ConnectTimeout=3 "$LAPTOP_USER@$cand" \
+             'test -f ~/rover_live.sh' 2>/dev/null; then
+          ip="$cand"; break
+        fi
+      fi
+      printf "."
+    done
+    echo
+  fi
+  [ -n "$ip" ] || die "no laptop found. Is it on, and awake? Set LAPTOP_IP=x.x.x.x to skip the search."
+  echo "  laptop at $ip"
+  echo "$ip" > "$HOME/.rover_laptop_ip"
+}
+
 # Host env does NOT reach `docker exec bash -lc` -- that is how `SLAM=false
 # ./rover pose` silently did nothing for months. The motion tools read these,
 # so forward the ones that are SET, and only those: an empty value would
@@ -169,7 +260,12 @@ rate_of(){
 # a bare mode=$(curl ...) under `set -e` exited silently (curl's 7) when it
 # was down, the same trap as OPEN_ISSUES #9.
 refuse_if_manual(){ # [message]
-  local mode; mode=$(timeout 5 curl -s "http://$PI5_HOST:8091/mode" 2>/dev/null || true)
+  local mode
+  if [ "$TWIN" = 1 ]; then   # the twin's teleop switch is a file (twin_brain.sh manual on|off)
+    mode=$(timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" 'cat ~/.langrobo_twin/teleop_mode.json' 2>/dev/null || true)
+  else
+    mode=$(timeout 5 curl -s "http://$PI5_HOST:8091/mode" 2>/dev/null || true)
+  fi
   case "$mode" in *'"manual": true'*) die "${1:-teleop is in MANUAL. Tap AUTO.}" ;; esac
 }
 assert_rate(){ # topic  min_hz  label
@@ -190,21 +286,31 @@ pose_honest(){ rexec "python3 $SRC/nodes/health.py"; }
 
 start_container(){
   docker rm -f "$NAME" >/dev/null 2>&1 || true
-  mkdir -p "$REPO/logs" "$REPO/maps"
+  mkdir -p "$HOSTLOGS" "$HOSTMAPS"
+  local twin_mount=()
+  if [ "$TWIN" = 1 ]; then
+    twin_mount=(-v "$TWIN_SRC":/opt/twin:ro)
+    # goal_exec starts as the real rover does: with the pivot it has learned
+    # (a COPY; the twin's motion pack 'rover' is the same numbers). Delete
+    # ~/.rover_twin/logs/goal_exec_pivot.json to start unlearned.
+    [ -f "$HOSTLOGS/goal_exec_pivot.json" ] || cp "$REPO/logs/goal_exec_pivot.json" "$HOSTLOGS/" 2>/dev/null || true
+    [ "$(docker inspect -f '{{.State.Running}}' rover 2>/dev/null)" = true ] \
+      && echo "  ! the REAL stack's container is running too: both share the Jetson's GPU and 8 GB."
+  fi
   # phase1/ is mounted READ-ONLY: edit a node on the host, restart the layer,
   # no rebuild. The image has no build recipe, so it must never be modified.
   docker run -d --name "$NAME" --entrypoint /bin/bash \
     --runtime=nvidia --network=host --privileged \
     -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all -e NVIDIA_DISABLE_REQUIRE=1 \
-    -e ROS_DOMAIN_ID=0 \
+    -e ROS_DOMAIN_ID=$DOMAIN "${twin_mount[@]}" \
     -v "$HOSTSRC":$SRC:ro \
     -v "$REPO/phase2":$SRC2:ro \
     -v "$REPO/phase3":$SRC3:ro \
     -v "$REPO/phase4":$SRC4:ro \
     -v "$REPO/models":/models:ro \
     -v "$REPO/lidar":$LIDAR:ro \
-    -v "$REPO/maps":/maps \
-    -v "$REPO/logs":/logs \
+    -v "$HOSTMAPS":/maps \
+    -v "$HOSTLOGS":/logs \
     "$IMAGE" -c 'sleep infinity' >/dev/null
   sleep 2
 }
@@ -233,6 +339,19 @@ camera)
     rexec "python3 $SRC/nodes/cam_lidar_calib.py ${3:-}"; exit
   fi
   start_container
+  if [ "$TWIN" = 1 ]; then
+  find_laptop
+  twin_desc_check
+  # a fresh stack's odom and map start where the rover stands: put it back on the
+  # world's start, as you would carry the robot to its mark (the judge assumes it)
+  timeout 20 ssh $LSSH "$LAPTOP_USER@$ip" 'cd /workspace/mitra_sim && ./mitra reset' 2>/dev/null | sed 's/^/  /' \
+    || echo "  ! could not reset the twin's pose (is ./mitra up running?)"
+  echo "[camera] TWIN: the laptop's simulated D555 -> d555_driver (realsense2_camera's topics)"
+  dexec "exec python3 -u /opt/twin/jetson/d555_driver.py --laptop $ip > /tmp/camera.log 2>&1"
+  # which rover code the twin is running: latched on /mitra/rover_commit, the judge records it
+  dexec "exec python3 -u /opt/twin/jetson/announce.py '$(git -C "$REPO" branch --show-current)' \
+         '$(git -C "$REPO" log --oneline -1 | tr -dc "[:alnum:] ._:,()+-" | cut -c1-90)' > /tmp/announce.log 2>&1"
+  else
   echo "[camera] D555 — stereo IR + depth + motion"
   echo "         emitter OFF and sync OFF; both are load-bearing, see phase1/README.md"
   dexec 'printf "{\"context\":{\"dds\":{\"enabled\":true,\"domain\":0}}}" > ~/.realsense-config.json;
@@ -243,9 +362,12 @@ camera)
             enable_depth:=true enable_color:=true rgb_camera.color_profile:=424x240x15 \
             align_depth.enable:=true \
             enable_motion:=true enable_sync:=false > /tmp/camera.log 2>&1'
+  fi
   t=0
   until cam_ready; do
     t=$((t+3)); [ "$t" -ge 40 ] && { echo "  ✗ D555 not streaming after 40 s."
+      [ "$TWIN" = 1 ] && { echo "    TWIN: is the world up on the laptop ($ip)?  cd /workspace/mitra_sim && ./mitra up home_real"
+                           docker exec "$NAME" tail -3 /tmp/camera.log; exit 1; }
       docker exec "$NAME" grep -q "No RealSense devices were found" /tmp/camera.log 2>/dev/null \
         && echo "    Its on-camera DDS server is offline. It still answers ping; that means nothing."
       echo "    Only a physical PoE power-cycle (unplug ~5 s) recovers this."
@@ -367,6 +489,14 @@ lidar)
     echo "  target ~50 cm DIRECTLY in front of the nose, nothing else within 1.5 m:"
     rexec "python3 $LIDAR/yaw_find.py"; exit
   fi
+  if [ "$TWIN" = 1 ]; then
+  find_laptop
+  kill_match '[c]1_driver[.]py'
+  echo "[lidar] fixed frames from description/params.yaml (robot_state_publisher)"
+  tf_up
+  echo "[lidar] TWIN: the laptop's simulated C1 -> c1_driver -> /scan  (10 Hz, 720 beams, 0.5 deg)"
+  dexec "exec python3 -u /opt/twin/jetson/c1_driver.py --laptop $ip > /tmp/lidar.log 2>&1"
+  else
   [ -x "$REPO/lidar/ws/build/sllidar_ros2/sllidar_node" ] \
     || die "driver not built — run: lidar/build.sh   (one-off, ~30 s)"
   [ -e "$LIDAR_PORT" ] || die "no $LIDAR_PORT — is the C1's USB cable in? (lsusb: Silicon Labs CP210x)"
@@ -378,6 +508,7 @@ lidar)
             -p serial_port:=$LIDAR_PORT -p serial_baudrate:=460800 -p frame_id:=laser \
             -p inverted:=false -p angle_compensate:=true -p scan_mode:=Standard \
             -p scan_time_offset:=$LIDAR_TIME_OFFSET > /tmp/lidar.log 2>&1"
+  fi
   sleep 5
   echo
   echo "  GATE lidar:"
@@ -436,7 +567,9 @@ wheels)
   # SUBSCRIBES to /cmd_vel. It shows up there as the micro-ROS agent's bare-DDS
   # endpoint (fusion2 is the other subscriber, so the plain count is 2 when
   # healthy). Without it nav2 publishes into nothing and every gate stays green.
-  esp_sub=$(rexec "ros2 topic info -v /cmd_vel 2>/dev/null | grep -A4 'Node name: _CREATED_BY_BARE_DDS_APP_' | grep -c SUBSCRIPTION" 2>/dev/null || true)
+  esp_node=_CREATED_BY_BARE_DDS_APP_     # how micro-ROS shows up in the graph
+  [ "$TWIN" = 1 ] && esp_node=esp32_twin  # the laptop's stand-in (mitra_sim nodes/esp32_sim.py)
+  esp_sub=$(rexec "ros2 topic info -v /cmd_vel 2>/dev/null | grep -A4 'Node name: $esp_node' | grep -c SUBSCRIPTION" 2>/dev/null || true)
   printf '      %-22s %7s        (want >= 1)   %s\n' 'ESP32 on /cmd_vel' "${esp_sub:-0}" \
     "$([ "${esp_sub:-0}" -ge 1 ] && echo OK || echo FAIL)"
   if [ "${esp_sub:-0}" -lt 1 ]; then
@@ -709,6 +842,31 @@ up)
   echo "[wheels] ESP32 link — first check"
   "$0" wheels || true
 
+  if [ "$TWIN" = 1 ]; then
+    # The Pi 5's half of the twin: the SAME agent_node, a second instance on
+    # this domain (own state dir, no Telegram, no voice, own teleop switch).
+    # Studio, voice and the real teleop page stay the real robot's.
+    echo
+    echo "[pi5] the twin's brain: twin_brain.sh (a 2nd agent_node, domain $DOMAIN)"
+    timeout 90 ssh -n -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" "MITRA_DOMAIN=$DOMAIN ~/ros2_ws/scripts/twin_brain.sh up" 2>&1 \
+      | sed 's/^/      /' || echo "      ? could not reach the Pi 5 ($PI5_HOST)"
+    mode=$(timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" 'cat ~/.langrobo_twin/teleop_mode.json' 2>/dev/null || true)
+    case "$mode" in
+      *'"manual": false'*|*'"manual":false'*) echo "      twin teleop: AUTO — OK" ;;
+      *) echo "      ✗ twin teleop not AUTO ($mode): on the Pi 5, twin_brain.sh manual off" ;;
+    esac
+    echo "      talk to it:  ssh $PI5_HOST '~/ros2_ws/scripts/twin_brain.sh say \"Mitra, what do you see?\"'"
+    echo
+    "$0" view || true
+    echo
+    echo "[wheels] the twin's ESP32 — second check, after every layer is up"
+    "$0" wheels || true
+    echo
+    echo "  Drive it: RViz 2D Goal Pose, ./rover reach X Y, or the twin brain."
+    echo "  Judge it on the truth (laptop): ./mitra scenario home_real"
+    exit 0
+  fi
+
   echo
   echo "[pi5] teleop + agent_node"
   # SSH_OK first: on weak WiFi this ssh times out, and an empty answer used to
@@ -783,6 +941,7 @@ up)
   ;;
 
 voice)
+  [ "$TWIN" = 1 ] && die "TWIN: the mic and speaker belong to the real robot -- talk to the twin with twin_brain.sh say"
     echo "[voice] Pi 5 STT/TTS (langrobo-voice)"
     # The Pi 5 runs voice as a systemd USER unit (langrobo-voice: audio owner +
     # STT + TTS, starts at boot, restarts on failure). Start THAT, never a
@@ -892,41 +1051,41 @@ view)
   # refused it, and the search walked past the laptop (2026-10-09: .5, after
   # .10 and .17). The entry is written once, after checking the fingerprint
   # against a machine that already knows the laptop (OPERATIONS.md, "laptop key").
-  LSSH="-o BatchMode=yes"
-  if ssh-keygen -F rover-laptop >/dev/null 2>&1; then
-    LSSH="$LSSH -o HostKeyAlias=rover-laptop"
-  else
-    echo "  ! no 'rover-laptop' host key: a laptop on a new address will be refused."
-    echo "    Add it once: ssh-keyscan -t ed25519 <laptop ip> | sed 's/^[^ ]*/rover-laptop/' >> ~/.ssh/known_hosts"
-    echo "    (check the fingerprint first: ssh-keygen -lf on the line, against the Pi 5's known_hosts)"
-  fi
-  ip="${LAPTOP_IP:-}"
-  if [ -z "$ip" ]; then
-    printf "  looking for the laptop"
-    for i in $(seq 2 40); do
-      cand="192.168.1.$i"
-      [ "$cand" = "$(hostname -I | tr ' ' '\n' | grep '^192\.168\.1\.' | head -1)" ] && continue
-      if timeout 1 bash -c "echo > /dev/tcp/$cand/22" 2>/dev/null; then
-        if timeout 6 ssh $LSSH -o ConnectTimeout=3 "$LAPTOP_USER@$cand" \
-             'test -f ~/rover_live.sh' 2>/dev/null; then
-          ip="$cand"; break
-        fi
-      fi
-      printf "."
-    done
-    echo
-  fi
-  [ -n "$ip" ] || die "no laptop found. Is it on, and awake? Set LAPTOP_IP=x.x.x.x to skip the search."
-  echo "  found at $ip"
+  find_laptop
 
   # Push the config every time. The laptop used to hold its own copy, which
   # drifted from the repo's and made "I fixed the RViz config" untrue on the
   # only machine that renders it. The repo is the single source; the laptop is
   # a display.
-  scp -q $LSSH "$(dirname "$0")/phase2/rviz/rover_live.rviz" \
-      "$LAPTOP_USER@$ip:~/rover_live.rviz" 2>/dev/null \
+  # TWIN: its own window on its own domain (beside the real one, if that is up),
+  # the SAME config plus one display: the twin world's true obstacles (/sim/world).
+  RVCFG=rover_live
+  RVSRC="$(dirname "$0")/phase2/rviz/rover_live.rviz"
+  if [ "$TWIN" = 1 ]; then
+    RVCFG=rover_twin
+    RVSRC=$(mktemp --suffix=.rviz)
+    python3 - "$(dirname "$0")/phase2/rviz/rover_live.rviz" "$RVSRC" <<'PY'
+import sys, yaml
+c = yaml.safe_load(open(sys.argv[1]))
+c['Visualization Manager']['Displays'].append({
+    'Class': 'rviz_default_plugins/MarkerArray', 'Enabled': True, 'Name': 'TWIN: the true world',
+    'Namespaces': {}, 'Value': True,
+    'Topic': {'Depth': 5, 'Durability Policy': 'Transient Local', 'History Policy': 'Keep Last',
+              'Reliability Policy': 'Reliable', 'Value': '/sim/world'}})
+c['Visualization Manager']['Displays'].append({
+    'Class': 'rviz_default_plugins/Marker', 'Enabled': True, 'Name': 'TWIN: where the rover really is',
+    'Namespaces': {}, 'Value': True,
+    'Topic': {'Depth': 5, 'Durability Policy': 'Volatile', 'History Policy': 'Keep Last',
+              'Reliability Policy': 'Reliable', 'Value': '/sim/truth/marker'}})
+yaml.safe_dump(c, open(sys.argv[2], 'w'), sort_keys=False)
+PY
+  fi
+  RVPAT="[r]viz2 -d .*$RVCFG[.]rviz"     # this window only: the real and the twin's can both be open
+  scp -q $LSSH "$RVSRC" "$LAPTOP_USER@$ip:~/$RVCFG.rviz" 2>/dev/null \
+    && scp -q $LSSH "$(dirname "$0")/phase2/rviz/rover_live.sh" "$LAPTOP_USER@$ip:~/rover_live.sh" 2>/dev/null \
     && echo "  config synced from the repo" \
     || echo "  ! could not sync the config — the laptop may be showing an old one"
+  [ "$TWIN" = 1 ] && rm -f "$RVSRC"
 
   # A desktop session must exist. RViz over ssh with nobody logged in renders
   # into nothing and exits 0 — it looks exactly like a data fault, and it cost
@@ -994,23 +1153,25 @@ view)
     # `sleep 2` found it still there, said "already running" and restarted
     # nothing (2026-10-09). SIGKILL after 10 s.
     timeout 30 ssh $LSSH "$LAPTOP_USER@$ip" \
-      'pkill -x rviz2; for i in $(seq 20); do pgrep -x rviz2 >/dev/null || exit 0; sleep 0.5; done; pkill -9 -x rviz2; sleep 1' \
+      "pkill -f '$RVPAT'; for i in \$(seq 20); do pgrep -f '$RVPAT' >/dev/null || exit 0; sleep 0.5; done; pkill -9 -f '$RVPAT'; sleep 1" \
       2>/dev/null || true
   fi
 
-  # pgrep -x, never -f: -f matches our own ssh command line and always "succeeds".
-  if timeout 15 ssh $LSSH "$LAPTOP_USER@$ip" 'pgrep -x rviz2 >/dev/null' 2>/dev/null; then
+  # pgrep -f only with the [r] trick: a plain pattern matches our own ssh
+  # command line and always "succeeds".
+  if timeout 15 ssh $LSSH "$LAPTOP_USER@$ip" "pgrep -f '$RVPAT' >/dev/null" 2>/dev/null; then
     echo "  already running — look at the laptop screen"
     echo "  (config changed? it is only read at startup: ./rover view --restart)"
   else
     timeout 30 ssh $LSSH "$LAPTOP_USER@$ip" \
       "DISPLAY=${disp:-:0} XAUTHORITY=$auth XDG_RUNTIME_DIR=/run/user/\$(id -u) \
-       setsid nohup bash ~/rover_live.sh >/tmp/rviz.log 2>&1 </dev/null & sleep 12" >/dev/null 2>&1
-    if timeout 15 ssh $LSSH "$LAPTOP_USER@$ip" 'pgrep -x rviz2 >/dev/null' 2>/dev/null; then
+       ROVER_RVIZ_DOMAIN=$DOMAIN ROVER_RVIZ_CONFIG=\$HOME/$RVCFG.rviz \
+       setsid nohup bash ~/rover_live.sh >/tmp/$RVCFG.log 2>&1 </dev/null & sleep 12" >/dev/null 2>&1
+    if timeout 15 ssh $LSSH "$LAPTOP_USER@$ip" "pgrep -f '$RVPAT' >/dev/null" 2>/dev/null; then
       echo "  started"
     else
       echo "  ✗ rviz2 did not stay up. Its error is ON THE LAPTOP:"
-      timeout 15 ssh $LSSH "$LAPTOP_USER@$ip" 'tail -8 /tmp/rviz.log' 2>/dev/null | sed 's/^/      /'
+      timeout 15 ssh $LSSH "$LAPTOP_USER@$ip" "tail -8 /tmp/$RVCFG.log" 2>/dev/null | sed 's/^/      /'
       exit 1
     fi
   fi
@@ -1019,7 +1180,7 @@ view)
   echo "  subscriptions (0 means it is connected to nothing):"
   for t in /robot_description /scan /map /fusion/path; do
     c=$(timeout 15 ssh $LSSH "$LAPTOP_USER@$ip" \
-        "source /opt/ros/jazzy/setup.bash; export ROS_DOMAIN_ID=0; unset ROS_DISCOVERY_SERVER; \
+        "source /opt/ros/jazzy/setup.bash; export ROS_DOMAIN_ID=$DOMAIN; unset ROS_DISCOVERY_SERVER; \
          timeout 6 ros2 topic info $t 2>/dev/null | grep -oP 'Subscription count: \K[0-9]+'" 2>/dev/null || true)
     printf "      %-42s %s\n" "$t" "${c:-0}"
   done
@@ -1239,6 +1400,6 @@ selftest)
   ;;
 
 *)
-  sed -n '2,21p' "$0" | sed 's/^# \?//'
+  sed -n '2,/^# WHY LAYERS/p' "$0" | sed '$d; s/^# \?//'
   ;;
 esac
