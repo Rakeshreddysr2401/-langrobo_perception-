@@ -2,6 +2,19 @@
 
 How the rover plans and moves, why it is limited, and the fix order F1-F5: [NAV_GUIDE.md](NAV_GUIDE.md) (2026-10-11).
 
+## 2026-10-11 — a clicked goal with room to spare took 551 s and failed
+
+Goal 2.47 m away through a ~60-70 cm corridor (the body needs ~44 cm).
+`reach`: nav2 "no valid path" x4 with back-up + wait (~60 s), tight route (one
+turn timed out at 30 s), then gap pass: **2 x 240 s in a turn**, 47 deg off.
+
+| item | finding | status |
+|---|---|---|
+| **pass turn deadlock** (goal_exec_node) | in pass mode it stopped whenever the depth view was > 1.0 s old; depth_gate passes nothing while the rover rotates (blur), so every turn went stop / refresh / creep / stop. Each wait pushed the stall clock on, so it never fired; only gap_pass's 240 s cap ended it | **fixed:** turns no longer wait for a fresh view (LiDAR + nvblox memory; cancel only if > 15 s old); all depth waits of a goal capped at 20 s. goal_exec restarted 04:26 UTC. **Re-click the same goal to verify** |
+| **camera-only lethal cells** | global costmap: 8206 lethal cells, **7695 nvblox-only**, 511 shared with the LiDAR; diagonal streaks and marks behind LiDAR walls; 14 % of cells free, 40 % inscribed. Same start poses plan fine minutes later (0.1-1.9 s), so the corridor was blocked when clicked | open -- tape tests with `phase3/tools/measure.py`, then depth filtering / camera-mark clearing |
+| costmap publish rates | global 0.73 Hz (set 1.0), local 1.67 Hz (set 2.0), Jetson load 13-17 | open |
+| nav2 recovery | 4 x (back-up + 5 s wait) before reach's own fallbacks: ~1 min per attempt | open, optional |
+
 ## 2026-10-09 — bring-up after the rebuild (ESP32 on USB), and a weak-WiFi evening
 
 `./rover up` from cold: every layer gate passed (camera -> vlm), wheels 20 Hz over the

@@ -74,6 +74,15 @@ DEPTH_STALE_S = 1.0             # pass mode stops without a camera update this r
 # mid-pass, and every pass through a gap the rover fits was cancelled on the
 # spot -- 6 in a few minutes. Stopped, the rover is not passing blind.
 DEPTH_GIVEUP_S = 5.0
+# A TURN does not wait for a fresh view. depth_gate passes nothing while the
+# rover rotates (blurred frames), so the view always ages mid-turn: requiring
+# < 1 s made every pass turn stop, refresh, creep, stop again -- 2 x 240 s
+# stuck 47 deg from target on 2026-10-11, the stall clock pushed on by each
+# wait so it never fired. A turn is checked against the LiDAR and the fused
+# map's MEMORY (nvblox keeps what it saw); only the camera being gone this
+# long stops one.
+DEPTH_TURN_GIVEUP_S = 15.0
+DEPTH_WAIT_TOTAL_S = 20.0       # all depth waits of one goal together: past this, refuse it
 SCAN_STALE_S = 0.5              # no scan this recent: the checks would run on a frozen view
 PAUSE_S = 5.0
 DEPTH_WARM_S = 2.0              # after a goal arrives, wait this long at most for a first depth view
@@ -117,6 +126,7 @@ class GoalExecNode(Node):
         self.dobs = make_obstacles(self, self.buf, lambda: self.pose, active=False)   # only during a goal
         self.warm_until = 0.0
         self.depth_wait_since = None
+        self.depth_waited = 0.0
         self.get_logger().info(f'goal_exec up; pivot prior {prior}')
 
     # ── inputs ──────────────────────────────────────────────────────────────
@@ -176,6 +186,7 @@ class GoalExecNode(Node):
         self.dobs.set_active(True)
         self.warm_until = time.time() + DEPTH_WARM_S
         self.depth_wait_since = None
+        self.depth_waited = 0.0
         self.paused_since = None
         self.get_logger().info(f'{"turn" if turn_only else "goal"} ({g[0]:.3f}, {g[1]:.3f}, '
                                f'{math.degrees(g[2]):.1f} deg) in odom from {m.header.frame_id}')
@@ -235,10 +246,20 @@ class GoalExecNode(Node):
             self._stop()                           # depth just switched on: one fresh view first
             self._report(extra={'paused': 'waiting for the depth camera'})
             return
-        if self.ex.pass_ and self.dobs.age() > DEPTH_STALE_S:
+        turning = self.ex.state in ('turn', 'mpause')
+        if self.ex.pass_ and turning and self.dobs.age() > DEPTH_TURN_GIVEUP_S:
+            self.ex.cancel(f'depth camera view {self.dobs.age():.1f} s old mid-turn: camera gone')
+            self._finish()
+            return
+        if self.ex.pass_ and not turning and self.dobs.age() > DEPTH_STALE_S:
             # a pass is judged on the camera as much as the LiDAR (a stool's
             # legs are camera-only): no fresh camera view, no MOVING -- stop
             # and wait for one; give up only if it does not come
+            waiting = self.depth_waited + (time.time() - self.depth_wait_since if self.depth_wait_since else 0.0)
+            if waiting > DEPTH_WAIT_TOTAL_S:
+                self.ex.cancel(f'waited {waiting:.0f} s in all for the depth camera: not passing blind')
+                self._finish()
+                return
             if self.dobs.age() > DEPTH_GIVEUP_S:
                 self.ex.cancel(f'depth camera view {self.dobs.age():.1f} s old: not passing blind')
                 self._finish()
@@ -251,6 +272,7 @@ class GoalExecNode(Node):
             # the wait is not a stall: move the executor's no-progress clock on by it
             waited = time.time() - self.depth_wait_since
             self.depth_wait_since = None
+            self.depth_waited += waited
             if hasattr(self.ex, 'best_t'):
                 self.ex.best_t += waited
         pts = self.pts
