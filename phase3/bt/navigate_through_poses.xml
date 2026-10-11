@@ -53,7 +53,7 @@
               <ClearEntireCostmap name="ClearLocalCostmap-Subtree" service_name="local_costmap/clear_entirely_local_costmap"/>
               <!-- local only: see the ClearGlobalCostmap note above -->
             </Sequence>
-            <!-- SPIN IS BACK, and it is the FIRST thing tried after clearing.
+            <!-- HISTORY (superseded by NO SPIN above, 2026-10-03): SPIN WAS BACK, first after clearing.
                  TODO 40. It was removed on the grounds that this rover cannot
                  turn in place; TODO 14 fixed that and measured 65 deg/s on the
                  floor, so the grounds expired. Leaving it out cost more than it

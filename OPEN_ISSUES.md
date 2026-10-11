@@ -1,5 +1,7 @@
 # Open issues — where things stand, 2026-10-09
 
+How the rover plans and moves, why it is limited, and the fix order F1-F5: [NAV_GUIDE.md](NAV_GUIDE.md) (2026-10-11).
+
 ## 2026-10-09 — bring-up after the rebuild (ESP32 on USB), and a weak-WiFi evening
 
 `./rover up` from cold: every layer gate passed (camera -> vlm), wheels 20 Hz over the
