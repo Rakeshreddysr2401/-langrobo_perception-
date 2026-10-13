@@ -14,6 +14,12 @@ one wild sample is ignored. pick: the start picks the one nearest the middle.
 near_hold: something between them, the person just past the gap: it holds and
 keeps following, no 'blocked'. search: a person who walks out to the left is
 turned after, and re-acquired (new id) farther than REACQ_M from the coast.
+find / find_nobody / find_no_room: "follow me" with nobody in view turns to
+find someone (2026-10-13), gives up after a full circle, or at once with no
+room to turn. gone: lost straight ahead, it drives to their last spot and
+looks all around there before 'lost'. look_*: someone who looks like the
+target is re-acquired anywhere in view while searching; someone who looks
+clearly different is not, even standing where the target should be.
 """
 import math
 import sys
@@ -27,11 +33,29 @@ import follow as fl  # noqa: E402
 DT = 0.05
 
 
-def person_msg(pid, px, py, vx, vy, pose, lost_s=0.0):
+RED = [0.9] + [0.0] * 7 + [0.1, 0.0, 0.0] + [0.0] * 8 + [0.8, 0.2, 0.0]    # red top, dark trousers
+BLUE = [0.0] * 5 + [0.9, 0.0, 0.0] + [0.0, 0.1, 0.0] + [0.0] * 8 + [0.1, 0.1, 0.8]  # blue top, white trousers
+FOV = math.radians(45)     # half the camera's view
+
+
+def person_msg(pid, px, py, vx, vy, pose, lost_s=0.0, look=None):
     dx, dy = px - pose[0], py - pose[1]
-    return {"id": pid, "x": px, "y": py, "vx": vx, "vy": vy, "conf": 0.9,
-            "lost_s": lost_s, "dist": math.hypot(dx, dy),
-            "bearing": fl.wrap(math.atan2(dy, dx) - pose[2])}
+    d = {"id": pid, "x": px, "y": py, "vx": vx, "vy": vy, "conf": 0.9,
+         "lost_s": lost_s, "dist": math.hypot(dx, dy),
+         "bearing": fl.wrap(math.atan2(dy, dx) - pose[2])}
+    if look is not None:
+        d["look"] = look
+    return d
+
+
+def in_view(pose, x, y):
+    return abs(fl.wrap(math.atan2(y - pose[1], x - pose[0]) - pose[2])) < FOV
+
+
+def drive(f, pose, vx, wz):
+    pose[0] += vx * math.cos(pose[2]) * DT
+    pose[1] += vx * math.sin(pose[2]) * DT
+    pose[2] = fl.wrap(pose[2] + wz * DT)
 
 
 def run(path, T, pose=(0.0, 0.0, 0.0), obstacles=None, visible=lambda t: True,
@@ -154,9 +178,97 @@ def test_search():
 
 
 def test_gone():
-    f, log = run(lambda t: (2.0, 0.0), 10.0, visible=lambda t: t < 2.0)
+    # lost straight ahead (a doorway): no turn first -- it goes to their last
+    # spot, looks all around there, and only then is it 'lost'
+    f, log = run(lambda t: (2.5, 0.0), 45.0, visible=lambda t: t < 2.0)
     assert f.state == "done" and f.result == "lost", f.status()
+    assert "all around" in f.why, f.why
     assert log[-1][0] < 2.0 + fl.LOST_S + 0.3
+    closest = min(math.hypot(2.5 - p[0], p[1]) for _, p, *_ in log)
+    assert closest <= fl.GO_DONE_M + 0.1, f"did not go to their spot: {closest:.2f} m"
+    yaws = [p[2] for t, p, *_ in log if t > 5.0]
+    turned = sum(abs(fl.wrap(b - a)) for a, b in zip(yaws, yaws[1:]))
+    assert turned > math.radians(330), f"looked around only {math.degrees(turned):.0f} deg"
+
+
+def _find(person=None, T=20.0, obstacles=None):
+    """Start with nobody in view; person (x, y) is seen only inside the view."""
+    f = fl.Follower()
+    pose = [0.0, 0.0, 0.0]
+    assert f.start(0.0, [], find=True) and f.state == "finding"
+    t, log = 0.0, []
+    while t < T and f.state in ("finding", "following"):
+        t += DT
+        if round(t / DT) % 4 == 0:
+            ppl = [person_msg(7, *person, 0, 0, pose)] if person and in_view(pose, *person) else []
+            f.update_people(t, ppl)
+        pts = None
+        if obstacles is not None:
+            c, s_ = math.cos(pose[2]), math.sin(pose[2])
+            d = obstacles - np.array(pose[:2])
+            pts = np.stack([d[:, 0] * c + d[:, 1] * s_, -d[:, 0] * s_ + d[:, 1] * c], 1)
+        vx, wz = f.step(t, tuple(pose), pts)
+        drive(f, pose, vx, wz)
+        log.append((t, f.state, tuple(pose), vx, wz))
+    return f, log
+
+
+def test_find():
+    f, log = _find(person=(-2.0, -0.5))        # behind it
+    assert f.state == "following" and f.target_id == 7 and f.found, f.status()
+    assert f.status().get("found") is True
+    first_turn = next(t for t, st, p, vx, wz in log if abs(wz) > 0.05)
+    assert first_turn >= fl.FIND_WAIT_S, f"turned before looking ahead: {first_turn:.2f} s"
+    assert all(vx == 0.0 for t, st, p, vx, wz in log if st == "finding"), "drove while finding"
+    assert abs(fl.wrap(math.atan2(-0.5 - log[-1][2][1], -2.0 - log[-1][2][0]) - log[-1][2][2])) < 0.3
+
+
+def test_find_nobody():
+    f, log = _find(T=25.0)
+    assert f.state == "done" and f.result == "nobody" and "full circle" in f.why, f.status()
+    assert log[-1][0] < fl.FIND_WAIT_S + 2 * math.pi / fl.SEARCH_W + 2.0
+
+
+def test_find_no_room():
+    post = np.array([[0.0, 0.25]])             # right beside it: inside the turning circle
+    f, log = _find(obstacles=post)
+    assert f.result == "nobody" and "too close" in f.why, f.status()
+    assert all(abs(wz) < 1e-9 for *_, wz in log), "turned into the post"
+
+
+def _lose_then(people_after, T=20.0):
+    """Follow a RED person at (2, 0) for 2 s; then they are gone and
+    people_after(t, pose) is all the camera sees."""
+    f = fl.Follower()
+    pose = [0.0, 0.0, 0.0]
+    assert f.start(0.0, [person_msg(1, 2.0, 0.0, 0, 0, pose, look=RED)])
+    t = 0.0
+    while t < T and f.state == "following":
+        t += DT
+        if round(t / DT) % 4 == 0:
+            ppl = ([person_msg(1, 2.0, 0.0, 0, 0, pose, look=RED)] if t < 2.0
+                   else people_after(t, pose))
+            f.update_people(t, ppl)
+            if t >= 2.0 and f.target_id != 1:
+                return f, t
+        drive(f, pose, *f.step(t, tuple(pose), None))
+    return f, t
+
+
+def test_look_reacquires_them_anywhere():
+    # 4 s after losing them, the same clothes 3 m to the side of where they were
+    seen = lambda t, pose: [person_msg(9, 2.0, 3.0, 0, 0, pose, look=RED)] if t > 6.0 else []
+    f, t = _lose_then(seen)
+    assert f.state == "following" and f.target_id == 9, f.status()
+    assert f.last_sim is not None and f.last_sim >= fl.LOOK_SAME
+
+
+def test_look_rejects_someone_else_where_they_were():
+    # someone in BLUE steps into their spot: not them -- and not followed
+    seen = lambda t, pose: [person_msg(5, 2.1, 0.1, 0, 0, pose, look=BLUE)] if t > 3.0 else []
+    f, t = _lose_then(seen, T=10.0)
+    assert f.target_id == 1, f"followed someone else: {f.status()}"
+    assert fl.look_sim(RED, BLUE) < fl.LOOK_OTHER and fl.look_sim(RED, RED) > 0.99
 
 
 def test_new_id():
@@ -183,6 +295,10 @@ def test_pick():
     f2 = fl.Follower()
     assert not f2.start(0.0, [person_msg(1, 6.0, 0.0, 0, 0, pose)])
     assert f2.result == "nobody"
+    # find=True turns to look instead -- but not for a named id
+    assert fl.Follower().start(0.0, [], find=True)
+    f3 = fl.Follower()
+    assert not f3.start(0.0, [], target_id=4, find=True) and f3.result == "nobody"
 
 
 if __name__ == "__main__":

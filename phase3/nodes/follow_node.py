@@ -3,14 +3,18 @@
 
     /follow/start    std_msgs/String JSON {} or {"id": 3} (a /vision/people id)
                      or {"stop_at_gap": true}: come to me -- done once at GAP;
+                     nobody in view: it turns to FIND someone (follow.py)
+                     unless {"find": false};
                      an optional "req" is echoed in every status line of that
                      follow, so a caller can tell its own follow's lines (the
                      Pi 5 bridge, like goal_stamp on /goal_exec/status)
     /follow/cancel   std_msgs/Empty
         -> /cmd_vel          while following, and a stop when it ends
            /follow/status    JSON on every change and at 2 Hz while following:
-                             state, target, dist, bearing, vx, wz, blocked,
-                             holding, searching, paused; when done: result + why
+                             state (finding | following | done), target, dist,
+                             bearing, vx, wz, blocked, holding, searching
+                             (turn | go | spin) + turned, found (true once the
+                             target was found by turning), paused; done: result + why
                              (reached | lost | blocked | nobody | cancelled |
                               timeout | pose unsure | no people | taken over)
 
@@ -154,7 +158,7 @@ class FollowNode(Node):
         self.last_why = ''
         self.stop_at_gap = bool(d.get('stop_at_gap'))
         self.req = d.get('req')
-        self.pending = {'id': d.get('id'), 'since': time.time()}
+        self.pending = {'id': d.get('id'), 'since': time.time(), 'find': d.get('find', True)}
         self.active = True
         if self.people_sub is None:
             self.people_sub = self.create_subscription(String, self.people_topic, self._people, 10)
@@ -172,17 +176,27 @@ class FollowNode(Node):
         self.people_t = time.time()
         people = d.get('people', [])
         if self.pending:
-            if not self.f.start(t, people, self.pending['id']):
+            if not self.f.start(t, people, self.pending['id'], find=self.pending['find']):
                 if time.time() - self.pending['since'] < START_WAIT_S:
                     return                     # YOLO may need a frame or two to wake up
                 self._end(self.f.result, self.f.why)   # _end clears pending
                 return
             self.pending = None
             self.started = time.time()
-            self.get_logger().info(f'following person {self.f.target_id}')
+            self.get_logger().info(f'following person {self.f.target_id}' if self.f.state == 'following'
+                                   else 'nobody in view: turning to find someone')
             self._report(force=True)
             return
+        before = (self.f.state, self.f.target_id)
         self.f.update_people(t, people)
+        if (self.f.state, self.f.target_id) != before and self.f.state == 'following':
+            if before[0] == 'finding':
+                self.get_logger().info(f'found person {self.f.target_id} '
+                                       f'{getattr(self.f, "tx", 0):.2f},{getattr(self.f, "ty", 0):.2f}')
+            else:   # every re-acquire with how alike they looked: LOOK_* are first guesses
+                sim = self.f.last_sim
+                self.get_logger().info(f're-acquired: person {before[1]} -> {self.f.target_id}, look '
+                                       + ('unknown' if sim is None else f'{sim:.2f}'))
 
     # ── the loop: one step per fused pose ───────────────────────────────────
     def _odom(self, m):
@@ -191,7 +205,7 @@ class FollowNode(Node):
         if self.pending and time.time() - self.pending['since'] > START_WAIT_S + 1.0:
             self._end('no people', 'no /vision/people -- is ./rover detect running?')
             return
-        if self.f.state != 'following':
+        if self.f.state not in ('following', 'finding'):
             return
         if time.time() - self.started > MAX_S:
             self._end('timeout', f'followed for {MAX_S / 60:.0f} min')
@@ -248,7 +262,7 @@ class FollowNode(Node):
         f = self.f
         why = (f.blocked_why if f.blocked_since is not None else '') or f.holding
         state = ('blocked' if f.blocked_since is not None else 'holding' if f.holding
-                 else 'searching' if f.search_dir is not None else '')
+                 else f'searching ({f.search_phase})' if f.search_phase else '')
         key = f'{state}:{why}'
         if key == self.last_why:
             return
@@ -263,7 +277,7 @@ class FollowNode(Node):
                 i = hit[np.argmin(pts[hit, 0])]
                 msg += (f'; nearest in the corridor at ({pts[i, 0]:.2f}, {pts[i, 1]:.2f}) base_link, '
                         f'from {"LiDAR" if i < n_scan else "fused map"}')
-        elif state == 'searching':
+        elif f.search_phase == 'turn':
             msg += f'; turning {"left" if f.search_dir > 0 else "right" if f.search_dir < 0 else "no way (facing their spot)"}'
         self.get_logger().info(msg)
 
@@ -294,7 +308,7 @@ class FollowNode(Node):
             return
         self.active = False
         self.pending = None
-        if self.f.state == 'following':
+        if self.f.state in ('following', 'finding'):
             self.f._finish(result, why)
         else:
             self.f.state, self.f.result, self.f.why = 'done', result, why
@@ -318,9 +332,9 @@ class FollowNode(Node):
         if extra:
             d.update(extra)
         key = (d['state'], d.get('result'), d.get('target'), bool(d.get('blocked')), d.get('paused'),
-               bool(d.get('holding')), 'searching' in d)
+               bool(d.get('holding')), d.get('searching'), d.get('found'))
         now = time.time()
-        if force or key != self.last_key or (d['state'] == 'following' and now - self.last_report > 0.5):
+        if force or key != self.last_key or (d['state'] in ('following', 'finding') and now - self.last_report > 0.5):
             self.last_key, self.last_report = key, now
             self.pub_status.publish(String(data=json.dumps(d)))
 

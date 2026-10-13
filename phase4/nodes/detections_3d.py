@@ -27,7 +27,8 @@ every tick while anyone subscribes, empty or not (silence = dead camera):
     {"frame": "odom", "stamp": 1791590000.0,
      "people": [{"id": 3, "x": 2.31, "y": -0.42, "vx": 0.4, "vy": 0.0,
                  "dist": 1.62, "bearing": -0.21, "conf": 0.81,
-                 "lost_s": 0.0, "box": [u1, v1, u2, v2]}, ...]}
+                 "lost_s": 0.0, "box": [u1, v1, u2, v2],
+                 "look": [22 numbers, the clothes' colours -- person_look.py]}, ...]}
       x, y      odom floor position (smoothed); vx, vy its velocity, m/s
       dist      m from base_link; bearing rad, + = to the rover's left
       lost_s    0 = seen in this frame; >0 = hidden, kept up to 1.5 s
@@ -91,6 +92,7 @@ from ultralytics import YOLO
 from tf2_ros import Buffer, TransformListener
 
 from person_tracker import PersonTracker
+from person_look import look_of
 
 
 def _decode_image(msg: Image) -> np.ndarray | None:
@@ -463,6 +465,9 @@ class Detections3DNode(Node):
             mp = to_odom(pt)
             d = {"x": float(mp[0]), "y": float(mp[1]), "conf": conf,
                  "box": list(box)}
+            look = look_of(img, box)      # clothes' colours: who is who (person_look.py)
+            if look is not None:
+                d["look"] = look
             if base is not None:
                 bt, bq = base.transform.translation, base.transform.rotation
                 rel = (_quat_rotate(bq.x, bq.y, bq.z, bq.w, pt)
