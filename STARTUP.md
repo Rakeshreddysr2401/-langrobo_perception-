@@ -180,8 +180,12 @@ and carries on: the robot works without it. YOLO idles until someone asks for pe
 so it costs nothing at rest; while active, measured 2026-10-11: `/odom` 20 Hz, colour
 4.5 Hz, the cleaned grid 5 Hz, `/scan` 10 Hz (unchanged), GPU ~10 %. `follow_node`
 drives only after `/follow/start`. `FOLLOW_DRY=1 ./rover follow` = commands on
-`/follow/cmd_vel_dry`, wheels untouched. The camera sits low: a person must be
-standing in view. Someone seated at the frame edge (legs and arms only) gives no
+`/follow/cmd_vel_dry`, wheels untouched. Nobody in view at the start: it turns
+in place to find someone (2026-10-13; not with something within ~0.29 m of its
+centre). Lost mid-follow: it turns after them, drives to where they were last
+seen and looks all around (40 s cap), re-acquiring by clothes colours
+(`phase4/nodes/person_look.py`). The camera sits low: a person must be
+standing to be seen. Someone seated at the frame edge (legs and arms only) gives no
 YOLO person even at conf 0.1.
 
 **Do not stop at `nav`.** `vlm` is what lets the Pi 5 brain *see* — without it
