@@ -17,6 +17,15 @@ the follower RE-ACQUIRES: someone seen now within REACQ_M of where the target
 should be by now (last position + velocity, coasting at most COAST_S). Nobody
 for LOST_S -> stop, 'lost'.
 
+SEARCH (2026-10-12). Every real follow of 2026-10-10/11 ended "lost sight for
+3 s": a person who steps out of the side of the view is gone before the rover
+has turned after them. Now, once the coast is over (unseen > COAST_S), it turns
+in place toward the side they left by -- the side of the last bearing, else
+the side they were walking to -- at SEARCH_W, at most SEARCH_TURN, and anyone
+seen within REACQ_SEARCH_M of where they should be is them again. A person
+lost straight ahead gets no turn: it keeps closing on their last position (a
+doorway). Nobody for LOST_S (now 8 s) -> 'lost', as before.
+
 MOTION (vx, wz; no reversing — the camera looks forward):
   - wz = K_W * bearing error, capped W_MAX; inside TURN_DEADBAND none;
   - vx = K_V * (distance - GAP), capped V_MAX, none inside DIST_DEADBAND;
@@ -31,7 +40,10 @@ SAFETY (every step, before anything is commanded):
     so it slows smoothly and holds FRONT_MARGIN off. Under V_MIN allowed ->
     blocked: vx 0 (turning still allowed if the turn is clear); blocked for
     BLOCKED_S -> stop, 'blocked'. Points within PERSON_R of the target are the
-    target, not an obstacle. (The first version stopped hard from full speed
+    target, not an obstacle. Blocked within NEAR_OK_M of the gap is HOLDING,
+    not a failure: it is already about where it should be (2026-10-12: a
+    follow quit 'blocked: something 0.25 m ahead' with the person ~1.15 m away,
+    i.e. 3 cm past the dead band); "come to me" counts it as reached. (The first version stopped hard from full speed
     when something entered a corridor sized by the WANTED speed -- 0.39 m off
     a wall in test_follow. The governor slows instead: a hard stop from
     0.3 m/s slides these wheels, and slides corrupt the pose.)
@@ -67,8 +79,13 @@ TURN_MARGIN = 0.03    # m beyond the outline's turning circle
 PERSON_R = 0.40       # m around the target: the person, not an obstacle
 REACQ_M = 1.0         # m from the target's predicted position
 COAST_S = 1.0         # s of the target's velocity used to predict it
-LOST_S = 3.0          # s without the target -> lost
+LOST_S = 8.0          # s without the target -> lost (search included)
 BLOCKED_S = 10.0      # s blocked -> give up
+NEAR_OK_M = 0.5       # m past GAP: blocked this close is holding, not a failure
+SEARCH_W = 0.5        # rad/s: the search turn
+SEARCH_TURN = math.radians(120)   # rad: the most the search turns
+SEARCH_VY = 0.15      # m/s: sideways walk that picks the search side when facing their spot
+REACQ_SEARCH_M = 2.0  # m from the predicted position: re-acquire radius while searching
 JUMP_M = 0.7          # m: a one-frame jump bigger than this is ignored once
 
 TURN_R = math.hypot(max(FRONT, REAR), SIDE)
@@ -85,6 +102,10 @@ class Follower:
         self.t_seen = None           # time the target was last seen
         self.blocked_since = None
         self.blocked_why = ''
+        self.holding = ''            # blocked, but already near the gap
+        self.search_dir = None       # +1 left / -1 right / 0 no turn; None = not searching
+        self.search_turned = 0.0
+        self.search_yaw = None
         self.jumped = False
         self.vx = self.wz = 0.0
         self.t = None
@@ -119,6 +140,7 @@ class Follower:
         self.tx, self.ty = p['x'], p['y']
         self.tvx, self.tvy = p.get('vx', 0.0), p.get('vy', 0.0)
         self.t_seen = t - p.get('lost_s', 0.0)
+        self.search_dir, self.search_turned, self.search_yaw = None, 0.0, None
 
     def predicted(self, t):
         dt = min(max(t - self.t_seen, 0.0), COAST_S)
@@ -140,8 +162,9 @@ class Follower:
             return
         # our id is gone (or only coasting): someone where the target should be?
         px, py = self.predicted(t)
+        r = REACQ_SEARCH_M if self.search_dir is not None else REACQ_M
         near = [p for p in people if p.get('lost_s', 0) == 0
-                and math.hypot(p['x'] - px, p['y'] - py) <= REACQ_M]
+                and math.hypot(p['x'] - px, p['y'] - py) <= r]
         if near:
             self._accept(min(near, key=lambda p: math.hypot(p['x'] - px, p['y'] - py)), t)
 
@@ -167,6 +190,24 @@ class Follower:
         if abs(dist - GAP) > DIST_DEADBAND and dist > GAP and abs(err) < DRIVE_MAX_ERR:
             vx = min(V_MAX, K_V * (dist - GAP)) * math.cos(err) ** 2
 
+        # the coast is over and they are still unseen: search (see SEARCH)
+        if t - self.t_seen > COAST_S:
+            if self.search_dir is None:
+                c0, s0 = math.cos(pose[2]), math.sin(pose[2])
+                vy_b = -self.tvx * s0 + self.tvy * c0          # their sideways walk, base_link
+                if abs(err) > TURN_DEADBAND:
+                    self.search_dir = 1 if err > 0 else -1
+                elif abs(vy_b) > SEARCH_VY:
+                    self.search_dir = 1 if vy_b > 0 else -1
+                else:
+                    self.search_dir = 0
+                self.search_yaw = pose[2]
+            if self.search_dir:
+                self.search_turned += abs(wrap(pose[2] - self.search_yaw))
+                self.search_yaw = pose[2]
+                vx = 0.0
+                wz = self.search_dir * SEARCH_W if self.search_turned < SEARCH_TURN else 0.0
+
         # target in base_link: its points are the person, not an obstacle
         c, s = math.cos(pose[2]), math.sin(pose[2])
         tb = np.array([dx * c + dy * s, -dx * s + dy * c])
@@ -178,7 +219,12 @@ class Follower:
         ok = v_cap >= V_MIN or vx == 0.0          # nothing wanted = nothing blocked
         why = f'something {free:.2f} m ahead' if not ok else ''
         vx = min(vx, v_cap)
-        if not ok:
+        self.holding = ''
+        if not ok and dist <= GAP + NEAR_OK_M:
+            vx = 0.0                     # near enough: hold here, it is not a failure
+            self.blocked_since = None
+            self.holding = why
+        elif not ok:
             vx = 0.0
             self.blocked_since = self.blocked_since or t
             self.blocked_why = why
@@ -229,4 +275,8 @@ class Follower:
                      unseen_s=round(max((self.t or 0) - self.t_seen, 0.0), 1))
             if self.blocked_since is not None:
                 d['blocked'] = self.blocked_why
+            if self.holding:
+                d['holding'] = self.holding
+            if self.search_dir:
+                d['searching'] = round(math.degrees(self.search_turned))
         return d

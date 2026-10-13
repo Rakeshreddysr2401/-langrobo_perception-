@@ -11,6 +11,9 @@ walking up to the rover is never reversed from. box: a box between them
 stops it, and it gives up after BLOCKED_S. gone: vanishing for LOST_S ends
 it. new_id: the tracker's new id after a short gap is re-acquired. glitch:
 one wild sample is ignored. pick: the start picks the one nearest the middle.
+near_hold: something between them, the person just past the gap: it holds and
+keeps following, no 'blocked'. search: a person who walks out to the left is
+turned after, and re-acquired (new id) farther than REACQ_M from the coast.
 """
 import math
 import sys
@@ -126,6 +129,28 @@ def test_sudden_obstacle_caps_at_once():
     vx, _ = f.step(0.05, (0.0, 0.0, 0.0), box)
     # smoothing alone would allow 0.3 - A_MAX * dt = 0.28 here
     assert vx <= (0.55 - fl.FRONT - fl.FRONT_MARGIN) / fl.STOP_T + 1e-9, vx
+
+
+def test_near_hold():
+    # 2026-10-12: blocked with them 1.15 m away ended the follow; it must hold
+    # the box 0.25 m past the front edge: blocked from the start, 0.85 m short of them
+    box = np.array([[0.45 + i * 0.02, j * 0.02] for i in range(3) for j in range(-5, 6)])
+    f, log = run(lambda t: (1.3, 0.0), 20.0, obstacles=box)
+    assert f.state == "following", f.status()
+    assert f.holding and "blocked" not in f.status(), f.status()
+    front = max(p[0] for _, p, *_ in log) + fl.FRONT
+    assert front < 0.45, f"drove into the box: front edge at {front:.2f}"
+
+
+def test_search():
+    # walks off to the left at 0.6 m/s, unseen from 2 s, stands at y=3.0; back in view at 6 s as id 2
+    path = lambda t: (2.0, 0.6 * min(t, 5.0))
+    f, log = run(path, 12.0, visible=lambda t: not (2.0 < t < 6.0), pid=lambda t: 1 if t < 2 else 2)
+    assert f.state == "following" and f.target_id == 2, f.status()
+    turning = [wz for t, _, vx, wz, _ in log if 3.2 < t < 6.0]
+    assert turning and min(turning) > 0.2, f"search did not turn left: {turning[:5]}"
+    # it slows at A_MAX like any stop that is not for safety, then turns in place
+    assert all(vx == 0.0 for t, _, vx, _, _ in log if 4.0 < t < 6.0), "drove while searching"
 
 
 def test_gone():

@@ -10,7 +10,7 @@
         -> /cmd_vel          while following, and a stop when it ends
            /follow/status    JSON on every change and at 2 Hz while following:
                              state, target, dist, bearing, vx, wz, blocked,
-                             paused; when done: result + why
+                             holding, searching, paused; when done: result + why
                              (reached | lost | blocked | nobody | cancelled |
                               timeout | pose unsure | no people | taken over)
 
@@ -49,7 +49,8 @@ from std_msgs.msg import Empty, String
 from tf2_ros import Buffer, TransformListener
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from follow import GAP, DIST_DEADBAND, Follower  # noqa: E402
+from follow import GAP, DIST_DEADBAND, SIDE_MARGIN, Follower  # noqa: E402
+from goal_exec import FRONT, SIDE  # noqa: E402
 from fused_obstacles import make_obstacles  # noqa: E402
 
 SD_MAX_CM = 3.0          # = goal_exec_node
@@ -83,6 +84,7 @@ class FollowNode(Node):
         self.paused_since = None
         self.last_key = None
         self.last_report = 0.0
+        self.last_why = ''           # the blocked/holding/searching state last logged
 
         # cmd_topic:=/follow/cmd_vel_dry is a DRY RUN: everything live, the
         # wheels untouched (nothing listens there) -- watch what it would do.
@@ -149,6 +151,7 @@ class FollowNode(Node):
             self.ge_cancel.publish(Empty())
             self.reach_cancel.publish(Empty())
         self.f = Follower()                    # no result left over from the last follow
+        self.last_why = ''
         self.stop_at_gap = bool(d.get('stop_at_gap'))
         self.req = d.get('req')
         self.pending = {'id': d.get('id'), 'since': time.time()}
@@ -210,14 +213,22 @@ class FollowNode(Node):
             return
         self.paused_since = None
         pts = self.pts
+        n_scan = 0 if pts is None else len(pts)
         dp = self.dobs.points_base(self.pose)
         if len(dp):
             pts = dp if pts is None else np.vstack([pts, dp])
         st = m.header.stamp
         t = st.sec + st.nanosec * 1e-9 if (st.sec or st.nanosec) else time.time()
         vx, wz = self.f.step(t, self.pose, pts)
+        self._log_why(pts, n_scan)
         if self.f.state == 'done':
             self._end(self.f.result, self.f.why)
+            return
+        if self.stop_at_gap and self.f.holding and abs(getattr(self.f, 'err', 1.0)) < math.radians(10):
+            # come to me, already near them and something between: that is arriving
+            why = f'{self.f.dist:.2f} m from them, {self.f.holding} so I stopped there'
+            self.f.state, self.f.result, self.f.why = 'done', 'reached', why
+            self._end('reached', why)
             return
         if (self.stop_at_gap and vx == 0.0 and abs(getattr(self.f, 'dist', 99) - GAP) <= DIST_DEADBAND
                 and abs(getattr(self.f, 'err', 1.0)) < math.radians(10)):
@@ -228,6 +239,33 @@ class FollowNode(Node):
         c.linear.x, c.angular.z = float(vx), float(wz)
         self.cmd.publish(c)
         self._report()
+
+    def _log_why(self, pts, n_scan):
+        """Log once per change why it is not simply following: blocked / holding
+        (with the nearest corridor point and whether the LiDAR or the fused map
+        saw it) and searching. On 2026-10-12 a follow ended 'blocked: something
+        0.25 m ahead' with the way clear to the eye, and nothing recorded what."""
+        f = self.f
+        why = (f.blocked_why if f.blocked_since is not None else '') or f.holding
+        state = ('blocked' if f.blocked_since is not None else 'holding' if f.holding
+                 else 'searching' if f.search_dir is not None else '')
+        key = f'{state}:{why}'
+        if key == self.last_why:
+            return
+        self.last_why = key
+        if not state:
+            return
+        msg = f'{state}: {why or "target unseen"}; person {getattr(f, "dist", 0):.2f} m, ' \
+              f'bearing {math.degrees(getattr(f, "err", 0)):.0f} deg'
+        if state in ('blocked', 'holding') and pts is not None and len(pts):
+            hit = np.where((pts[:, 0] > FRONT - 0.02) & (np.abs(pts[:, 1]) < SIDE + SIDE_MARGIN))[0]
+            if len(hit):
+                i = hit[np.argmin(pts[hit, 0])]
+                msg += (f'; nearest in the corridor at ({pts[i, 0]:.2f}, {pts[i, 1]:.2f}) base_link, '
+                        f'from {"LiDAR" if i < n_scan else "fused map"}')
+        elif state == 'searching':
+            msg += f'; turning {"left" if f.search_dir > 0 else "right" if f.search_dir < 0 else "no way (facing their spot)"}'
+        self.get_logger().info(msg)
 
     def _pose_unsure(self):
         """goal_exec_node._pose_unsure, the same rules."""
@@ -279,7 +317,8 @@ class FollowNode(Node):
             d['come'] = True
         if extra:
             d.update(extra)
-        key = (d['state'], d.get('result'), d.get('target'), bool(d.get('blocked')), d.get('paused'))
+        key = (d['state'], d.get('result'), d.get('target'), bool(d.get('blocked')), d.get('paused'),
+               bool(d.get('holding')), 'searching' in d)
         now = time.time()
         if force or key != self.last_key or (d['state'] == 'following' and now - self.last_report > 0.5):
             self.last_key, self.last_report = key, now
