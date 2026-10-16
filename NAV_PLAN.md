@@ -100,7 +100,7 @@ held.
   lidar sector with the most clearance, drive ≤ 20 cm toward it by goal_exec)
   → Spin → BackUp *only* if the lidar sees ≥ 40 cm behind → Wait.
 - Stuck detector (no progress N s, or recovery ≥ 2): publish a reason on
-  `/nav/stuck`; the Pi 5 injects it as a `[SYSTEM]` turn so Mitra says what is
+  `/nav/stuck`; the Pi 5 injects it as a `[SYSTEM]` turn so Kino says what is
   wrong and what it will try.
 - `fleet.sh check` gains: nav2 restarts this session, last stuck reason.
 *Done:* boxed in on purpose (3 sides), it gets out or says why, every time.

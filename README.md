@@ -29,7 +29,7 @@ brain → LangGraph Studio → Pi 5 voice + Bluetooth speaker → RViz on the la
 - At the end it prints the **Studio** link. It needs two steps: on the laptop
   `ssh -N -L 2024:localhost:2024 rakhi24@192.168.1.16`, then open
   <https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024>.
-- Talk to it: "**Mitra**, what time is it?" — the name has to be in the sentence.
+- Talk to it: "**Kino**, what time is it?" — the name has to be in the sentence.
 - **Before anything drives:** `./rover wheels --nudge` (moves ~7 cm) — a live ESP32 link
   does not prove the motor supply is on. Teleop must be in AUTO.
 - Stop: `./rover stop` (OPERATIONS.md).

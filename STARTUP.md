@@ -43,7 +43,7 @@ second copy — and prints the providers, the wake setting, and which speaker +
 mic the Pi 5's audio owner picked. Since 2026-10-10 the **mic is the USB AM-C28
 array** and the **boAt Stone is the speaker** (Bluetooth A2DP). Speech-to-text is
 Sarvam (Telugu or English → English); if Sarvam fails, Parakeet transcribes English
-on the Pi 5. Say "Mitra" in the sentence to be sure it becomes a turn; other
+on the Pi 5. Say "Kino" in the sentence to be sure it becomes a turn; other
 sentences are judged by the brain. Details: the Pi 5 repo
 `docs/voice/VOICE_LAB_2026-10.md`.
 
@@ -173,7 +173,7 @@ ssh 192.168.1.16 'grep -n create_subscription \
 
 If `/vision/detections_3d` is not in that output, skip `detect`.
 
-**`follow` is part of `up` since 2026-10-11** ("Mitra, follow me" / "come to me";
+**`follow` is part of `up` since 2026-10-11** ("Kino, follow me" / "come to me";
 the Pi 5 brain has the tool on with `LANGROBO_FOLLOW=1`). It starts `detect` (YOLO
 + the person tracker -> `/vision/people`) and `follow_node`. If it fails, `up` warns
 and carries on: the robot works without it. YOLO idles until someone asks for people,

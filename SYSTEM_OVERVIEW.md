@@ -14,7 +14,7 @@ against this repo.
 
 ## 1. The goal
 
-**Mitra**: a home robot you talk to ("Mitra, go near the bottle and tell me
+**Kino**: a home robot you talk to ("Kino, go near the bottle and tell me
 what's on it"). It understands the request, finds the thing from its photos,
 drives there exactly (to within about 1 cm) without touching anything, and
 reports back by voice or Telegram.
