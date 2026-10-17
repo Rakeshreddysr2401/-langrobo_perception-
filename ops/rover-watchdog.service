@@ -1,0 +1,19 @@
+[Unit]
+Description=Kino rover watchdog (health page :8099, restarts a dead layer only if ROVER_WATCHDOG_ACT=1)
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rakhi24
+WorkingDirectory=/home/rakhi24/rover
+# observe only by default; `sudo systemctl edit rover-watchdog` and add
+#   [Service]
+#   Environment=ROVER_WATCHDOG_ACT=1
+# to let it restart a dead layer.
+ExecStart=/usr/bin/python3 /home/rakhi24/rover/ops/rover_watchdog.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

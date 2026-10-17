@@ -41,3 +41,6 @@ logs/goal_exec_pivot.json
 phase3/plugins/ws/build/
 phase3/plugins/ws/install/
 phase3/plugins/ws/log/
+
+# the watchdog's change log (ops/rover_watchdog.py): run output
+logs/watchdog.jsonl

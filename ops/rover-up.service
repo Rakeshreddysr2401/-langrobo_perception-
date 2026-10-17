@@ -1,0 +1,16 @@
+[Unit]
+Description=Kino rover: bring the whole stack up after boot (./rover up). NOT enabled by default.
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=rakhi24
+WorkingDirectory=/home/rakhi24/rover
+Environment=SSH_AUTH_SOCK=
+ExecStart=/home/rakhi24/rover/rover up
+TimeoutStartSec=900
+
+[Install]
+WantedBy=multi-user.target

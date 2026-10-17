@@ -556,3 +556,26 @@ ignores the field.
 - **Never run `logs/keepalive.py` while teleoperating.** It publishes zero
   `/cmd_vel` continuously, which would interleave with real commands. It exists
   only as a fallback if a future flash regresses the executor fix.
+
+## Health, watchdog, saved room (2026-10-16)
+
+- `./rover health` — every layer's rate in one ~15 s pass (`status` takes 2+ min).
+- `rover-watchdog` (systemd, installed with `sudo ops/install_services.sh`) probes
+  every 30 s, serves `http://<jetson>:8099/` (JSON at `/health`), and logs changes
+  to `logs/watchdog.jsonl`. **Observe only.** To let it restart a dead layer:
+  `sudo systemctl edit rover-watchdog` → `Environment=ROVER_WATCHDOG_ACT=1`. Even
+  then it never acts while `/cmd_vel` is non-zero or `~/.rover_watchdog_pause`
+  exists (`./rover watchdog pause|resume`), restarts the lowest failed layer
+  only, and gives up after 2 restarts per layer per 15 min. `./rover watchdog
+  status|start|act|stop`. `ops/rover-up.service` (stack at boot) is installed
+  but NOT enabled; `sudo ops/install_services.sh --boot-up` enables it.
+- Saved room: `./rover slam` autosaves the pose graph every 2 min to
+  `maps/last.*` (+ `last.pose`, where the rover stood; `last.prev.*` = the save
+  before), `./rover stop` saves too, and the next `./rover slam` resumes from
+  it at `last.pose` (`SLAM_START_POSE="x,y,theta"` if it was moved,
+  `SLAM_FRESH=1` to start empty). Tested 2026-10-16: restart resumed within
+  1 cm and the old walls were there. nav2 still plans in `odom`, not `map`.
+- `./rover net` — signal, link rate, ping jitter to the Pi 5, ROS traffic.
+  Measured 2026-10-16: WiFi carries ~3.5 Mbit/s of ROS data, so bandwidth is not
+  the limit; signal is. DDS unicast-only discovery was tried (FastDDS peer XML,
+  `ROS_STATIC_PEERS`) and did not prove multicast was off: left unchanged.

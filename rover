@@ -34,7 +34,11 @@
 #   ./rover voice      Pi 5 STT/TTS + the speaker, on its own (safe any time —
 #                      it touches nothing on the Jetson and skips if already up)
 #   ./rover logs <n>   tail a layer's log (camera|vo|gyro|fused|lidar|slam)
-#   ./rover stop       tear the container down
+#   ./rover health     every layer's rate in ONE pass (~15 s), instead of status's 2+ min
+#   ./rover watchdog   start|stop|pause|resume|status|act — watches the layers, serves
+#                      http://<jetson>:8099, restarts a dead layer only when told (ops/)
+#   ./rover net        WiFi signal, link rate, jitter to the Pi 5, ROS traffic on the air
+#   ./rover stop       tear the container down (saves the slam room first)
 #
 #   TWIN=1 ./rover <any of the above>
 #                      the same, on the Mitra TWIN instead of the robot: the
@@ -684,9 +688,32 @@ slam)
     exit 1
   fi
   kill_match '[a]sync_slam_toolbox_node'
+  kill_match '[m]ap_autosave[.]py'
+  # RESUME: the room survives a power cycle. maps/last.* is the pose graph the
+  # autosave (below) writes; slam_toolbox loads it and carries on mapping from
+  # map_start_pose, which must be where the rover STANDS now. Default = where
+  # it stood at the last save (maps/last.pose; the rover is normally powered
+  # off in place), else 0,0,0. If it was moved while off:
+  #   SLAM_START_POSE="x,y,theta" ./rover slam      theta in radians
+  # It then finds itself against the old walls by scan matching + loop closure
+  # (search radius 3 m): a start more than ~1 m or ~30 deg off may not lock on,
+  # and a wrong lock corrupts the map -- ./rover slam --save before a risky
+  # start, SLAM_FRESH=1 to ignore the saved map.
+  SLAMCFG=$SRC2/config/slam_toolbox.yaml
+  if [ "${SLAM_FRESH:-0}" != 1 ] && [ -s "$HOSTMAPS/last.posegraph" ] && [ -s "$HOSTMAPS/last.data" ]; then
+    sp=${SLAM_START_POSE:-$(tr -d '[:space:]' < "$HOSTMAPS/last.pose" 2>/dev/null)}
+    sp=${sp:-0,0,0}
+    rexec "cp $SRC2/config/slam_toolbox.yaml /tmp/slam_resume.yaml && printf '    map_file_name: /maps/last\n    map_start_pose: [%s]\n' '$sp' >> /tmp/slam_resume.yaml"
+    SLAMCFG=/tmp/slam_resume.yaml
+    echo "[slam] resuming the saved room maps/last ($(date -r "$HOSTMAPS/last.posegraph" '+%F %H:%M')) from pose [$sp]"
+  else
+    echo "[slam] no saved room (or SLAM_FRESH=1): starting an empty map"
+  fi
   echo "[slam] slam_toolbox (online async, mapping) -> map -> odom TF, /map"
   dexec "exec ros2 launch slam_toolbox online_async_launch.py \
-            slam_params_file:=$SRC2/config/slam_toolbox.yaml use_sim_time:=false autostart:=true > /tmp/slam.log 2>&1"
+            slam_params_file:=$SLAMCFG use_sim_time:=false autostart:=true > /tmp/slam.log 2>&1"
+  # keep the room on disk: every 2 min, atomically (phase2/tools/map_autosave.py)
+  dexec "exec python3 $SRC2/tools/map_autosave.py 120 > /tmp/map_autosave.log 2>&1"
   sleep 8
   echo
   echo "  GATE slam:"
@@ -1404,7 +1431,68 @@ logs)
   ;;
 
 stop)
+  # save the room first: the container (and slam_toolbox's memory) goes with it
+  if running && docker exec "$NAME" pgrep -f '[a]sync_slam_toolbox_node' >/dev/null 2>&1; then
+    timeout 40 docker exec "$NAME" bash -lc "$ENVSET python3 -c \"import sys; sys.path.insert(0,'$SRC2/tools'); import map_autosave as m; print('  room saved' if m.save_once()[0] else '  room NOT saved (previous maps/last kept)')\"" || echo "  room NOT saved (timed out; previous maps/last kept)"
+  fi
   docker rm -f "$NAME" >/dev/null 2>&1 && echo "  container removed" || echo "  nothing running"
+  ;;
+
+health)
+  need_container
+  rexec "python3 $SRC3/tools/health_probe.py ${2:-6}" | python3 -c "
+import json,sys
+d=json.loads(sys.stdin.read().strip().splitlines()[-1])
+print('  topic'.ljust(48),'Hz')
+for t,h in d['hz'].items(): print('  '+t.ljust(46), ('%.1f'%h) if h else '--')
+print('  rover driving:', d['moving'])"
+  ;;
+
+watchdog)
+  WD="$REPO/ops/rover_watchdog.py"; PIDF=/tmp/rover_watchdog.pid; PAUSEF="$HOME/.rover_watchdog_pause"
+  wd_pid(){ pgrep -f 'python3 .*ops/rover_watchdo[g]' | head -1; }
+  case "${2:-status}" in
+    start|act)
+      [ -z "$(wd_pid)" ] || die "already running (pid $(wd_pid)); ./rover watchdog stop first"
+      [ "${2:-}" = act ] && export ROVER_WATCHDOG_ACT=1
+      nohup python3 "$WD" >> "$REPO/logs/watchdog.out" 2>&1 < /dev/null &
+      echo "  watchdog started (pid $!), $([ "${ROVER_WATCHDOG_ACT:-0}" = 1 ] && echo 'RESTARTS a dead layer' || echo 'observe only'): http://$(hostname -I | awk '{print $1}'):8099"
+      ;;
+    stop) pkill -f 'python3 .*ops/rover_watchdo[g]' && echo "  stopped" || echo "  not running" ;;
+    pause) touch "$PAUSEF"; echo "  paused: it observes but restarts nothing (use before debugging a layer)" ;;
+    resume) rm -f "$PAUSEF"; echo "  resumed" ;;
+    status)
+      [ -n "$(wd_pid)" ] && echo "  running (pid $(wd_pid))$([ -f "$PAUSEF" ] && echo ', PAUSED')" || echo "  not running"
+      curl -s -m 4 localhost:8099/health | python3 -c "
+import json,sys,time
+d=json.load(sys.stdin)
+print('  mode:','acts on failures' if d['act'] else 'observe only','| container up:',d['container'],'| Pi 5:',d['pi5'],'| age %ds'%(time.time()-d['t']))
+if d['error']: print('  ',d['error'])
+for k,v in d['layers'].items(): print('  %-8s %-5s restarts=%d'%(k,v['status'].upper(),v.get('restarts',0)))" 2>/dev/null || true
+      ;;
+    *) die "usage: ./rover watchdog start|act|stop|pause|resume|status" ;;
+  esac
+  ;;
+
+net)
+  IF=$(ip route get 192.168.1.16 2>/dev/null | awk '{for(i=1;i<NF;i++) if($i=="dev") print $(i+1); exit}')
+  echo "  link:   $IF  $(iw dev "$IF" link 2>/dev/null | awk '/signal/{printf "signal %s %s  ", $2, $3} /tx bitrate/{printf "tx %s %s", $3, $4}')"
+  echo "  (signal: better than -60 dBm is good, -70 is marginal, -75 drops frames)"
+  for h in "Pi 5:$PI5_HOST" "router:$(ip route | awk '/default/{print $3; exit}')"; do
+    out=$(ping -c 10 -i 0.2 -q "${h#*:}" 2>/dev/null || true)
+    loss=$(echo "$out" | sed -n 's/.* \([0-9.]*\)% packet loss.*/\1/p')
+    r=$(echo "$out" | sed -n 's|^rtt [^=]*= \([0-9.]*\)/\([0-9.]*\)/\([0-9.]*\)/\([0-9.]*\) ms|avg \2 ms  max \3 ms  jitter \4 ms|p')
+    [ -n "$r" ] && r="loss ${loss}%  $r"
+    echo "  ${h%%:*}: ${r:-unreachable}"
+  done
+  a=$(awk -v i="$IF:" '$1==i{print $2,$10}' /proc/net/dev); sleep 5; b=$(awk -v i="$IF:" '$1==i{print $2,$10}' /proc/net/dev)
+  echo "$a $b" | awk '{printf "  traffic: in %.1f Mbit/s, out %.1f Mbit/s over 5 s\n", ($3-$1)*8/5/1e6, ($4-$2)*8/5/1e6}'
+  if running; then
+    echo "  biggest ROS streams (what a weak link has to carry):"
+    for t in /camera/color/image_raw/compressed /ghost_clear/grid /scan /map; do
+      printf '    %-40s ' "$t"; rexec "timeout 7 ros2 topic bw $t 2>/dev/null | awk '/B\/s/{print \$1,\$2; exit}'" || echo "-"
+    done
+  fi
   ;;
 
 selftest)
