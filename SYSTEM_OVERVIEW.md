@@ -1,5 +1,9 @@
 # System overview: the whole robot, every machine, and how clean it is (2026-10-03)
 
+> **2026-10-18:** the laptop is a NEW machine (user `chotesh`, RTX 4050) and the twin runs in
+> **Isaac Sim** (Gazebo and the old `rover_sim` are retired). §2, §3's twin part and §4's
+> laptop table are updated for it; the health check (§5) is the 2026-10-03 snapshot.
+
 The one page for "where are we and how does it all fit". It covers the four
 repos on three computers, how they connect, the goal, and an honest check of
 how tidy each one is. For what is open and what to do next, see
@@ -33,8 +37,7 @@ The order it is being built in, from the README and INTELLIGENCE_PLAN.md:
 |---|---|---|---|
 | **Jetson Orin Nano** | 192.168.1.15 | `~/rover` → `-langrobo_perception-`, `rover-v1.1.7` | **the body's brain**: sensors, pose, map, nav2, exact moves, pixel→goal. Everything runs in one Docker container (`rover`, image `orin-nav:1.1`) |
 | **Pi 5** | 192.168.1.16 | `~/ros2_ws` → `pi5_ros2_ws`, `dev-1.4.1` | **the mind**: LangGraph brain (3 agents), voice (STT/TTS/wake word), Telegram, teleop web page, micro-ROS agent for the ESP32 |
-| **Laptop** | DHCP (moves: .17 earlier today) | `/workspace/mitra_sim` → `mitra_sim`, `main` | **a window and a twin**: RViz for the real robot, plus the Gazebo "Mitra twin" world |
-| | | `/workspace/ros2_ws/src/rover_sim` → `rover_sim`, `dev-0.1.1` | the older Gazebo sim (mecanum body, its own nav2). Still what `fleet.sh sim` starts |
+| **Laptop** | DHCP (192.168.1.9 on 2026-10-18), user `chotesh` | `~/mitra_sim` → `mitra_sim`, `isaac` | **a window and a twin**: the robot's hardware in Isaac Sim 5.1 (domain 42), RViz for the twin and the real robot (`./mitra rviz [real]`, needs ros-jazzy-desktop) |
 | Mac mini | DHCP, `singireddys-mac-mini.local:8080` | (none) | llama.cpp: Gemma 4 12B, LLM + VLM, `--jinja --parallel 4` |
 | ESP32 | micro-ROS over USB serial to the Pi 5 (`/dev/ttyUSB0`) | firmware in `~/rover/phase1/firmware/` | 4-wheel PID, encoders, 500 ms cmd_vel watchdog |
 | D555 camera | 192.168.11.55 (PoE, own subnet) | (none) | stereo IR, depth, colour, **and the gyro** (OPEN_ISSUES #2) |
@@ -64,8 +67,8 @@ The order it is being built in, from the README and INTELLIGENCE_PLAN.md:
    └───────────────┬────────────────────────────────────────────────────┘
                    │ DDS (subscribe only)              ssh: ./rover view pushes the config
    ┌───────────────▼─────────────────────────────┐
-   │ Laptop  RViz (~/rover_live.sh + .rviz)      │
-   │         mitra_sim twin = simulated D555/C1/ESP32, DOMAIN 42 ──► TWIN=1 ./rover up (rover_twin)
+   │ Laptop  RViz (./mitra rviz [real])          │
+   │         mitra_sim twin (Isaac Sim) = simulated D555/C1/ESP32, DOMAIN 42 ──► TWIN=1 ./rover up (rover_twin)
    │                                        ◄─── a 2nd Pi 5 brain, twin_brain.sh (domain 42)
    └─────────────────────────────────────────────┘
 ```
@@ -96,31 +99,32 @@ systemd.
 goal → `/reach/goal` → nav2 route + `goal_exec` exact finish → arrival photo
 check → spoken report.
 
-### The twin, end to end (mirror level, 2026-10-11)
+### The twin, end to end (Isaac Sim, 2026-10-18)
 
 The simulator is the robot's HARDWARE only; everything else is the robot's own,
 on ROS domain 42 beside the real robot on domain 0:
 
 | piece | where | what |
 |---|---|---|
-| the hardware + world | laptop, `./mitra up <world>` | Gazebo: rooms (2.4 m walls, textured), the body from THIS repo's `description/` (a synced copy), and the D555 (IR pair + depth 448x252 @30, colour @15, IMU 200 Hz), the C1 (720 beams, clockwise sweeps), the ESP32 (firmware v2's topics, encoders on the calibrated effective track, the measured wheel response and slide). `home_real` is furnished with household models |
+| the hardware + world | laptop, `./mitra up <world>` | Isaac Sim 5.1 (RTX, headless; `follow=true` opens a window chasing the rover): rooms (2.4 m walls, textured, live shadows), the body from THIS repo's `description/` (a synced copy), and the D555 (IR pair + depth 448x252 @30, colour @15, IMU 200 Hz), the C1 (720 beams, clockwise sweeps), the ESP32 (firmware v2's topics, encoders on the calibrated effective track, the measured wheel response and slide). `home_real` is furnished with household models |
 | the cables | laptop -> Jetson TCP :7555 / :7556 | the D555's and C1's frames (JPEG/PNG, ~2 MB/s); on the Jetson `~/mitra_sim/jetson/{d555,c1}_driver.py` publish realsense2_camera's and sllidar_node's own topics |
 | the stack | Jetson, `TWIN=1 ./rover up` | THIS repo's layers unchanged: camera, lidar, pose (cuVSLAM, gyro), fused (lidar_odom, fusion2), slam, map (nvblox), nav (nav2, reach, goal_exec), vlm; container `rover_twin`, state `~/.rover_twin`. Any layer alone: `TWIN=1 ./rover <layer>` |
 | the mind | Pi 5, `scripts/twin_brain.sh up` (started by `TWIN=1 ./rover up`) | a second agent_node: own state dir (`~/.langrobo_twin`), no Telegram, no voice, own teleop switch; talk with `twin_brain.sh say "..."` |
-| the view | laptop RViz window `rover_twin` (`TWIN=1 ./rover view`) | `rover_live.rviz` + the true world + the rover's true outline (the gap to the RobotModel is the pose error) |
-| all at once | Pi 5, `scripts/fleet.sh twin [up\|down\|status] [world] [mirror\|pose]` | default `home_real mirror` |
+| finding it | `/sim/hardware` (latched, domain 42) | the laptop's address, the cable ports, the world, the params sha1 the body was built from: `TWIN=1 ./rover camera`/`lidar` find the cables and check the body over DDS, and reset the rover with `/sim/reset` -- no ssh into the laptop |
+| the view | laptop, `./mitra rviz` | this repo's `rover_live.rviz` (fetched from here every time) + the true world + the rover's true outline (the gap to the RobotModel is the pose error) |
+| all at once | laptop `./mitra up home_real`, then Pi 5 `scripts/fleet.sh twin up\|down\|status` | the Pi 5 checks /sim/hardware, then runs `TWIN=1 ./rover up` here and the twin brain |
 
 **The real robot stays the default**: the twin runs only when started, and its
-domain cannot reach the real wheels. First mirror day: every layer passed its
-real gate on simulated hardware (cuVSLAM 191 landmarks, fusion "LiDAR-anchored,
-sd 0.58 cm"); `./rover reach 1.0 -0.6 90` believed (0.994, -0.596, 89.5 deg)
-where the truth was (0.993, -0.582, 89.6 deg); the home_real tour reached all
-4 goals through the 80 cm door and back (pose error <= 10.5 cm over 7.7 m) and
-drove over the 1 cm tablet, as the robot would. Details and decisions:
-mitra_sim `docs/STATUS.md`. The older pose level (`./mitra up <world>
-level=pose` + `~/mitra_sim/jetson/sim_stack.sh`: a ready /odom, nav only) is
-kept for quick planner experiments; `fleet.sh sim` still starts the older
-rover_sim until the owner retires it.
+domain cannot reach the real wheels. The Jetson runs one stack at a time.
+First Isaac day (2026-10-18): every layer passed its real gate on simulated
+hardware (cuVSLAM 159-168 landmarks, fusion "LiDAR-anchored, sd 0.6 cm");
+`./rover reach 1.0 -0.6 90` believed (1.006, -0.562, 90.6 deg) where the
+truth was (1.003, -0.560, 90.7 deg); the home_real tour reached all 4 goals
+through the 80 cm door and back (pose error <= 9.3 cm) and drove over the 1 cm
+tablet, as the robot would. A twin run starts slam with an empty map
+(`SLAM_FRESH` defaults to 1 under `TWIN=1`: the twin's rover always starts on
+its world's start). Details and decisions: mitra_sim `docs/STATUS.md`. The
+Gazebo pose level and `fleet.sh sim` (the old rover_sim) are retired.
 
 ## 4. How each repo is organised
 
@@ -152,11 +156,10 @@ rover_sim until the owner retires it.
 
 | where | what | source of truth |
 |---|---|---|
-| `~/rover_live.sh`, `~/rover_live.rviz` | the RViz launcher + config | **this repo**, `phase2/rviz/`. Pushed by `./rover view`; identical today |
-| `/workspace/mitra_sim` (also cloned on the Jetson at `~/mitra_sim`, mounted into `rover_twin` at `/opt/twin`) | the twin: Gazebo world + the simulated hardware (`./mitra up/status/goal/scenario/test`), the body from a synced copy of this repo's `description/`, `jetson/{d555,c1}_driver.py` (the stand-ins `TWIN=1 ./rover` starts), tests, `docs/STATUS.md` | its own repo |
-| `/workspace/ros2_ws/src/rover_sim` | the older sim (mecanum, own nav2, sim/real contract gate) | its own repo |
-| `~/old/` | leftovers archived 2026-10-03 (old sim copy, old RViz configs, stray colcon output, a stale LAPTOP.md); see its README.txt | nothing reads them |
-| `~/ros2_ws` (mycobot_ros2, ros2_fundamentals_examples) | learning / future arm material | unrelated to the rover |
+| `~/mitra_sim` (also cloned on the Jetson at `~/mitra_sim`, mounted into `rover_twin` at `/opt/twin`) | the twin: Isaac Sim world + the simulated hardware (`./mitra up/status/selftest/scenario/test/parity/rviz`), the body from a synced copy of this repo's `description/`, `jetson/{d555,c1}_driver.py` (the stand-ins `TWIN=1 ./rover` starts), tests, `docs/STATUS.md`, `CLAUDE.md` | its own repo |
+| `~/.mitra_sim/rviz/` | the RViz configs `./mitra rviz` writes | **this repo**, `phase2/rviz/rover_live.rviz`, fetched every time |
+| `~/IsaacLab` (v2.3.2) | Isaac Lab, RL training (arm pick-and-place, later) | upstream |
+| `~/langrobo_perception` (`main`, July) | an old clone of this repo | stale: this repo is the Jetson's `~/rover` |
 
 ## 5. Is it clean? The health check
 

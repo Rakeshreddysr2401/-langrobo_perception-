@@ -2,6 +2,18 @@
 
 How the rover plans and moves, why it is limited, and the fix order F1-F5: [NAV_GUIDE.md](NAV_GUIDE.md) (2026-10-11).
 
+## 2026-10-18 — the twin moves to Isaac Sim (new laptop)
+
+The twin runs THIS code on simulated hardware again (mitra_sim, Isaac Sim 5.1;
+SYSTEM_OVERVIEW.md §3). Found on it, for the real robot:
+
+| item | finding | status |
+|---|---|---|
+| door clearance | home_real goal 2 passed the 80 cm door frame at **0.7 cm** (2.8 cm in the morning run, 3.5 cm on Gazebo 10-11): no touch, but no margin | open: look at nav2's inflation / the 1 cm hard margin in doors |
+| the 1 cm tablet | driven over on goals 1 and 4, as on Gazebo (below the lidar plane and nvblox's slice) | known (#3) |
+| twin vs slam resume | `./rover stop` saves the room and `./rover slam` resumed it, but the twin always resets the rover to its world's start | fixed: `SLAM_FRESH` defaults to 1 under `TWIN=1` |
+| twin vs laptop ssh | camera/lidar/reset ssh-ed into the laptop (`rakhi24`, `/workspace`): a new laptop broke it | fixed: the twin announces itself on `/sim/hardware`; `/sim/reset` |
+
 ## 2026-10-11 — a clicked goal with room to spare took 551 s and failed
 
 Goal 2.47 m away through a ~60-70 cm corridor (the body needs ~44 cm).
@@ -391,4 +403,4 @@ errors, queue) and `objects_remembered`; `fleet.sh check` prints them.
 - The Pi 5 sudo password was typed into a chat session on 2026-09-26: change it.
 - 2026-10-03 tidy of all repos and machines (SYSTEM_OVERVIEW.md §5, C1–C13): done. Left
   for the owner: delete `~/mitra_sim.handcopy-2026-10-03` on the Jetson (identical to
-  the clone now at `~/mitra_sim`), and decide whether the older `rover_sim` is retired.
+  the clone now at `~/mitra_sim`). The older `rover_sim` is retired (2026-10-18).

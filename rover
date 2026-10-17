@@ -126,6 +126,10 @@ if [ "$TWIN" = 1 ]; then
   NAME=rover_twin
   TWIN_SRC=${TWIN_SRC:-$HOME/mitra_sim}
   TWIN_STATE=${TWIN_STATE:-$HOME/.rover_twin}
+  # The twin's rover always starts on its world's start (twin_reset), but a saved
+  # room (./rover stop saves one) was mapped from wherever the last run ended:
+  # resuming it would lock onto the wrong place. Start fresh unless asked.
+  SLAM_FRESH=${SLAM_FRESH:-1}
   HOSTLOGS="$TWIN_STATE/logs"
   HOSTMAPS="$TWIN_STATE/maps"
   [ -f "$TWIN_SRC/jetson/d555_driver.py" ] \
@@ -186,19 +190,51 @@ tf_up(){
 
 need_container(){ running || die "no container. Run: ./rover camera"; }
 
-# TWIN: the laptop built the twin's body from ITS copy of description/ (mitra_sim
+# TWIN: the twin announces itself on its own domain (mitra_sim, latched
+# /sim/hardware): the laptop's addresses, the cable ports, the world and the
+# description/params.yaml it built the body from. The Jetson finds it over DDS,
+# so it needs no ssh into the laptop and no laptop user or path. LAPTOP_IP=x.x.x.x
+# still picks the address by hand.
+twin_hw(){
+  [ -n "${TWIN_HW:-}" ] && return 0
+  TWIN_HW=$(rexec "timeout 15 ros2 topic echo --once --qos-durability transient_local --qos-reliability reliable --full-length --field data \
+                   /sim/hardware std_msgs/msg/String" 2>/dev/null | grep -m1 '^{' || true)
+  [ -n "$TWIN_HW" ] || die "no twin announcing on domain $DOMAIN (/sim/hardware). On the laptop: ./mitra up home_real"
+}
+twin_field(){ python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get(sys.argv[2], ""))' "$TWIN_HW" "$1"; }
+find_twin(){
+  [ -n "${ip:-}" ] && return 0
+  twin_hw
+  # of the laptop's addresses, the one on this Jetson's subnet
+  ip=${LAPTOP_IP:-$(python3 -c '
+import json, sys
+hosts, mine = json.loads(sys.argv[1])["hosts"], sys.argv[2].split()
+net = lambda a: a.rsplit(".", 1)[0]
+print(next((h for h in hosts if any(net(h) == net(m) for m in mine)), hosts[0] if hosts else ""))' "$TWIN_HW" "$(hostname -I)")}
+  [ -n "$ip" ] || die "the twin announced no address: $TWIN_HW"
+  echo "  twin at $ip: world $(twin_field world), engine $(twin_field engine)"
+}
+# The laptop built the twin's body from ITS copy of description/ (mitra_sim
 # tools/sync_rover.sh). A re-measurement here that never reached it is a twin
 # with the camera or lidar somewhere the robot's TF says they are not.
 twin_desc_check(){
   local mine theirs
+  twin_hw
   mine=$(sha1sum "$REPO/description/params.yaml" | cut -c1-12)
-  theirs=$(timeout 8 ssh $LSSH "$LAPTOP_USER@$ip" 'grep -o "sha1 [0-9a-f]*" /workspace/mitra_sim/description/rover/SOURCE' 2>/dev/null | cut -d' ' -f2 || true)
+  theirs=$(twin_field params_sha1)
   if [ "$mine" = "$theirs" ]; then
     echo "  twin body = this rover's description/params.yaml ($mine)"
   else
     echo "  ! the twin was built from params.yaml ${theirs:-?}, this rover's is $mine."
-    echo "    On the laptop: cd /workspace/mitra_sim && tools/sync_rover.sh && ./mitra build, then ./mitra up again."
+    echo "    On the laptop: tools/sync_rover.sh && ./mitra build, then ./mitra up again (mitra_sim)."
   fi
+}
+# Put the twin's rover back on its world's start, as you would carry the robot to
+# its mark: a fresh stack's odom and map start where the rover stands (the judge assumes it).
+twin_reset(){
+  rexec "timeout 10 ros2 topic pub --once -w 1 /sim/reset std_msgs/msg/Empty '{}'" >/dev/null 2>&1 \
+    && { sleep 1; echo "  twin rover back on the start of $(twin_field world)"; } \
+    || echo "  ! could not reset the twin's pose (no /sim/reset listener: is ./mitra up running?)"
 }
 
 # The laptop is on DHCP and MOVES (.10, .17, .5 so far): find it rather than
@@ -344,12 +380,9 @@ camera)
   fi
   start_container
   if [ "$TWIN" = 1 ]; then
-  find_laptop
+  find_twin
   twin_desc_check
-  # a fresh stack's odom and map start where the rover stands: put it back on the
-  # world's start, as you would carry the robot to its mark (the judge assumes it)
-  timeout 20 ssh $LSSH "$LAPTOP_USER@$ip" 'cd /workspace/mitra_sim && ./mitra reset' 2>/dev/null | sed 's/^/  /' \
-    || echo "  ! could not reset the twin's pose (is ./mitra up running?)"
+  twin_reset
   echo "[camera] TWIN: the laptop's simulated D555 -> d555_driver (realsense2_camera's topics)"
   dexec "exec python3 -u /opt/twin/jetson/d555_driver.py --laptop $ip > /tmp/camera.log 2>&1"
   # which rover code the twin is running: latched on /mitra/rover_commit, the judge records it
@@ -370,7 +403,7 @@ camera)
   t=0
   until cam_ready; do
     t=$((t+3)); [ "$t" -ge 40 ] && { echo "  ✗ D555 not streaming after 40 s."
-      [ "$TWIN" = 1 ] && { echo "    TWIN: is the world up on the laptop ($ip)?  cd /workspace/mitra_sim && ./mitra up home_real"
+      [ "$TWIN" = 1 ] && { echo "    TWIN: is the world up on the laptop ($ip)?  There: ./mitra up home_real (mitra_sim)"
                            docker exec "$NAME" tail -3 /tmp/camera.log; exit 1; }
       docker exec "$NAME" grep -q "No RealSense devices were found" /tmp/camera.log 2>/dev/null \
         && echo "    Its on-camera DDS server is offline. It still answers ping; that means nothing."
@@ -494,7 +527,7 @@ lidar)
     rexec "python3 $LIDAR/yaw_find.py"; exit
   fi
   if [ "$TWIN" = 1 ]; then
-  find_laptop
+  find_twin
   kill_match '[c]1_driver[.]py'
   echo "[lidar] fixed frames from description/params.yaml (robot_state_publisher)"
   tf_up
