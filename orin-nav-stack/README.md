@@ -315,13 +315,20 @@ layer parents of `orin-nav:1.1` (until a lean rebuild replaces them).
   - **Rebuild without the CLI** (preferred for the lean image): in a Dockerfile add
     `deb [signed-by=/usr/share/keyrings/nvidia-isaac-ros.gpg] https://isaac.download.nvidia.com/isaac-ros/release-4.4 noble-jetpack main`
     then `apt install ros-jazzy-isaac-ros-nvblox ...` (same source the CLI used).
-  - **CLI status (2026-07-19)**: reinstalled and configured (v2.3.0, release-4.4 repo) but
-    DORMANT — do NOT run `isaac-ros init docker`/`activate` casually: it targets 4.x (cuVSLAM
-    Thor-only), expects ISAAC_ROS_WS, and pulls GB images. Keep for future dev-env needs;
-    watch isaac_ros_visual_slam issue #223 for Orin support in 4.x.
-- **Host caveat**: apt has a pre-existing broken-dependency state (opencv/cmake from old host
-  experiments). Everything here runs in Docker and is unaffected — but avoid
-  `apt --fix-broken install` casually; it may churn many packages.
+  - **CLI status (2026-10-18)**: v2.5.0 from the **release-4.6** repo, installed with
+    `ISAAC_ROS_PLATFORM=arm64-jetpack`, still DORMANT — do NOT run `isaac-ros init
+    docker`/`activate` casually: it expects ISAAC_ROS_WS and pulls GB images. Isaac ROS 4.6's
+    cuVSLAM DOES run on this Orin (4.4's was Thor-only); the rover uses it in `orin-nav:1.2`
+    (see `~/rover/ISAAC_ROS_4_6_UPGRADE.md`).
+  - **Its OpenCV pin is disabled on purpose**: `isaac-ros-opencv-4-6.pref` forces Ubuntu's
+    OpenCV 4.6 over JetPack's 4.8 — that is what broke apt in July. It is moved to
+    `~/rover_backups/host-apt-2026-10-18/` (a deleted conffile stays deleted on upgrades).
+    Its CUDA 13.2 / TensorRT 10.16 pins match JetPack 7.2.1 and stay.
+  - `/etc/apt/preferences.d/50-keep-ubuntu-python3-rich.pref` keeps Ubuntu's python3-rich:
+    NVIDIA's needs python3-markdown-it-py, which collides with Ubuntu's (netplan needs rich).
+- **Host apt (2026-10-18)**: the broken state is REPAIRED (an `apt upgrade` cut off on
+  2026-07-16 had left 230 packages half-configured) and the host is on JetPack 7.2.1, fully
+  up to date. The ten-line story is in `~/rover/ISAAC_ROS_4_6_UPGRADE.md` §5.
 
 ## 13. Roadmap / known limitations
 
