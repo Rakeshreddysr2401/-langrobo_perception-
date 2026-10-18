@@ -11,6 +11,7 @@ SYSTEM_OVERVIEW.md §3). Found on it, for the real robot:
 |---|---|---|
 | door clearance | home_real goal 2 passed the 80 cm door frame at **0.7 cm** (2.8 cm in the morning run, 3.5 cm on Gazebo 10-11): no touch, but no margin | open: look at nav2's inflation / the 1 cm hard margin in doors |
 | the 1 cm tablet | driven over on goals 1 and 4, as on Gazebo (below the lidar plane and nvblox's slice) | known (#3) |
+| leaving a corner | home_real, from (0.3, -0.45, 180 deg) by the shoe rack / fridge (where the tour ends) to (3.05, 0.1): nav2 "no path: planner found none", `tight` "no fit found in the time" (3 s, 2837 expanded), `way_back` timed out twice ("stuck: the controller made no progress"), then `pass_far` got out after ~250 s; attempt 2 was on its way when cancelled at 298 s. | open: why no plan from there (the corner's costmap, the 3 s tight budget); the twin reproduces it: `./mitra scenario home_real`, then `TWIN=1 ./rover reach 3.05 0.1 0` |
 | twin vs slam resume | `./rover stop` saves the room and `./rover slam` resumed it, but the twin always resets the rover to its world's start | fixed: `SLAM_FRESH` defaults to 1 under `TWIN=1` |
 | twin vs laptop ssh | camera/lidar/reset ssh-ed into the laptop (`rakhi24`, `/workspace`): a new laptop broke it | fixed: the twin announces itself on `/sim/hardware`; `/sim/reset` |
 
