@@ -1,0 +1,11 @@
+/scan /gyro/base /camera/camera0/motion/sample /wheel_state /wheel_ticks /wheel_odom /rover_diag
+/cmd_vel /cmd_vel_nav /cmd_vel_smoothed /cmd_vel_turn /speed_limit
+/odom /lidar/odom /lidar/odom_status /vo/odom /vo/status /fusion/status /fusion/path /visual_slam/status /pose /tf /tf_static /map /map_metadata /robot_description /joint_states
+/camera/camera0/color/camera_info /camera/camera0/depth/camera_info /camera/camera0/infra1/camera_info /camera/camera0/infra2/camera_info /camera/camera0/aligned_depth_to_color/camera_info
+/camera/color/image_raw/compressed /depth_gate/passed /camera/pan_tilt_state
+/plan /unsmoothed_plan /optimal_trajectory /global_costmap/costmap /global_costmap/costmap_updates /global_costmap/lidar_layer /global_costmap/nvblox_layer /local_costmap/costmap /local_costmap/costmap_updates /nvblox_node/static_occupancy_grid /ghost_clear/grid /ghost_clear/erased
+/behavior_tree_log /collision_monitor_state /controller_selector /planner_selector /goal_pose
+/reach/goal /reach/status /reach/cancel /goal_exec/goal /goal_exec/status /goal_exec/pass /goal_exec/turn /follow/start /follow/status /follow/cancel
+/vision/people /vision/detections_3d /vision/pixel_query /vision/pixel_result /vision/target /vision/target_result
+/brain/thinking /brain/objects /voice/user_input /voice/robot_speech /voice/stt_meta /voice/tts_meta /voice/tts_speaking /voice/tts_stop /voice/debug_transcript
+/diag/timing /diagnostics /rosout
