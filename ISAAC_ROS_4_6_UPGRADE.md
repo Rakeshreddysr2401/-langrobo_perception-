@@ -118,8 +118,8 @@ apt source, `apt-get install --only-upgrade` the `ros-jazzy-isaac-ros-*` /
 clearance 0.7 cm, tablet driven over — kino_sim `docs/STATUS.md`).
 
 **F. Real robot:** `IMAGE=orin-nav:1.2 ./rover up`, the usual gates, a short
-`./rover record` + `./rover grade`. Rollback is `./rover stop` and plain
-`./rover up` (1.1 is the default `IMAGE`).
+`./rover record` + `./rover grade`. Rollback is `./rover stop` and
+`IMAGE=orin-nav:1.1 ./rover up` (1.2 is the default `IMAGE` since 2026-10-18).
 
 ## Sources
 
@@ -216,3 +216,30 @@ the real-robot test comes next, after a power cycle to connect the D555/C1.
 - `./rover view` took the login screen's Xwayland (gdm, `:1024`) for ours and
   died with "Authorization required"; it now only looks at the user's own
   Xwayland and sessions, and says "nobody is logged in" when that is true.
+
+## 6. Step E done 2026-10-18 (laptop session) — the twin on 1.2
+
+Twin = kino_sim `main` on Isaac Sim 6.2 (the 5.1 twin is retired). Jetson in 15 W.
+
+- `IMAGE=orin-nav:1.2 TWIN=1 ./rover up`: **every gate OK** (camera, lidar, pose
+  with VO=isaac, fused, slam, map, nav, vlm, wheels). The first start in a fresh
+  `rover_twin` cache failed the map gate: nvblox JIT-compiles ~27 s per layer
+  (~3 min) into `~/.cache/rover-cuda/rover_twin`; a re-run of `./rover up` passed
+  and later starts reuse the cache. (The cache dirs are root-owned: `du` as
+  rakhi24 reads 48K -- that is permissions, not an empty cache.)
+- `./sim test contract | encoders | motion`: PASS.
+- `./sim scenario home_real`, 1.2 vs 1.1 (same day, same twin):
+
+  | goal | 1.1 (VO=pycuvslam) | 1.2 (VO=isaac) |
+  |---|---|---|
+  | 1 (3.05, 0.1) | 53 s, over the tablet, pose err 7.5 cm | 67 s, over the tablet, 5.5 cm |
+  | 2 (5.2, 0.9), the 80 cm door | 106 s, 1.2 cm from the wall, 3.5 cm | 93 s, **0.2 cm** from the frame, 5.8 cm |
+  | 3 (5.6, -0.2) | 28 s, 35 cm clear, 10.7 cm | 20 s, 35 cm clear, 2.7 cm |
+  | 4 (0.3, -0.45, 180) | 70 s, over the tablet, 9.1 cm | 58 s, over the tablet, 10.0 cm |
+
+  4/4 reached on both; the tablet (OPEN_ISSUES #3) as on every twin since 10-11.
+  Open: the door pass at 0.2-1.2 cm (5.1 twin: 2.8 cm) and 93-106 s (5.1: 27 s).
+- The twin now defaults to 1.2 (`./rover`); 1.1 is the rollback only. The owner
+  deletes 1.1 after one more real-robot run on 1.2 (step F).
+- Twin camera rate: stereo 20-25 Hz, not 30 -- the twin's own limit (Python
+  stand-in driver + laptop->router->Jetson WiFi ~6 MB/s), not the robot's.

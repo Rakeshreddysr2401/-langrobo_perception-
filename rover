@@ -57,9 +57,9 @@ set -eo pipefail
 # commit like 1.1 (ISAAC_ROS_4_6_UPGRADE.md). Its visual odometry is the
 # packaged Isaac cuVSLAM (VO=isaac); 1.1's is the pyCuVSLAM wheel (VO=pycuvslam)
 # -- 1.1's Isaac 4.4 node is a Thor build and SIGILLs here, and 1.2 has no wheel.
-# The TWIN stays on 1.1 until it is moved on purpose: it is mid-development.
+# The twin runs 1.2 too since 2026-10-18 (step E of ISAAC_ROS_4_6_UPGRADE.md passed).
 # Roll the robot back with:  IMAGE=orin-nav:1.1 ./rover up
-IMAGE=${IMAGE:-$([ "${TWIN:-0}" = 1 ] && echo orin-nav:1.1 || echo orin-nav:1.2)}
+IMAGE=${IMAGE:-orin-nav:1.2}
 VO=${VO:-$([ "$IMAGE" = orin-nav:1.1 ] && echo pycuvslam || echo isaac)}
 NAME=${NAME:-rover}
 LAPTOP_USER=${LAPTOP_USER:-rakhi24}   # LAPTOP_IP is DISCOVERED, not fixed: DHCP moves it
@@ -140,7 +140,7 @@ if [ "$TWIN" = 1 ]; then
   HOSTLOGS="$TWIN_STATE/logs"
   HOSTMAPS="$TWIN_STATE/maps"
   [ -f "$TWIN_SRC/jetson/d555_driver.py" ] \
-    || { echo "TWIN=1: no $TWIN_SRC/jetson/d555_driver.py -- clone kino_sim to ~/kino_sim (branch isaac)" >&2; exit 1; }
+    || { echo "TWIN=1: no $TWIN_SRC/jetson/d555_driver.py -- clone kino_sim to ~/kino_sim (branch main)" >&2; exit 1; }
   echo "  ── TWIN: the twin on ROS domain $DOMAIN (container $NAME). The real robot is not touched. ──"
 fi
 

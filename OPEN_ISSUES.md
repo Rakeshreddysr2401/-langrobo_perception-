@@ -2,14 +2,14 @@
 
 How the rover plans and moves, why it is limited, and the fix order F1-F5: [NAV_GUIDE.md](NAV_GUIDE.md) (2026-10-11).
 
-## 2026-10-18 — Isaac ROS 4.6 upgrade: planned, not started
+## 2026-10-18 — Isaac ROS 4.6 upgrade: `orin-nav:1.2` built, twin run (step E) passed; real-robot run (F) next
 
 The plan, the reasons, the rules (never touch `orin-nav:1.1`) and the gate (the Jetson froze
 four times after today's power change: fix that first): [ISAAC_ROS_4_6_UPGRADE.md](ISAAC_ROS_4_6_UPGRADE.md).
 
 ## 2026-10-18 — the twin moves to Isaac Sim (new laptop)
 
-The twin runs THIS code on simulated hardware again (kino_sim, Isaac Sim 5.1;
+The twin runs THIS code on simulated hardware again (kino_sim, Isaac Sim 6.2 since 2026-10-18;
 SYSTEM_OVERVIEW.md §3). Found on it, for the real robot:
 
 | item | finding | status |
