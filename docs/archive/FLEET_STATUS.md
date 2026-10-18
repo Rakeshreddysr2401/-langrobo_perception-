@@ -77,8 +77,8 @@ error. `turns_total: 2`, last turn 2.07 s. That channel is live.
 
 **Voice: no, not right now.** `pi5_stt_node` / `pi5_tts_node` from
 `pi5_voice_pkg` are **not running** — the Pi 5 has `teleop_web.py` and
-`agent_node` (via `brain_launch.py provider:=llamacpp start_micro_ros:=false
-robot_body:=rover`) and nothing else. The package is built and documented
+`agent_node` (via `brain_launch.py provider:=llamacpp start_micro_ros:=false`)
+and nothing else. The package is built and documented
 (`~/ros2_ws/PI5_VOICE.md` on the Pi 5), so this is "not started", not "not
 working" — but it has to be started before anyone can speak to the robot.
 
