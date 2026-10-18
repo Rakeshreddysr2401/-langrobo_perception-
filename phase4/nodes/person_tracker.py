@@ -4,7 +4,7 @@ No ROS: detections_3d feeds it the people it found in one frame (odom-frame
 floor positions) and publishes what it returns; test_person_tracker.py runs it
 offline.
 
-WHY (2026-10-10). "Mitra, follow me" needs to know which of the people in view
+WHY (2026-10-10). "Kino, follow me" needs to know which of the people in view
 is ME, frame after frame -- not just "a person". detections_3d smoothed object
 positions per LABEL, so two people in frame shared one track and fought, and a
 follower would swap to whoever walked past. Ultralytics' ByteTrack needs the

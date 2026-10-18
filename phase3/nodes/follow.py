@@ -3,7 +3,7 @@
 No ROS: follow_node feeds it the pose, the people (/vision/people) and the
 obstacle points; test_follow.py runs it offline.
 
-WHY (2026-10-10). "Mitra, follow me" / "come to me". nav2 plans to a FIXED
+WHY (2026-10-10). "Kino, follow me" / "come to me". nav2 plans to a FIXED
 pose; a person walks, and a goal re-sent every second is a robot that stops,
 re-plans and lurches. This is the direct way: face the person, close to GAP,
 check the corridor every step. If the straight line is blocked it stops and

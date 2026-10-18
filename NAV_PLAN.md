@@ -108,7 +108,7 @@ held.
 **N5 — Stay good: regression.**
 The N0 course is the release gate for every nav2.yaml change: re-run and
 compare CSVs before committing. Without the robot: the twin runs this same
-nav2.yaml on simulated hardware (mitra_sim `./mitra scenario <world>`, or
+nav2.yaml on simulated hardware (kino_sim `./sim scenario <world>`, or
 `tools/run_suite.sh` for every world), judged on the true pose.
 *Done:* the release gate is written down in OPERATIONS.md and has been used.
 

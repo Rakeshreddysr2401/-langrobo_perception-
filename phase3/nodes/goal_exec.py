@@ -146,7 +146,7 @@ class GoalExec:
     MAX_MANEUVERS = 3     # per goal; then refuse as before
     # A turn is checked with the outline swept about the LEARNED pivot. Before
     # it is learned (no saved prior, < 2 turns that way) the prediction can be
-    # several cm off: the Mitra twin, starting fresh, finished a turn-and-
+    # several cm off: the twin, starting fresh, finished a turn-and-
     # shuffle 0.2 cm from a box (2026-10-04). Until then, this much more margin.
     UNLEARNED_EXTRA = 0.03   # m
 

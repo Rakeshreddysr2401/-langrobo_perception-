@@ -37,7 +37,7 @@ The order it is being built in, from the README and INTELLIGENCE_PLAN.md:
 |---|---|---|---|
 | **Jetson Orin Nano** | 192.168.1.15 | `~/rover` → `-langrobo_perception-`, `rover-v1.1.7` | **the body's brain**: sensors, pose, map, nav2, exact moves, pixel→goal. Everything runs in one Docker container (`rover`, image `orin-nav:1.1`) |
 | **Pi 5** | 192.168.1.16 | `~/ros2_ws` → `pi5_ros2_ws`, `dev-1.4.1` | **the mind**: LangGraph brain (3 agents), voice (STT/TTS/wake word), Telegram, teleop web page, micro-ROS agent for the ESP32 |
-| **Laptop** | DHCP (192.168.1.9 on 2026-10-18), user `chotesh` | `~/mitra_sim` → `mitra_sim`, `isaac` | **a window and a twin**: the robot's hardware in Isaac Sim 5.1 (domain 42), and later RViz too (`./mitra rviz [real]`, after ros-jazzy-desktop) |
+| **Laptop** | DHCP (192.168.1.9 on 2026-10-18), user `chotesh` | `~/kino_sim` → `kino_sim`, `isaac` | **a window and a twin**: the robot's hardware in Isaac Sim 5.1 (domain 42), and later RViz too (`./sim rviz [real]`, after ros-jazzy-desktop) |
 | **Old laptop** | 192.168.1.8 (DHCP), user `rakhi24` | — (`~/rover_live.sh`, `~/rover_live.rviz`, `~/rover_twin.rviz`, pushed by `./rover view`) | **the RViz station**: `./rover view` (real robot, domain 0) and `TWIN=1 ./rover view` (the twin, domain 42) open RViz here; ROS 2 Jazzy installed |
 | Mac mini | DHCP, `singireddys-mac-mini.local:8080` | (none) | llama.cpp: Gemma 4 12B, LLM + VLM, `--jinja --parallel 4` |
 | ESP32 | micro-ROS over USB serial to the Pi 5 (`/dev/ttyUSB0`) | firmware in `~/rover/phase1/firmware/` | 4-wheel PID, encoders, 500 ms cmd_vel watchdog |
@@ -68,8 +68,8 @@ The order it is being built in, from the README and INTELLIGENCE_PLAN.md:
    └───────────────┬────────────────────────────────────────────────────┘
                    │ DDS (subscribe only)              ssh: ./rover view pushes the config
    ┌───────────────▼─────────────────────────────┐
-   │ Laptop  RViz (./mitra rviz [real])          │
-   │         mitra_sim twin (Isaac Sim) = simulated D555/C1/ESP32, DOMAIN 42 ──► TWIN=1 ./rover up (rover_twin)
+   │ Laptop  RViz (./sim rviz [real])          │
+   │         kino_sim twin (Isaac Sim) = simulated D555/C1/ESP32, DOMAIN 42 ──► TWIN=1 ./rover up (rover_twin)
    │                                        ◄─── a 2nd Pi 5 brain, twin_brain.sh (domain 42)
    └─────────────────────────────────────────────┘
 ```
@@ -107,13 +107,13 @@ on ROS domain 42 beside the real robot on domain 0:
 
 | piece | where | what |
 |---|---|---|
-| the hardware + world | laptop, `./mitra up <world>` | Isaac Sim 5.1 (RTX, headless; `follow=true` opens a window chasing the rover): rooms (2.4 m walls, textured, live shadows), the body from THIS repo's `description/` (a synced copy), and the D555 (IR pair + depth 448x252 @30, colour @15, IMU 200 Hz), the C1 (720 beams, clockwise sweeps), the ESP32 (firmware v2's topics, encoders on the calibrated effective track, the measured wheel response and slide). `home_real` is furnished with household models |
-| the cables | laptop -> Jetson TCP :7555 / :7556 | the D555's and C1's frames (JPEG/PNG, ~2 MB/s); on the Jetson `~/mitra_sim/jetson/{d555,c1}_driver.py` publish realsense2_camera's and sllidar_node's own topics |
+| the hardware + world | laptop, `./sim up <world>` | Isaac Sim 5.1 (RTX, headless; `follow=true` opens a window chasing the rover): rooms (2.4 m walls, textured, live shadows), the body from THIS repo's `description/` (a synced copy), and the D555 (IR pair + depth 448x252 @30, colour @15, IMU 200 Hz), the C1 (720 beams, clockwise sweeps), the ESP32 (firmware v2's topics, encoders on the calibrated effective track, the measured wheel response and slide). `home_real` is furnished with household models |
+| the cables | laptop -> Jetson TCP :7555 / :7556 | the D555's and C1's frames (JPEG/PNG, ~2 MB/s); on the Jetson `~/kino_sim/jetson/{d555,c1}_driver.py` publish realsense2_camera's and sllidar_node's own topics |
 | the stack | Jetson, `TWIN=1 ./rover up` | THIS repo's layers unchanged: camera, lidar, pose (cuVSLAM, gyro), fused (lidar_odom, fusion2), slam, map (nvblox), nav (nav2, reach, goal_exec), vlm; container `rover_twin`, state `~/.rover_twin`. Any layer alone: `TWIN=1 ./rover <layer>` |
 | the mind | Pi 5, `scripts/twin_brain.sh up` (started by `TWIN=1 ./rover up`) | a second agent_node: own state dir (`~/.langrobo_twin`), no Telegram, no voice, own teleop switch; talk with `twin_brain.sh say "..."` |
 | finding it | `/sim/hardware` (latched, domain 42) | the laptop's address, the cable ports, the world, the params sha1 the body was built from: `TWIN=1 ./rover camera`/`lidar` find the cables and check the body over DDS, and reset the rover with `/sim/reset` -- no ssh into the laptop |
-| the view | laptop, `./mitra rviz` | this repo's `rover_live.rviz` (fetched from here every time) + the true world + the rover's true outline (the gap to the RobotModel is the pose error) |
-| all at once | laptop `./mitra up home_real`, then Pi 5 `scripts/fleet.sh twin up\|down\|status` | the Pi 5 checks /sim/hardware, then runs `TWIN=1 ./rover up` here and the twin brain |
+| the view | laptop, `./sim rviz` | this repo's `rover_live.rviz` (fetched from here every time) + the true world + the rover's true outline (the gap to the RobotModel is the pose error) |
+| all at once | laptop `./sim up home_real`, then Pi 5 `scripts/fleet.sh twin up\|down\|status` | the Pi 5 checks /sim/hardware, then runs `TWIN=1 ./rover up` here and the twin brain |
 
 **The real robot stays the default**: the twin runs only when started, and its
 domain cannot reach the real wheels. The Jetson runs one stack at a time.
@@ -124,7 +124,7 @@ truth was (1.003, -0.560, 90.7 deg); the home_real tour reached all 4 goals
 through the 80 cm door and back (pose error <= 9.3 cm) and drove over the 1 cm
 tablet, as the robot would. A twin run starts slam with an empty map
 (`SLAM_FRESH` defaults to 1 under `TWIN=1`: the twin's rover always starts on
-its world's start). Details and decisions: mitra_sim `docs/STATUS.md`.
+its world's start). Details and decisions: kino_sim `docs/STATUS.md`.
 
 ## 4. How each repo is organised
 
@@ -156,8 +156,8 @@ its world's start). Details and decisions: mitra_sim `docs/STATUS.md`.
 
 | where | what | source of truth |
 |---|---|---|
-| `~/mitra_sim` (also cloned on the Jetson at `~/mitra_sim`, mounted into `rover_twin` at `/opt/twin`) | the twin: Isaac Sim world + the simulated hardware (`./mitra up/status/selftest/scenario/test/parity/rviz`), the body from a synced copy of this repo's `description/`, `jetson/{d555,c1}_driver.py` (the stand-ins `TWIN=1 ./rover` starts), tests, `docs/STATUS.md`, `CLAUDE.md` | its own repo |
-| `~/.mitra_sim/rviz/` | the RViz configs `./mitra rviz` writes | **this repo**, `phase2/rviz/rover_live.rviz`, fetched every time |
+| `~/kino_sim` (also cloned on the Jetson at `~/kino_sim`, mounted into `rover_twin` at `/opt/twin`) | the twin: Isaac Sim world + the simulated hardware (`./sim up/status/selftest/scenario/test/parity/rviz`), the body from a synced copy of this repo's `description/`, `jetson/{d555,c1}_driver.py` (the stand-ins `TWIN=1 ./rover` starts), tests, `docs/STATUS.md`, `CLAUDE.md` | its own repo |
+| `~/.kino_sim/rviz/` | the RViz configs `./sim rviz` writes | **this repo**, `phase2/rviz/rover_live.rviz`, fetched every time |
 | `~/IsaacLab` (v2.3.2) | Isaac Lab, RL training (arm pick-and-place, later) | upstream |
 | `~/langrobo_perception` (`main`, July) | an old clone of this repo | stale: this repo is the Jetson's `~/rover` |
 
@@ -166,11 +166,11 @@ its world's start). Details and decisions: mitra_sim `docs/STATUS.md`.
 ### What is good
 
 - **All three git trees are clean.** Jetson and Pi 5 are in sync with their
-  remotes, and mitra_sim is clean on `main`.
+  remotes, and kino_sim is clean on `main`.
 - **Pi 5 tests: 434 passed in 18 s.** pyflakes is clean apart from one deliberate `noqa` probe.
 - **Nothing has drifted between copies:** the deployed teleop
   (`~/langrobo_teleop/teleop_web.py`) matches `phase1/teleop/`, the laptop's
-  RViz files match `phase2/rviz/`, and `~/mitra_sim` on the Jetson is now a
+  RViz files match `phase2/rviz/`, and `~/kino_sim` on the Jetson is now a
   clone of the twin repo.
 - **Clear boundaries:** `langrobo_core` imports no rclpy (it is testable
   anywhere), the measurements have one source (`description/params.yaml`),
@@ -188,10 +188,10 @@ its world's start). Details and decisions: mitra_sim `docs/STATUS.md`.
 | # | where | issue | done |
 |---|---|---|---|
 | C1 | Jetson `ARCHITECTURE.md` | stale: `fusion.py`, NavFn + RPP, "not an EKF" (contradicting its own §5), none of goal_exec / reach / pixel_to_goal / gates / the twin, open faults pointed at the archived TODO | ✅ §0 stack, §1 diagram, §2 topics, §4 node table refreshed; points at OPEN_ISSUES.md and here |
-| C2 | Jetson `OPEN_ISSUES.md`, mitra_sim `docs/STATUS.md` | headed 2026-10-04, work done 2026-10-03 | ✅ both say 2026-10-03 (commit 53c3a99's message still says 10-04; history is not rewritten) |
+| C2 | Jetson `OPEN_ISSUES.md`, kino_sim `docs/STATUS.md` | headed 2026-10-04, work done 2026-10-03 | ✅ both say 2026-10-03 (commit 53c3a99's message still says 10-04; history is not rewritten) |
 | C3 | Jetson `README.md` | status table dated 2026-09-26 | ✅ dated 2026-10-03; close quarters, the brain (B1–B3) and the twin added |
 | C4-C5 | the laptop's older simulator | unpushed commits; two sims side by side | ✅ resolved; that simulator is retired (2026-10-18) |
-| C6 | `~/mitra_sim` on the Jetson | hand copy of the twin's `jetson/` | ✅ now a git clone (mitra_sim f74337a); the old hand copy was deleted 2026-10-18 |
+| C6 | `~/kino_sim` on the Jetson | hand copy of the twin's `jetson/` | ✅ now a git clone (kino_sim f74337a); the old hand copy was deleted 2026-10-18 |
 | C7 | Pi 5 repo root | stray screenshot, `ESP_32_frimware/` lock-file dir, `.env*` world-readable (644) with live keys | ✅ screenshot removed (it was an empty Studio page); dir moved to Pi 5 `~/old/`; `.env` and both backups `chmod 600` (kept, not deleted) |
 | C8 | Pi 5 `TODO.md` | header said `dev-1.3.8` | ✅ `dev-1.4.1` |
 | C9 | Pi 5 `object_memory.py` / `survey.py` | looked dead | ✅ **not dead**: the survey is an opt-in feature (`LANGROBO_PHOTO_SURVEY=1`, default off), `survey.py` also owns the vision-tool slot every photo prompt uses, and approach uses object_memory's helpers. The comments in `look.py` / `approach.py` that said every photo feeds memory now say it is opt-in |
@@ -200,7 +200,7 @@ its world's start). Details and decisions: mitra_sim `docs/STATUS.md`.
 | C12 | Laptop home | leftovers | ✅ moved to `~/old/` with a README.txt (nothing deleted; `~/LAPTOP.md` was a stale copy that differed from `phase2/LAPTOP.md`) |
 | C13 | doc sprawl | 16 top-level docs on the Pi 5 | ✅ the four voice docs moved to Pi 5 `docs/voice/`; all 31 files referencing them follow. 12 top-level docs remain there |
 
-Commits: Jetson (this one), Pi 5 0cd4503, mitra_sim f74337a. Pi 5 tests 434/434 after.
+Commits: Jetson (this one), Pi 5 0cd4503, kino_sim f74337a. Pi 5 tests 434/434 after.
 
 ### What is clean in code but open in behaviour
 

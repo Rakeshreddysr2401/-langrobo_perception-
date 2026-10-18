@@ -29,7 +29,7 @@ All machines and repos on one page: [SYSTEM_OVERVIEW.md](SYSTEM_OVERVIEW.md). Re
 | teleop | a **web page on the Pi 5**, hold-to-move | any phone on the WiFi is a controller and a stop button, with no app to install |
 | visualisation | **RViz2 on a laptop** | the Jetson needs its GPU for nvblox |
 
-**A simulation twin** (since 2026-10-03; Isaac Sim since 2026-10-18): the laptop's `mitra_sim` simulates the HARDWARE only -- the D555 and the C1 over TCP "cables" to stand-in drivers in the `rover_twin` container (`~/mitra_sim/jetson/`), the ESP32's topics over DDS -- and `TWIN=1 ./rover up` runs this repo's whole stack on it, unchanged, on ROS domain 42 (state in `~/.rover_twin`). The twin announces itself (latched `/sim/hardware`: address, ports, world, params sha1), so this repo finds it without ssh. Domain 0 (the real robot) is never touched.
+**A simulation twin** (since 2026-10-03; Isaac Sim since 2026-10-18): the laptop's `kino_sim` simulates the HARDWARE only -- the D555 and the C1 over TCP "cables" to stand-in drivers in the `rover_twin` container (`~/kino_sim/jetson/`), the ESP32's topics over DDS -- and `TWIN=1 ./rover up` runs this repo's whole stack on it, unchanged, on ROS domain 42 (state in `~/.rover_twin`). The twin announces itself (latched `/sim/hardware`: address, ports, world, params sha1), so this repo finds it without ssh. Domain 0 (the real robot) is never touched.
 
 **Everything runs in one container** (`rover`) on the Jetson, brought up in
 layers by `./rover`, because a failure in one layer must name itself rather than

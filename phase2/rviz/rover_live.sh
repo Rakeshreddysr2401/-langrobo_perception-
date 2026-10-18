@@ -11,7 +11,7 @@
 export DISPLAY="${DISPLAY:-:0}"
 source /opt/ros/jazzy/setup.bash
 # must match the rover. `TWIN=1 ./rover view` sets 42 and its own config: the
-# Mitra twin's window, beside the real one.
+# The twin's window, beside the real one.
 export ROS_DOMAIN_ID="${ROVER_RVIZ_DOMAIN:-0}"
 unset ROS_DISCOVERY_SERVER        # a stale one shows an empty graph
 unset FASTRTPS_DEFAULT_PROFILES_FILE

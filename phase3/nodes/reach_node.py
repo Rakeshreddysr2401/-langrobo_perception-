@@ -82,7 +82,7 @@ PASS_D_FAR = (1.8, 1.3, 0.9)
 # A goal beyond the planner's window goes in LEGS. The global costmap is an
 # 8 x 8 m window that follows the rover (there is no map frame): a goal more
 # than ~4 m away is "outside bounds" and nav2 fails at once. Found in the
-# Mitra twin, 2026-10-04: bedroom -> living room, 6.2 m, eight instant
+# The twin, 2026-10-04: bedroom -> living room, 6.2 m, eight instant
 # "nav2 failed" in 117 s; in a real home, any room past ~4 m. Each leg: the
 # farthest point toward the goal, up to LEG_MAX, that fits and plans.
 LEG_MAX = 3.2          # m: well inside the 4 m half-window

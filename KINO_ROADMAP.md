@@ -14,7 +14,7 @@ OPEN_ISSUES.md, LOCALIZATION_GAPS.md, NAV_GUIDE.md, ROVER_BUILD_PLAN.md.
 | Eyes: YOLO people, VLM grounding (pixel to goal), photo log, follow-me | Jetson + Mac mini | working, floor-tested |
 | Brain: LangGraph (chat / local_agent / navigate), memory, Telegram | Pi 5 | working |
 | Voice: STT (Whisper/Parakeet/Apple), TTS, wake aliases | Pi 5 + Mac mini | working, no acoustic wake word yet |
-| Twin: the robot's hardware in Isaac Sim on the laptop (mitra_sim), the real stack on it | laptop + Jetson + Pi 5 | working (2026-10-18) |
+| Twin: the robot's hardware in Isaac Sim on the laptop (kino_sim), the real stack on it | laptop + Jetson + Pi 5 | working (2026-10-18) |
 
 ## What stops it feeling like a real robot (most important first)
 
@@ -79,6 +79,6 @@ Candidates, ordered by payoff per effort. Verify versions and Orin Nano
 | Memory | vector store (sqlite-vec / Chroma) of photo captions + CLIP embeddings; retrieve, not dump | linear photo log |
 | Network | Ethernet backbone, CycloneDDS or Zenoh with unicast peers, compress images (JPEG/zstd), QoS tuning | multicast over weak WiFi |
 | Ops | systemd units + watchdog, health endpoint, Prometheus/Grafana or simple status page, structured JSON logs, rosbag ring buffer for failures | manual `rover up` |
-| Testing | rosbag replay CI, pytest + the Isaac twin as regression (`./mitra scenario`, tools/run_suite.sh), golden transcripts for the prompts (eval set of 50 utterances) | "it worked yesterday" |
+| Testing | rosbag replay CI, pytest + the Isaac twin as regression (`./sim scenario`, tools/run_suite.sh), golden transcripts for the prompts (eval set of 50 utterances) | "it worked yesterday" |
 | Dev | pre-commit (ruff), type checks, one `docker compose`, config in one place, Studio traces (LangSmith/Langfuse) | scattered config |
 | Power | INA219/INA226 current+voltage sensing on the ESP32, brownout warnings, battery % into the prompt | battery sag surprises |

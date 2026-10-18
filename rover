@@ -41,8 +41,8 @@
 #   ./rover stop       tear the container down (saves the slam room first)
 #
 #   TWIN=1 ./rover <any of the above>
-#                      the same, on the Mitra TWIN instead of the robot: the
-#                      laptop's simulated D555 / C1 / ESP32 (mitra_sim, `./mitra
+#                      the same, on the TWIN instead of the robot: the
+#                      laptop's simulated D555 / C1 / ESP32 (kino_sim, `./sim
 #                      up <world>` there first), ROS domain 42, container
 #                      rover_twin, state in ~/.rover_twin. The real robot's
 #                      container, domain and logs are never touched.
@@ -104,15 +104,15 @@ LIDAR_PORT=${LIDAR_PORT:-/dev/ttyUSB0}
 LIDAR_TIME_OFFSET=${LIDAR_TIME_OFFSET:-0.082}
 CAM_NS=/camera/camera0
 
-# ── TWIN=1 ./rover <layer>: the SAME layers on the Mitra twin, not the robot ──
-# The laptop (mitra_sim: `./mitra up <world>`) is the HARDWARE -- a simulated
+# ── TWIN=1 ./rover <layer>: the SAME layers on the twin, not the robot ──
+# The laptop (kino_sim: `./sim up <world>`) is the HARDWARE -- a simulated
 # D555, C1 and ESP32 on the measured body, in a simulated home. Everything here
 # then runs exactly as on the robot (same scripts, nodes, configs, gates), with
 # four differences:
-#   - ROS domain $MITRA_DOMAIN (42), never 0: nothing reaches the real wheels;
+#   - ROS domain $TWIN_DOMAIN (42), never 0: nothing reaches the real wheels;
 #   - its own container (rover_twin): kill_match / stop never touch the real one;
 #   - its own /logs and /maps (~/.rover_twin): learned state never mixes;
-#   - camera / lidar: driver stand-ins (~/mitra_sim/jetson/{d555,c1}_driver.py)
+#   - camera / lidar: driver stand-ins (~/kino_sim/jetson/{d555,c1}_driver.py)
 #     take the laptop's frames off a virtual cable and publish the drivers' own
 #     topics; the ESP32's stand-in publishes its micro-ROS topics from the laptop.
 # The Pi 5's half is twin_brain.sh (a second agent_node on the same domain).
@@ -121,10 +121,10 @@ DOMAIN=0
 HOSTLOGS="$REPO/logs"
 HOSTMAPS="$REPO/maps"
 if [ "$TWIN" = 1 ]; then
-  DOMAIN=${MITRA_DOMAIN:-42}
+  DOMAIN=${TWIN_DOMAIN:-42}
   [ "$DOMAIN" = 0 ] && { echo "refusing: TWIN=1 on domain 0 would be the REAL robot's" >&2; exit 1; }
   NAME=rover_twin
-  TWIN_SRC=${TWIN_SRC:-$HOME/mitra_sim}
+  TWIN_SRC=${TWIN_SRC:-$HOME/kino_sim}
   TWIN_STATE=${TWIN_STATE:-$HOME/.rover_twin}
   # The twin's rover always starts on its world's start (twin_reset), but a saved
   # room (./rover stop saves one) was mapped from wherever the last run ended:
@@ -133,8 +133,8 @@ if [ "$TWIN" = 1 ]; then
   HOSTLOGS="$TWIN_STATE/logs"
   HOSTMAPS="$TWIN_STATE/maps"
   [ -f "$TWIN_SRC/jetson/d555_driver.py" ] \
-    || { echo "TWIN=1: no $TWIN_SRC/jetson/d555_driver.py -- clone mitra_sim to ~/mitra_sim (branch v0.0.2)" >&2; exit 1; }
-  echo "  ── TWIN: the Mitra twin on ROS domain $DOMAIN (container $NAME). The real robot is not touched. ──"
+    || { echo "TWIN=1: no $TWIN_SRC/jetson/d555_driver.py -- clone kino_sim to ~/kino_sim (branch isaac)" >&2; exit 1; }
+  echo "  ── TWIN: the twin on ROS domain $DOMAIN (container $NAME). The real robot is not touched. ──"
 fi
 
 # The cuvslam wheel ships its own libcuvslam.so and CUDA-12 userspace libs, and
@@ -190,7 +190,7 @@ tf_up(){
 
 need_container(){ running || die "no container. Run: ./rover camera"; }
 
-# TWIN: the twin announces itself on its own domain (mitra_sim, latched
+# TWIN: the twin announces itself on its own domain (kino_sim, latched
 # /sim/hardware): the laptop's addresses, the cable ports, the world and the
 # description/params.yaml it built the body from. The Jetson finds it over DDS,
 # so it needs no ssh into the laptop and no laptop user or path. LAPTOP_IP=x.x.x.x
@@ -199,7 +199,7 @@ twin_hw(){
   [ -n "${TWIN_HW:-}" ] && return 0
   TWIN_HW=$(rexec "timeout 15 ros2 topic echo --once --qos-durability transient_local --qos-reliability reliable --full-length --field data \
                    /sim/hardware std_msgs/msg/String" 2>/dev/null | grep -m1 '^{' || true)
-  [ -n "$TWIN_HW" ] || die "no twin announcing on domain $DOMAIN (/sim/hardware). On the laptop: ./mitra up home_real"
+  [ -n "$TWIN_HW" ] || die "no twin announcing on domain $DOMAIN (/sim/hardware). On the laptop: ./sim up home_real"
 }
 twin_field(){ python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get(sys.argv[2], ""))' "$TWIN_HW" "$1"; }
 find_twin(){
@@ -214,7 +214,7 @@ print(next((h for h in hosts if any(net(h) == net(m) for m in mine)), hosts[0] i
   [ -n "$ip" ] || die "the twin announced no address: $TWIN_HW"
   echo "  twin at $ip: world $(twin_field world), engine $(twin_field engine)"
 }
-# The laptop built the twin's body from ITS copy of description/ (mitra_sim
+# The laptop built the twin's body from ITS copy of description/ (kino_sim
 # tools/sync_rover.sh). A re-measurement here that never reached it is a twin
 # with the camera or lidar somewhere the robot's TF says they are not.
 twin_desc_check(){
@@ -226,7 +226,7 @@ twin_desc_check(){
     echo "  twin body = this rover's description/params.yaml ($mine)"
   else
     echo "  ! the twin was built from params.yaml ${theirs:-?}, this rover's is $mine."
-    echo "    On the laptop: tools/sync_rover.sh && ./mitra build, then ./mitra up again (mitra_sim)."
+    echo "    On the laptop: tools/sync_rover.sh && ./sim build, then ./sim up again (kino_sim)."
   fi
 }
 # Put the twin's rover back on its world's start, as you would carry the robot to
@@ -234,7 +234,7 @@ twin_desc_check(){
 twin_reset(){
   rexec "timeout 10 ros2 topic pub --once -w 1 /sim/reset std_msgs/msg/Empty '{}'" >/dev/null 2>&1 \
     && { sleep 1; echo "  twin rover back on the start of $(twin_field world)"; } \
-    || echo "  ! could not reset the twin's pose (no /sim/reset listener: is ./mitra up running?)"
+    || echo "  ! could not reset the twin's pose (no /sim/reset listener: is ./sim up running?)"
 }
 
 # The laptop is on DHCP and MOVES (.10, .17, .5 so far): find it rather than
@@ -385,7 +385,7 @@ camera)
   twin_reset
   echo "[camera] TWIN: the laptop's simulated D555 -> d555_driver (realsense2_camera's topics)"
   dexec "exec python3 -u /opt/twin/jetson/d555_driver.py --laptop $ip > /tmp/camera.log 2>&1"
-  # which rover code the twin is running: latched on /mitra/rover_commit, the judge records it
+  # which rover code the twin is running: latched on /sim/rover_commit, the judge records it
   dexec "exec python3 -u /opt/twin/jetson/announce.py '$(git -C "$REPO" branch --show-current)' \
          '$(git -C "$REPO" log --oneline -1 | tr -dc "[:alnum:] ._:,()+-" | cut -c1-90)' > /tmp/announce.log 2>&1"
   else
@@ -403,7 +403,7 @@ camera)
   t=0
   until cam_ready; do
     t=$((t+3)); [ "$t" -ge 40 ] && { echo "  ✗ D555 not streaming after 40 s."
-      [ "$TWIN" = 1 ] && { echo "    TWIN: is the world up on the laptop ($ip)?  There: ./mitra up home_real (mitra_sim)"
+      [ "$TWIN" = 1 ] && { echo "    TWIN: is the world up on the laptop ($ip)?  There: ./sim up home_real (kino_sim)"
                            docker exec "$NAME" tail -3 /tmp/camera.log; exit 1; }
       docker exec "$NAME" grep -q "No RealSense devices were found" /tmp/camera.log 2>/dev/null \
         && echo "    Its on-camera DDS server is offline. It still answers ping; that means nothing."
@@ -605,7 +605,7 @@ wheels)
   # endpoint (fusion2 is the other subscriber, so the plain count is 2 when
   # healthy). Without it nav2 publishes into nothing and every gate stays green.
   esp_node=_CREATED_BY_BARE_DDS_APP_     # how micro-ROS shows up in the graph
-  [ "$TWIN" = 1 ] && esp_node=esp32_twin  # the laptop's stand-in (mitra_sim nodes/esp32_sim.py)
+  [ "$TWIN" = 1 ] && esp_node=esp32_twin  # the laptop's stand-in (kino_sim hardware/esp32.py, isaac/ros_io.py)
   esp_sub=$(rexec "ros2 topic info -v /cmd_vel 2>/dev/null | grep -A4 'Node name: $esp_node' | grep -c SUBSCRIPTION" 2>/dev/null || true)
   printf '      %-22s %7s        (want >= 1)   %s\n' 'ESP32 on /cmd_vel' "${esp_sub:-0}" \
     "$([ "${esp_sub:-0}" -ge 1 ] && echo OK || echo FAIL)"
@@ -898,7 +898,7 @@ up)
     fi
   done
 
-  # "Mitra, follow me" (detect + follow_node). The brain has the tool on
+  # "Kino, follow me" (detect + follow_node). The brain has the tool on
   # (LANGROBO_FOLLOW=1), and with this layer started by hand it failed after
   # every power cycle (2026-10-11). Not fatal: the robot works without it.
   # YOLO idles until someone asks for people, so it costs ~nothing at rest.
@@ -917,14 +917,14 @@ up)
     # Studio, voice and the real teleop page stay the real robot's.
     echo
     echo "[pi5] the twin's brain: twin_brain.sh (a 2nd agent_node, domain $DOMAIN)"
-    timeout 90 ssh -n -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" "MITRA_DOMAIN=$DOMAIN ~/ros2_ws/scripts/twin_brain.sh up" 2>&1 \
+    timeout 90 ssh -n -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" "TWIN_DOMAIN=$DOMAIN ~/ros2_ws/scripts/twin_brain.sh up" 2>&1 \
       | sed 's/^/      /' || echo "      ? could not reach the Pi 5 ($PI5_HOST)"
     mode=$(timeout 8 ssh -o BatchMode=yes "$LAPTOP_USER@$PI5_HOST" 'cat ~/.langrobo_twin/teleop_mode.json' 2>/dev/null || true)
     case "$mode" in
       *'"manual": false'*|*'"manual":false'*) echo "      twin teleop: AUTO — OK" ;;
       *) echo "      ✗ twin teleop not AUTO ($mode): on the Pi 5, twin_brain.sh manual off" ;;
     esac
-    echo "      talk to it:  ssh $PI5_HOST '~/ros2_ws/scripts/twin_brain.sh say \"Mitra, what do you see?\"'"
+    echo "      talk to it:  ssh $PI5_HOST '~/ros2_ws/scripts/twin_brain.sh say \"Kino, what do you see?\"'"
     echo
     "$0" view || true
     echo
@@ -932,7 +932,7 @@ up)
     "$0" wheels || true
     echo
     echo "  Drive it: RViz 2D Goal Pose, ./rover reach X Y, or the twin brain."
-    echo "  Judge it on the truth (laptop): ./mitra scenario home_real"
+    echo "  Judge it on the truth (laptop): ./sim scenario home_real"
     exit 0
   fi
 
@@ -1043,7 +1043,7 @@ voice)
       'journalctl --user -u langrobo-voice -b -o cat | grep -E "audio ready:|no audio device" | tail -1 | sed "s/.*pi5_audio_device\]: //"' 2>/dev/null || true)
     echo "      audio: ${ready:-unknown -- on the Pi 5: journalctl --user -u langrobo-voice | grep audio}"
   echo
-  echo "  Say \"Mitra\" in the sentence (\"Mitra, what time is it?\") — only speech"
+  echo "  Say \"Kino\" in the sentence (\"Kino, what time is it?\") — only speech"
   echo "  containing the name becomes a turn (wake_detector line above says how it"
   echo "  is heard). Watch a turn land:"
   echo "     https://smith.langchain.com  ->  project pi5  ->  run turn:voice"
@@ -1426,7 +1426,7 @@ status)
 
 follow)
   need_container
-  # "Mitra, follow me" (phase3/nodes/follow_node.py). Needs the fused pose (it
+  # "Kino, follow me" (phase3/nodes/follow_node.py). Needs the fused pose (it
   # drives on it, with goal_exec's trust rules) and the people from the detect
   # layer, which this starts if it is not running. Part of ./rover up since
   # 2026-10-11 (after vlm, not fatal); run alone to restart it.
