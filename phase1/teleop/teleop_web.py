@@ -45,7 +45,7 @@ CMD_TIMEOUT = 0.4      # s since last button ping before we treat it as released
 #
 # UNITS. rover_firmware_v2.ino reads wz as RADIANS PER SECOND and computes each
 # wheel as  vx +/- wz * WHEEL_BASE_M/2  with WHEEL_BASE_M = 0.34. It does NOT
-# treat wz as a PWM fraction -- that was an earlier firmware (rover_sim
+# treat wz as a PWM fraction -- that was an earlier firmware (an old
 # contract_bridge.py), and the values below were tuned for it.
 #
 # The consequence, measured 2026-08-22: WZ = 2.0 asks each wheel for 0.34 m/s,

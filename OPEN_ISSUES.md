@@ -9,8 +9,8 @@ SYSTEM_OVERVIEW.md §3). Found on it, for the real robot:
 
 | item | finding | status |
 |---|---|---|
-| door clearance | home_real goal 2 passed the 80 cm door frame at **0.7 cm** (2.8 cm in the morning run, 3.5 cm on Gazebo 10-11): no touch, but no margin | open: look at nav2's inflation / the 1 cm hard margin in doors |
-| the 1 cm tablet | driven over on goals 1 and 4, as on Gazebo (below the lidar plane and nvblox's slice) | known (#3) |
+| door clearance | home_real goal 2 passed the 80 cm door frame at **0.7 cm** (2.8 cm in the morning run, 3.5 cm on the 10-11 twin): no touch, but no margin | open: look at nav2's inflation / the 1 cm hard margin in doors |
+| the 1 cm tablet | driven over on goals 1 and 4, as on the 10-11 twin (below the lidar plane and nvblox's slice) | known (#3) |
 | leaving a corner | home_real, from (0.3, -0.45, 180 deg) by the shoe rack / fridge (where the tour ends) to (3.05, 0.1): nav2 "no path: planner found none", `tight` "no fit found in the time" (3 s, 2837 expanded), `way_back` timed out twice ("stuck: the controller made no progress"), then `pass_far` got out after ~250 s; attempt 2 was on its way when cancelled at 298 s. | open: why no plan from there (the corner's costmap, the 3 s tight budget); the twin reproduces it: `./mitra scenario home_real`, then `TWIN=1 ./rover reach 3.05 0.1 0` |
 | twin vs slam resume | `./rover stop` saves the room and `./rover slam` resumed it, but the twin always resets the rover to its world's start | fixed: `SLAM_FRESH` defaults to 1 under `TWIN=1` |
 | twin vs laptop ssh | camera/lidar/reset ssh-ed into the laptop (`rakhi24`, `/workspace`): a new laptop broke it | fixed: the twin announces itself on `/sim/hardware`; `/sim/reset` |
@@ -179,7 +179,7 @@ before its drive started -- most of it VLM round trips (issue 3).
 
 ## 2026-10-03 (late) — Pi 5 ssh/IDE, ports, real-rover bring-up
 
-Focus is the **real rover only**; the Mitra twin / Gazebo is parked (owner reviews it later).
+Focus is the **real rover only**; the twin is parked (owner reviews it later).
 
 | item | finding | status |
 |---|---|---|
@@ -189,7 +189,7 @@ Focus is the **real rover only**; the Mitra twin / Gazebo is parked (owner revie
 | ports, Jetson | TCP: 22, PyCharm remote-dev on 127.0.0.1 only (5990/63342/...), 5201 iperf3 server (left from the switch test), 6566 (saned) | clean. iperf3 is harmless; stop it if unwanted |
 | Mac mini LLM/VLM | Was not on the rover's network (the owner moved it). Now `singireddys-mac-mini.local` = **192.168.1.5** from the Pi 5; `/health` ok; text reply 0.8 s; a live D555 frame described correctly (office chair + white chair, tiled floor) in 4.3 s. (.6 = owner's MacBook Air; .7:8080 is an unrelated web server) | **fixed**. The brain calls it by name, so no config change |
 | bring-up | `./rover up` exit 0: IR 30 Hz, depth 28.6, VO 28.4, gyro 203, lidar 10, lidar odom 10, `/odom` 20 (LiDAR-anchored, sd 0.6-0.7 cm), cuVSLAM 44 landmarks, slam map 0.5, nvblox 4.9, costmaps 0.9/1.7, colour for Pi 5 4.6, wheel_state 20-21.5; teleop AUTO; RViz on the laptop (.17) | up |
-| Gazebo twin on the laptop | `home_real` world was still running from 18:42 (domain 42, so it never touched the real wheels, but it was using laptop CPU next to RViz) | stopped with `./mitra down`. Twin brain (Pi 5) and twin Jetson stack were already down. Restart all: `fleet.sh twin up` on the Pi 5 |
+| twin on the laptop | `home_real` world was still running from 18:42 (domain 42, so it never touched the real wheels, but it was using laptop CPU next to RViz) | stopped with `./mitra down`. Twin brain (Pi 5) and twin Jetson stack were already down. Restart all: `fleet.sh twin up` on the Pi 5 |
 | Jetson `/etc/hosts` | `192.168.2.10 rakhi24-desktop.local` ("ethernet via JioAirFiber switch") was left over, so on the Jetson the Pi 5's name went to a dead address; the container copies it at creation | fixed: now `192.168.1.16` on the host (backup `/etc/hosts.bak-2026-10-03`) and in the running container |
 | "go near the door" from Studio: "I can't find the door" | the brain looked once (`snapshot_expired`), then both search turns (-45, +94 deg) **stalled at 0 deg rotation**; 0.61 m+ clear all round, so not boxed. Nudge: wheel peaks 0.060/0.068 vs 0.090/0.086 at 20:43 for the same 0.05 m/s: **battery sagging**; turns (skid scrub) fail before straight driving. The rover had also been moved 1.1 m / 112 deg after arriving at the door (pose healthy, same origin) | **owner: charge before more motion tests.** Code: a stalled search turn should say "my turn didn't move, battery may be low", not "can't find it" (D3) |
 | two Studio servers | a second `langgraph dev` (19:28) could not get :2024 but kept its workers and a second `/studio_bridge` | killed the orphan; one bridge now |
@@ -263,12 +263,11 @@ same ping (`ping -M do -s 8972`) before the camera goes on it.**
 
 ## 2026-10-03 (night) — the Mitra twin (simulator) and what it found
 
-A laptop Gazebo twin of this rover: github.com/Rakeshreddysr2401/mitra_sim
+A laptop twin of this rover: github.com/Rakeshreddysr2401/mitra_sim
 (private). The laptop is only the WORLD (measured body, lidar, depth camera,
-gyro, the wheels' real slide); THIS code is the brain, run as a second
-instance in the rover container on ROS domain 42 (`~/mitra_sim/jetson/
-sim_stack.sh up|down|status`), beside the real stack on domain 0, with its
-learned state in /tmp/mitra_state (ROVER_STATE_DIR). Every run is judged on
+gyro, the wheels' real slide); THIS code is the brain, then run as a second
+nav-only instance in the rover container on ROS domain 42, beside the real
+stack on domain 0 (since 2026-10-11 the whole stack: `TWIN=1 ./rover up`). Every run is judged on
 the true pose against the true obstacles. Results: mitra_sim docs/STATUS.md.
 
 | found by the twin | status |
@@ -402,6 +401,5 @@ errors, queue) and `objects_remembered`; `fleet.sh check` prints them.
 ## Housekeeping
 
 - The Pi 5 sudo password was typed into a chat session on 2026-09-26: change it.
-- 2026-10-03 tidy of all repos and machines (SYSTEM_OVERVIEW.md §5, C1–C13): done. Left
-  for the owner: delete `~/mitra_sim.handcopy-2026-10-03` on the Jetson (identical to
-  the clone now at `~/mitra_sim`). The older `rover_sim` is retired (2026-10-18).
+- 2026-10-03 tidy of all repos and machines (SYSTEM_OVERVIEW.md §5, C1–C13): done. The
+  leftover hand copy of the twin's Jetson files was deleted 2026-10-18.

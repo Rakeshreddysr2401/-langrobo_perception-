@@ -18,8 +18,8 @@ nothing — only a non-zero velocity does.
 `rover_firmware_v2.ino` reads `wz` as **radians per second** and computes each
 wheel as `vx ± wz × WHEEL_BASE_M/2`, with `WHEEL_BASE_M = 0.34`.
 
-This app was written for an **earlier firmware** (`rover_sim
-contract_bridge.py`) where `wz` was a **PWM fraction**. Its original comment
+This app was written for an **earlier firmware** (an old
+`contract_bridge.py`) where `wz` was a **PWM fraction**. Its original comment
 claimed `WZ = 2.0` gave "~100% PWM per wheel". Against this firmware it gives
 **48%**:
 

@@ -835,7 +835,7 @@ scrubbing sideways need more torque than the rover was being given.
 
 `rover_firmware_v2.ino` reads `wz` as **rad/s** and computes each wheel as
 `vx ± wz × 0.34/2`. The teleop was written for an earlier firmware
-(`rover_sim contract_bridge.py`) where `wz` was a **PWM fraction** — and its own
+(an old `contract_bridge.py`) where `wz` was a **PWM fraction** — and its own
 comment still claims `WZ = 2.0` gives "~100% PWM per wheel".
 
 | WZ | wheel target | duty |

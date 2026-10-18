@@ -1,8 +1,8 @@
 # System overview: the whole robot, every machine, and how clean it is (2026-10-03)
 
-> **2026-10-18:** the laptop is a NEW machine (user `chotesh`, RTX 4050) and the twin runs in
-> **Isaac Sim** (Gazebo and the old `rover_sim` are retired). §2, §3's twin part and §4's
-> laptop table are updated for it; the health check (§5) is the 2026-10-03 snapshot.
+> **2026-10-18:** the twin runs in **Isaac Sim** on a NEW laptop (user `chotesh`, RTX 4050);
+> RViz stays on the old laptop (192.168.1.8). §2, §3's twin part and §4's laptop table are
+> updated for it; the health check (§5) is the 2026-10-03 snapshot.
 
 The one page for "where are we and how does it all fit". It covers the four
 repos on three computers, how they connect, the goal, and an honest check of
@@ -37,7 +37,8 @@ The order it is being built in, from the README and INTELLIGENCE_PLAN.md:
 |---|---|---|---|
 | **Jetson Orin Nano** | 192.168.1.15 | `~/rover` → `-langrobo_perception-`, `rover-v1.1.7` | **the body's brain**: sensors, pose, map, nav2, exact moves, pixel→goal. Everything runs in one Docker container (`rover`, image `orin-nav:1.1`) |
 | **Pi 5** | 192.168.1.16 | `~/ros2_ws` → `pi5_ros2_ws`, `dev-1.4.1` | **the mind**: LangGraph brain (3 agents), voice (STT/TTS/wake word), Telegram, teleop web page, micro-ROS agent for the ESP32 |
-| **Laptop** | DHCP (192.168.1.9 on 2026-10-18), user `chotesh` | `~/mitra_sim` → `mitra_sim`, `isaac` | **a window and a twin**: the robot's hardware in Isaac Sim 5.1 (domain 42), RViz for the twin and the real robot (`./mitra rviz [real]`, needs ros-jazzy-desktop) |
+| **Laptop** | DHCP (192.168.1.9 on 2026-10-18), user `chotesh` | `~/mitra_sim` → `mitra_sim`, `isaac` | **a window and a twin**: the robot's hardware in Isaac Sim 5.1 (domain 42), and later RViz too (`./mitra rviz [real]`, after ros-jazzy-desktop) |
+| **Old laptop** | 192.168.1.8 (DHCP), user `rakhi24` | — (`~/rover_live.sh`, `~/rover_live.rviz`, `~/rover_twin.rviz`, pushed by `./rover view`) | **the RViz station**: `./rover view` (real robot, domain 0) and `TWIN=1 ./rover view` (the twin, domain 42) open RViz here; ROS 2 Jazzy installed |
 | Mac mini | DHCP, `singireddys-mac-mini.local:8080` | (none) | llama.cpp: Gemma 4 12B, LLM + VLM, `--jinja --parallel 4` |
 | ESP32 | micro-ROS over USB serial to the Pi 5 (`/dev/ttyUSB0`) | firmware in `~/rover/phase1/firmware/` | 4-wheel PID, encoders, 500 ms cmd_vel watchdog |
 | D555 camera | 192.168.11.55 (PoE, own subnet) | (none) | stereo IR, depth, colour, **and the gyro** (OPEN_ISSUES #2) |
@@ -123,8 +124,7 @@ truth was (1.003, -0.560, 90.7 deg); the home_real tour reached all 4 goals
 through the 80 cm door and back (pose error <= 9.3 cm) and drove over the 1 cm
 tablet, as the robot would. A twin run starts slam with an empty map
 (`SLAM_FRESH` defaults to 1 under `TWIN=1`: the twin's rover always starts on
-its world's start). Details and decisions: mitra_sim `docs/STATUS.md`. The
-Gazebo pose level and `fleet.sh sim` (the old rover_sim) are retired.
+its world's start). Details and decisions: mitra_sim `docs/STATUS.md`.
 
 ## 4. How each repo is organised
 
@@ -190,9 +190,8 @@ Gazebo pose level and `fleet.sh sim` (the old rover_sim) are retired.
 | C1 | Jetson `ARCHITECTURE.md` | stale: `fusion.py`, NavFn + RPP, "not an EKF" (contradicting its own §5), none of goal_exec / reach / pixel_to_goal / gates / the twin, open faults pointed at the archived TODO | ✅ §0 stack, §1 diagram, §2 topics, §4 node table refreshed; points at OPEN_ISSUES.md and here |
 | C2 | Jetson `OPEN_ISSUES.md`, mitra_sim `docs/STATUS.md` | headed 2026-10-04, work done 2026-10-03 | ✅ both say 2026-10-03 (commit 53c3a99's message still says 10-04; history is not rewritten) |
 | C3 | Jetson `README.md` | status table dated 2026-09-26 | ✅ dated 2026-10-03; close quarters, the brain (B1–B3) and the twin added |
-| C4 | Laptop `rover_sim` | 4 commits never pushed | ✅ pushed (`dev-0.1.1`, 06b8951) |
-| C5 | two sims | `fleet.sh sim` starts the OLDER `rover_sim`; the twin is `mitra_sim` | ✅ `fleet.sh` header + its `sim` output and the Pi 5 CLAUDE.md say which is which. Retiring `rover_sim` stays the owner's call |
-| C6 | `~/mitra_sim` on the Jetson | hand copy of the twin's `jetson/` | ✅ now a git clone; `sim_stack.sh up` warns when it is not a clone, has local edits, or is behind origin; `sim_stack.sh` is executable in git (mitra_sim f74337a). The old copy is at `~/mitra_sim.handcopy-2026-10-03` (identical; delete it when you like) |
+| C4-C5 | the laptop's older simulator | unpushed commits; two sims side by side | ✅ resolved; that simulator is retired (2026-10-18) |
+| C6 | `~/mitra_sim` on the Jetson | hand copy of the twin's `jetson/` | ✅ now a git clone (mitra_sim f74337a); the old hand copy was deleted 2026-10-18 |
 | C7 | Pi 5 repo root | stray screenshot, `ESP_32_frimware/` lock-file dir, `.env*` world-readable (644) with live keys | ✅ screenshot removed (it was an empty Studio page); dir moved to Pi 5 `~/old/`; `.env` and both backups `chmod 600` (kept, not deleted) |
 | C8 | Pi 5 `TODO.md` | header said `dev-1.3.8` | ✅ `dev-1.4.1` |
 | C9 | Pi 5 `object_memory.py` / `survey.py` | looked dead | ✅ **not dead**: the survey is an opt-in feature (`LANGROBO_PHOTO_SURVEY=1`, default off), `survey.py` also owns the vision-tool slot every photo prompt uses, and approach uses object_memory's helpers. The comments in `look.py` / `approach.py` that said every photo feeds memory now say it is opt-in |
@@ -201,7 +200,7 @@ Gazebo pose level and `fleet.sh sim` (the old rover_sim) are retired.
 | C12 | Laptop home | leftovers | ✅ moved to `~/old/` with a README.txt (nothing deleted; `~/LAPTOP.md` was a stale copy that differed from `phase2/LAPTOP.md`) |
 | C13 | doc sprawl | 16 top-level docs on the Pi 5 | ✅ the four voice docs moved to Pi 5 `docs/voice/`; all 31 files referencing them follow. 12 top-level docs remain there |
 
-Commits: Jetson (this one), Pi 5 0cd4503, mitra_sim f74337a, rover_sim pushed. Pi 5 tests 434/434 after.
+Commits: Jetson (this one), Pi 5 0cd4503, mitra_sim f74337a. Pi 5 tests 434/434 after.
 
 ### What is clean in code but open in behaviour
 

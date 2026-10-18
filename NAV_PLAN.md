@@ -107,9 +107,9 @@ held.
 
 **N5 — Stay good: regression.**
 The N0 course is the release gate for every nav2.yaml change: re-run and
-compare CSVs before committing. Optional: the same config on rover_sim for
-planner/controller regressions without the robot (its map frame and
-TwistStamped differ — the frame is the one to watch).
+compare CSVs before committing. Without the robot: the twin runs this same
+nav2.yaml on simulated hardware (mitra_sim `./mitra scenario <world>`, or
+`tools/run_suite.sh` for every world), judged on the true pose.
 *Done:* the release gate is written down in OPERATIONS.md and has been used.
 
 ## Production-grade means (the exit bar)
