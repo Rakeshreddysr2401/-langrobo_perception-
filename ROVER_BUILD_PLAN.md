@@ -156,7 +156,7 @@ Today the same numbers are typed into four places:
 | where | what it holds |
 |---|---|
 | `./rover` | `LIDAR_X/Z/YAW`, and the camera static TF |
-| `phase2/nodes/rover_marker.py` | the RViz model's dimensions |
+| `description/params.yaml` → `rover.urdf` | the RViz model's dimensions (`rover_marker.py` retired for the URDF) |
 | `phase3/config/nav2.yaml` | the footprint |
 | firmware `WHEEL_BASE_M` | the physical track, used for its wheel mixing |
 | Jetson `WHEEL_BASE_ROT_M` | the effective turning width |

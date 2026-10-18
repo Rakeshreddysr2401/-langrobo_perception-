@@ -28,7 +28,7 @@ lidar/build.sh             # one-off: clone + patch + compile inside the image
 | `yaw_calibrate.py` | `LIDAR_YAW` from how the room slides while driving out and back |
 | `yaw_find.py` | `LIDAR_YAW` from a target at the nose; `--watch` for the live readout |
 | `scan_lag.py` | stamp error from registering mid-turn scans against a still one |
-| `pivot_test.py` | grades turns against the walls (`./rover pivot`) — see LOCALIZATION.md |
+| `scan_tools.py` | scan helpers shared by `./rover drive` and `scan_lag.py` (kept from `pivot_test.py`, retired 2026-09-26: the harness grades turns now) |
 
 ## LIDAR_YAW — measured by driving, not by eye
 
