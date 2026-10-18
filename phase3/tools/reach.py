@@ -59,19 +59,30 @@ def main():
     p.pose.position.x, p.pose.position.y = gx, gy
     p.pose.orientation.z, p.pose.orientation.w = math.sin(gth / 2), math.cos(gth / 2)
     print(f'  goal {p.header.frame_id}: ({gx:+.3f}, {gy:+.3f}, {math.degrees(gth):+.1f} deg). THIS DRIVES THE ROVER. Ctrl-C cancels.')
-    # Seeing the node's subscription is not the node seeing us: one goal sent
-    # at once was lost (2026-10-04, twice -- no goal in its log, nothing
-    # moved). Let discovery finish on its side before the one publish.
-    end = time.time() + 0.5
-    while time.time() < end:
-        rclpy.spin_once(n, timeout_sec=0.05)
-    pub.publish(p)
+    # A goal published once can be lost (2026-10-04 twice; 2026-10-18 twice in
+    # a row on the real robot at load 22-27: the node got nothing, nothing
+    # moved). So stamp it (reach echoes the stamp back as goal_stamp) and send
+    # it again until reach_node says it has it -- at most 5 times, 1 s apart.
+    p.header.stamp = n.get_clock().now().to_msg()
+    mine = f'{p.header.stamp.sec}.{p.header.stamp.nanosec:09d}'
+    for k in range(5):
+        pub.publish(p)
+        end = time.time() + 1.0
+        while time.time() < end and not any(s.get('goal_stamp') == mine for s in got):
+            rclpy.spin_once(n, timeout_sec=0.05)
+        if any(s.get('goal_stamp') == mine for s in got):
+            break
+    else:
+        sys.exit('  reach_node did not take the goal (5 tries): is it alive? ./rover nav')
+    got[:] = [s for s in got if s.get('goal_stamp') == mine]
     t0 = time.time()
     seen = 0
     try:
         while True:
             rclpy.spin_once(n, timeout_sec=0.1)
             for s in got[seen:]:
+                if s.get('goal_stamp') not in (None, mine):
+                    continue
                 print(f'  {time.time() - t0:5.1f}s  ' + ', '.join(f'{k} {v}' for k, v in s.items() if k != 't'))
                 if 'result' in s:
                     return 0 if s['result'] == 'reached' else 1
