@@ -20,9 +20,11 @@ cd ~/rover
 IMAGE=orin-nav:1.1 ./rover up       # the previous image, proven on the real robot
 ```
 
-> **2026-10-18:** 1.2 has passed on the twin, not yet on the real robot
-> (ISAAC_ROS_4_6_UPGRADE.md step F), and the board has been switching off a few
-> minutes after boot since a power-supply change (§0 there, OPEN_ISSUES.md).
+> **2026-10-18, owner's decision: 1.2 is THE image** for the robot and the twin
+> (twin: every gate OK, home_real 4/4). The first real-robot run is step F of
+> ISAAC_ROS_4_6_UPGRADE.md; 1.1 is kept only as the rollback until it passes.
+> Open: the board switching off a few minutes after boot since a power-supply
+> change (§0 there, OPEN_ISSUES.md).
 
 It brings up and checks each layer in order: camera (D555 depth) → LiDAR → pose
 → fused pose → slam → nvblox map → nav2 → VLM → ESP32 wheels → Pi 5 teleop +
