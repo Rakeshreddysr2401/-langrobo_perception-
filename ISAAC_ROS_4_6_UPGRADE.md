@@ -128,3 +128,78 @@ clearance 0.7 cm, tablet driven over — kino_sim `docs/STATUS.md`).
 - Isaac ROS Jetson page: https://nvidia-isaac-ros.github.io/repositories_and_packages/isaac_ros_jetson/index.html
 - Forum, NITROS 4.6 missing types on Orin Nano (2026-08-22/24): https://forums.developer.nvidia.com/t/isaac-ros-nitros-4-6-missing-types/380960
 - Forum, roadmap for Isaac ROS Jazzy on Orin: https://forums.developer.nvidia.com/t/roadmap-for-isaac-ros-jazzy-on-orin-devices/375982
+
+## 5. Done 2026-10-18 (Jetson session) — read this first
+
+Owner's calls: skip the §0 stress test; standardise on the packaged Isaac
+cuVSLAM and drop pyCuVSLAM; **no twin tests** (kino_sim is mid-development) —
+the real-robot test comes next, after a power cycle to connect the D555/C1.
+
+- **Binary check before anything:** 4.4's `libcuvslam.so` has ~5280 SVE
+  instructions (the SIGILL); 4.6's has 0 and carries sm_87 + sm_110 GPU code.
+  The "Orin Nano?" question of §2 is answered: it runs here.
+- **`orin-nav:1.2` = `46c9e69f6975`** — what changed is in `docker/README.md`.
+  1.1 untouched. A mains power cut at 08:35 interrupted the install (not a
+  board freeze); it was resumed from the apt cache.
+- **4.6 needed CUDA 13.2**: the 4.4 `isaac-ros-cli` pins block 13.1+, so the
+  CLI went to 2.5 with `ISAAC_ROS_PLATFORM=arm64-jetpack` and the Jetson repo
+  to r39.2, exactly as 4.6's own `Dockerfile.isaac_ros` does.
+- **The VO switch** (`phase1/launch/vo_isaac.launch.py`, `phase1/nodes/vo_isaac.py`,
+  `./rover pose` with `VO=isaac`, the default on 1.2). vo_isaac.py keeps
+  vo_node's contract: `/vo/status` with the same keys, the z-divergence guard
+  (-> `/visual_slam/reset`), the floor-projected, gated map -> odom (slam:=true
+  only). The Isaac node publishes `/vo/odom` itself; it tracks in
+  `vslam_{left,right}_optical`, published under camera0_link with vo_node's
+  axis swap and camera_info's |baseline| — not the driver's infra TF.
+- **Synthetic-stereo test** (textured wall at 2 m, rig sliding 0.10 m/s; no
+  camera, no twin): 30 Hz, 0.100 ± 0.002 m/s tracked, < 1 cm cross-axis,
+  ~210 landmarks, healthy. CPU, % of one core, same feed:
+
+  | | SLAM on | SLAM off |
+  |---|---|---|
+  | vo_node + pyCuVSLAM 16.0 | 29 | 26 |
+  | Isaac 4.6 (cuVSLAM 15.0) + vo_isaac.py | 28 + 5 | 27 + 3 |
+
+  The SLAM backend runs in both modes: Isaac publishes the landmark cloud only
+  from it, and fusion2 drops VO under 20 landmarks. vo_isaac.py reads its
+  topics raw and spins the events executor — the first version cost 22 %.
+  **No CPU win on this feed**; the real D555 path (cv_bridge copies in
+  vo_node) may differ. Measure it.
+- **Not yet known — the real-robot test must answer:** tracking vs LiDAR truth
+  (`./rover record` + `./rover grade`), real CPU, the D555 with emitter off,
+  `ground:=true` (enable_ground_constraint_in_odometry) as an option.
+- Host: the 2026-07-16 `apt upgrade` had been cut off (230 packages half
+  configured, openssh/systemd/docker among them) — repaired. The host's
+  `isaac-ros-cli` 2.3's pins forced Ubuntu's OpenCV 4.6 over JetPack's 4.8
+  and held CUDA at 13.0. The owner keeps the CLI installed-but-dormant, so it
+  is now **2.5 from release-4.6** (`ISAAC_ROS_PLATFORM=arm64-jetpack`) with
+  its OpenCV pin disabled and a pin keeping Ubuntu's python3-rich
+  (orin-nav-stack README §12 has the detail).
+- **JetPack 7.2.1 installed** (510 packages, 14:20-14:28); bootloader capsule
+  applied on the next boot (39.2.1, slot B). Host: 0 updates pending.
+- **JetPack 7.2.1 regression, fixed in `./rover`:** `libnvcuvid.so.1` moved
+  to `/opt/nvidia/l4t-gpu-libs/openrm/` and is now handed to containers only
+  on the openrm driver (this Orin is nvgpu). The images' VPI / NITROS -- so
+  visual_slam and nvblox -- would not load. `start_container` bind-mounts it
+  back to where 39.2.0 had it.
+- **Real robot on 1.2 (15:00, standing still):** camera 30 Hz, Isaac VO 30 Hz
+  healthy (111-507 landmarks, ~3 mm in 20 s), lidar 10 Hz, fused 20 Hz,
+  health.py all ok, fusion accepted 115 VO fixes / rejected 0. CPU: tracker
+  11 % + vo_isaac 3 % of a core (synthetic feed: 27 + 3).
+- **nvblox 4.6 regression, fixed in `./rover`:** its `libnvblox_ros_lib.so`
+  (280 MB) carries GPU code for **sm_75 only** -- 4.4's (1.1) had sm_87. The
+  driver JIT-compiles it from PTX on first use: ~4 min at 100 % CPU, during
+  which the D555's IR/depth collapsed (twice; `./rover camera` recovered it).
+  The JIT cache lived in the container, so EVERY bring-up paid it.
+  `start_container` now mounts `~/.cache/rover-cuda/$NAME` on
+  `/root/.nv/ComputeCache` with `CUDA_CACHE_MAXSIZE=4 GB`: compiled once
+  (47 MB), a fresh container then maps straight away. Report it upstream.
+- **Full stack on 1.2, standing still (16:08):** IR 28, VO 25 (healthy),
+  gyro 200, scan 10, wheels 20, fused 20, depth->map 15.6, grid 4.8,
+  YOLO (cuda) 5.1 Hz; health.py all ok, fusion VO fixes 1726 accepted /
+  0 rejected. **Still to run:** a driven `record` + `grade` (owner's OK).
+- Lesson: `ros2 topic hz` on 896x504 images UNDER-reports on a loaded Orin
+  (Python cannot keep up) -- judge the camera by `/vo/status` rate_hz and
+  `/depth_gate/passed`, small messages.
+- `orin-nav:0.0.2` deleted (1.1 + a 1.92 MB layer of runtime leftovers;
+  nothing used it). 1.1 stays: rollback and the twin.

@@ -53,7 +53,14 @@
 # failure names itself.
 set -eo pipefail
 
-IMAGE=${IMAGE:-orin-nav:1.1}
+# orin-nav:1.2 (2026-10-18) = 1.1 + Isaac ROS 4.6 + CUDA 13.2, made by docker
+# commit like 1.1 (ISAAC_ROS_4_6_UPGRADE.md). Its visual odometry is the
+# packaged Isaac cuVSLAM (VO=isaac); 1.1's is the pyCuVSLAM wheel (VO=pycuvslam)
+# -- 1.1's Isaac 4.4 node is a Thor build and SIGILLs here, and 1.2 has no wheel.
+# The TWIN stays on 1.1 until it is moved on purpose: it is mid-development.
+# Roll the robot back with:  IMAGE=orin-nav:1.1 ./rover up
+IMAGE=${IMAGE:-$([ "${TWIN:-0}" = 1 ] && echo orin-nav:1.1 || echo orin-nav:1.2)}
+VO=${VO:-$([ "$IMAGE" = orin-nav:1.1 ] && echo pycuvslam || echo isaac)}
 NAME=${NAME:-rover}
 LAPTOP_USER=${LAPTOP_USER:-rakhi24}   # LAPTOP_IP is DISCOVERED, not fixed: DHCP moves it
 PI5_HOST=${PI5_HOST:-192.168.1.16}    # fixed — unlike the laptop, not on DHCP
@@ -137,9 +144,10 @@ if [ "$TWIN" = 1 ]; then
   echo "  ── TWIN: the twin on ROS domain $DOMAIN (container $NAME). The real robot is not touched. ──"
 fi
 
-# The cuvslam wheel ships its own libcuvslam.so and CUDA-12 userspace libs, and
-# they must come BEFORE Isaac ROS's own build in /opt/ros/jazzy — that one is
-# compiled for Thor and will not run on this Orin.
+# VO=pycuvslam only (orin-nav:1.1): the cuvslam wheel ships its own
+# libcuvslam.so and CUDA-12 userspace libs, and they must come BEFORE Isaac
+# ROS's own build in /opt/ros/jazzy — in 1.1 that one is compiled for Thor and
+# will not run on this Orin.
 CU=/usr/local/lib/python3.12/dist-packages
 CU12="$CU/cuvslam:$CU/nvidia/cuda_runtime/lib:$CU/nvidia/cublas/lib:$CU/nvidia/cusolver/lib:$CU/nvidia/cusparse/lib:$CU/nvidia/nvjitlink/lib:$CU/nvidia/nvtx/lib"
 
@@ -337,12 +345,32 @@ start_container(){
     [ "$(docker inspect -f '{{.State.Running}}' rover 2>/dev/null)" = true ] \
       && echo "  ! the REAL stack's container is running too: both share the Jetson's GPU and 8 GB."
   fi
+  # JetPack 7.2.1 (L4T 39.2.1) moved libnvcuvid.so.1 from
+  # /usr/lib/aarch64-linux-gnu/nvidia/ to /opt/nvidia/l4t-gpu-libs/openrm/, and
+  # its new nv-load-gpu-libs.sh hands it to containers (l4t.csv) only on the
+  # openrm driver -- never on this Orin, which is nvgpu. The images' VPI and
+  # NITROS (so isaac_ros_visual_slam and nvblox) link it and fail to load
+  # without it (2026-10-18). Nothing here decodes video: it only has to load,
+  # as it did under 39.2.0. So put it back where 39.2.0 had it. The runtime
+  # reads only devices/drivers/l4t.csv, and l4t.csv is rewritten every boot.
+  local nvcuvid=()
+  local nvcuvid_host=/opt/nvidia/l4t-gpu-libs/openrm/libnvcuvid.so
+  [ -f "$nvcuvid_host" ] && nvcuvid=(-v "$nvcuvid_host":/usr/lib/aarch64-linux-gnu/nvidia/libnvcuvid.so.1:ro)
+  # Isaac ROS 4.6's nvblox ships GPU code for sm_75 only (4.4's, in 1.1, had
+  # sm_87 -- this Orin). The driver JIT-compiles its 280 MB library from PTX on
+  # first use: minutes at 100 % CPU, and that load knocked the D555's IR and
+  # depth over twice (2026-10-18). The result is cached in ~/.nv/ComputeCache --
+  # inside the container, which every bring-up recreates. Keep it on the host,
+  # one per container name, and big enough to hold it, so it compiles ONCE.
+  local cuda_cache="$HOME/.cache/rover-cuda/$NAME"
+  mkdir -p "$cuda_cache"
   # phase1/ is mounted READ-ONLY: edit a node on the host, restart the layer,
   # no rebuild. The image has no build recipe, so it must never be modified.
   docker run -d --name "$NAME" --entrypoint /bin/bash \
     --runtime=nvidia --network=host --privileged \
     -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all -e NVIDIA_DISABLE_REQUIRE=1 \
-    -e ROS_DOMAIN_ID=$DOMAIN "${twin_mount[@]}" \
+    -e ROS_DOMAIN_ID=$DOMAIN "${twin_mount[@]}" "${nvcuvid[@]}" \
+    -v "$cuda_cache":/root/.nv/ComputeCache -e CUDA_CACHE_MAXSIZE=4294967296 \
     -v "$HOSTSRC":$SRC:ro \
     -v "$REPO/phase2":$SRC2:ro \
     -v "$REPO/phase3":$SRC3:ro \
@@ -468,14 +496,24 @@ pose)
   echo "[pose] fixed frames from description/params.yaml (robot_state_publisher)"
   tf_up
 
-  echo "[pose] visual odometry  (stereo IR -> /vo/odom, TF odom -> base_link)"
+  echo "[pose] visual odometry  (stereo IR -> /vo/odom, $VO)"
   kill_match "[v]o_node.py"
+  kill_match "[v]o_isaac.py"
+  kill_match "[v]o_isaac.launch.py"
+  kill_match "[v]slam_container"
   # ${SLAM:-true} is expanded HERE, on the host, not escaped into the container.
   # It used to be \${SLAM:-true}, which `docker exec bash -lc` expanded inside
   # the container where SLAM is never set -- so it always resolved to true and
   # `SLAM=false ./rover pose` did nothing at all, silently. That knob is what
   # hands map -> odom to slam_toolbox, so it has to actually work.
-  dexec "export LD_LIBRARY_PATH=$CU12:\$LD_LIBRARY_PATH; exec python3 $SRC/nodes/vo_node.py --ros-args -p publish_tf:=false -p slam:=${SLAM:-true} > /tmp/vo.log 2>&1"
+  if [ "$VO" = pycuvslam ]; then
+    dexec "export LD_LIBRARY_PATH=$CU12:\$LD_LIBRARY_PATH; exec python3 $SRC/nodes/vo_node.py --ros-args -p publish_tf:=false -p slam:=${SLAM:-true} > /tmp/vo.log 2>&1"
+  else
+    # Isaac ROS cuVSLAM tracks and publishes /vo/odom; vo_isaac.py gives it its
+    # optical frames and owns /vo/status and (slam:=true) map -> odom.
+    dexec "exec ros2 launch $SRC/launch/vo_isaac.launch.py > /tmp/vslam.log 2>&1"
+    dexec "exec python3 $SRC/nodes/vo_isaac.py --ros-args -p slam:=${SLAM:-true} > /tmp/vo.log 2>&1"
+  fi
 
   echo "[pose] gyro  (D555 IMU, re-framed into base_link -> /gyro/base)"
   kill_match "[g]yro_node.py"
@@ -705,9 +743,9 @@ slam)
   # slam_toolbox is the one we want: it corrects against walls, every scan,
   # rather than only when cuVSLAM recognises a place (15-27 closures a session
   # since TODO 23 -- READINESS.md). So cuVSLAM's must be turned off, not this one.
-  if docker exec "$NAME" bash -lc 'pgrep -af "[v]o_node.py" | grep -q "slam:=true"' 2>/dev/null; then
+  if docker exec "$NAME" bash -lc 'pgrep -af "[v]o_(node|isaac).py" | grep -q "slam:=true"' 2>/dev/null; then
     echo
-    echo "  ✗ cuVSLAM is already publishing map -> odom (vo_node has slam:=true)."
+    echo "  ✗ cuVSLAM is already publishing map -> odom (vo_node/vo_isaac has slam:=true)."
     echo "    Two owners of one transform makes TF non-deterministic — the pose"
     echo "    would flip between visual loop closure and scan matching."
     echo
