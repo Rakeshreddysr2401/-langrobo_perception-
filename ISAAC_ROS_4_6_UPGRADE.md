@@ -5,6 +5,11 @@ get onto the release that officially supports this board, and see whether the
 packaged cuVSLAM can replace our pyCuVSLAM workaround — **without risking the
 working robot**. Nothing below has been done yet except where it says so.
 
+> **2026-10-18, later:** the laptop's twin is being rebuilt on Isaac Sim 6.2 + Isaac Lab 3.0
+> (the Isaac Sim 5.1 stack was removed; the old twin is git tag `isaacsim5-final` in
+> kino_sim). Until the new twin passes its checks, only step **A** below can run; **B, C and
+> E wait** for it. The twin keeps the same cables and topics, so nothing here changes.
+
 ## 0. Gate: the Jetson must be stable first
 
 Since a power-source change on 2026-10-18 the Jetson froze / dropped off WiFi
