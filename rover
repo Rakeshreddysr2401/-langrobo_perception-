@@ -153,7 +153,17 @@ CU12="$CU/cuvslam:$CU/nvidia/cuda_runtime/lib:$CU/nvidia/cublas/lib:$CU/nvidia/c
 
 # A stale ROS_DISCOVERY_SERVER makes nodes silently invisible to each other,
 # which looks exactly like a crashed node. Clear it on every command.
-ENVSET="unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE; export ROS_DOMAIN_ID=$DOMAIN; source /opt/ros/jazzy/setup.bash;"
+#
+# FASTDDS_BUILTIN_TRANSPORTS=UDPv4: no shared memory between the container's
+# own processes. FastDDS's SHM segments are 512 KB; a D555 depth frame is
+# ~900 KB, IR ~450 KB, and once a reader stalls or dies mid-read the segment
+# stays full: every SHM reader then gets NO images while small messages
+# (camera_info) still flow. 2026-10-18: IR and depth "stopped" a minute or
+# two into every bring-up -- over UDP the same probe got 30 Hz of each, from
+# the same driver, at the same moment. (The 2026-10-10 "UDP-only worked"
+# above, kill_match, was the same failure.) The Pi 5 and laptop were UDP
+# already; this only changes traffic inside the container.
+ENVSET="unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE; export FASTDDS_BUILTIN_TRANSPORTS=UDPv4; export ROS_DOMAIN_ID=$DOMAIN; source /opt/ros/jazzy/setup.bash;"
 
 dexec(){ docker exec -d "$NAME" bash -lc "$ENVSET $1"; }
 rexec(){ docker exec    "$NAME" bash -lc "$ENVSET $1"; }
@@ -419,12 +429,19 @@ camera)
   else
   echo "[camera] D555 — stereo IR + depth + motion"
   echo "         emitter OFF and sync OFF; both are load-bearing, see phase1/README.md"
+  # COLOUR 448x252x15. It was 424x240x15 from 2026-09-06 -- a D4xx profile the
+  # D555 does not offer, so the driver logged "invalid" and fell back to
+  # 896x504x30: ~40 MB/s of colour on top of IR 27 + depth 27, near the gigabit
+  # link's limit. On 2026-10-18 the link ran 82 MB/s and the D555 dropped BOTH
+  # IR streams (colour and depth kept flowing) about a minute into every VO run.
+  # 448x252x15 is the D555's low-res profile (~5 MB/s). The valid list:
+  #   ros2 param describe /camera/camera0 rgb_camera.color_profile
   dexec 'printf "{\"context\":{\"dds\":{\"enabled\":true,\"domain\":0}}}" > ~/.realsense-config.json;
          export LD_LIBRARY_PATH=/root/librealsense/install/lib:$LD_LIBRARY_PATH;
          exec ros2 launch realsense2_camera rs_launch.py camera_name:=camera0 \
             enable_infra1:=true enable_infra2:=true depth_module.infra_profile:=896x504x30 \
             depth_module.emitter_enabled:=false depth_module.laser_power:=0.0 \
-            enable_depth:=true enable_color:=true rgb_camera.color_profile:=424x240x15 \
+            enable_depth:=true enable_color:=true rgb_camera.color_profile:=448x252x15 \
             align_depth.enable:=true \
             enable_motion:=true enable_sync:=false > /tmp/camera.log 2>&1'
   fi
@@ -1212,7 +1229,10 @@ PY
   # auth cookie waiting in the runtime dir? That cookie is precisely what the
   # on-demand path sets up in advance, and starting rviz2 against it is what
   # spawns Xwayland.
-  xw=$(timeout 15 ssh $LSSH "$LAPTOP_USER@$ip" 'pgrep -a Xwayland 2>/dev/null | head -1' 2>/dev/null || true)
+  # -u $(id -u): OUR Xwayland only. The login screen runs one too, as gdm
+  # (2026-10-18: :1024, /run/user/120/...), and RViz started against that dies
+  # with "Authorization required" instead of the "log in there" below.
+  xw=$(timeout 15 ssh $LSSH "$LAPTOP_USER@$ip" 'pgrep -a -u "$(id -u)" Xwayland 2>/dev/null | head -1' 2>/dev/null || true)
   if [ -n "$xw" ]; then
     disp=$(echo "$xw" | grep -oE ' :[0-9]+' | head -1 | tr -d ' ' || true)
     auth=$(echo "$xw" | sed -nE 's/.* -auth ([^ ]+).*/\1/p')
@@ -1223,6 +1243,8 @@ PY
       echo SSH_OK
       for s in $(loginctl list-sessions --no-legend 2>/dev/null | awk "{print \$1}"); do
         [ "$(loginctl show-session "$s" -p Active --value 2>/dev/null)" = yes ] || continue
+        # ours, not the login screen's: gdm's greeter is an active wayland session too
+        [ "$(loginctl show-session "$s" -p User --value 2>/dev/null)" = "$(id -u)" ] || continue
         case "$(loginctl show-session "$s" -p Type --value 2>/dev/null)" in
           wayland|x11) echo GRAPHICAL; break ;;
         esac

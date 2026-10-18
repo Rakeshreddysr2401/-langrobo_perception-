@@ -203,3 +203,16 @@ the real-robot test comes next, after a power cycle to connect the D555/C1.
   `/depth_gate/passed`, small messages.
 - `orin-nav:0.0.2` deleted (1.1 + a 1.92 MB layer of runtime leftovers;
   nothing used it). 1.1 stays: rollback and the twin.
+- **The "D555 goes half-alive" episodes were not the camera (16:16-16:50).**
+  IR (then depth) stopped a minute or two into every bring-up while
+  `camera_info` kept 30 Hz. A probe with `FASTDDS_BUILTIN_TRANSPORTS=UDPv4`
+  got IR and depth at 30 Hz from the same driver at the same moment; the
+  default (shared-memory) probe got nothing: a full 512 KB SHM segment, the
+  2026-10-10 "UDP-only worked" failure again. `ENVSET` now sets UDPv4 for
+  everything in the container. Same day: the colour profile `424x240x15`
+  (a D4xx one, rejected since 2026-09-06) silently ran colour at 896x504x30,
+  ~40 MB/s on a link already carrying 54; it is `448x252x15` now (link 82 ->
+  58 MB/s). After both, the full stack ran IR 30.2, depth 30.2, VO 30.1 Hz.
+- `./rover view` took the login screen's Xwayland (gdm, `:1024`) for ours and
+  died with "Authorization required"; it now only looks at the user's own
+  Xwayland and sessions, and says "nobody is logged in" when that is true.
