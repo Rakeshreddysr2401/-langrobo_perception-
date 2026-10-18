@@ -112,6 +112,7 @@ def run(goal, P, eff, w_dead, rng, segs, t_max=90.0, ex=None, appear=None, turn_
     ex.set_goal(goal, turn_only=turn_only)
     ex.max_vx = 0.0
     t = 0.0
+    pts = None                                 # scanned on even ticks, from the first
     while ex.state != 'done' and t < t_max:
         if appear and t >= appear[0]:
             segs = segs + appear[1]

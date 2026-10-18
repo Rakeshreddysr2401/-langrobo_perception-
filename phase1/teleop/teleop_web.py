@@ -308,7 +308,7 @@ def main():
     # Without these, MANUAL's zeros and goal_exec's commands fought over
     # /cmd_vel at ~10 Hz each and the rover jerked; reach retried against the
     # zeros for up to 5 min.
-    stop_pubs = [node.create_publisher(Empty, t, 10) for t in ('/reach/cancel', '/goal_exec/cancel')]
+    stop_pubs = [node.create_publisher(Empty, t, 10) for t in ('/reach/cancel', '/goal_exec/cancel', '/follow/cancel')]
 
     def tick():
         if CANCEL_NAV.is_set():          # taking manual control -> hard-cancel nav2

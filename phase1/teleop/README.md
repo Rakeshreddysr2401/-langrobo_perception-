@@ -74,8 +74,8 @@ password.
 
 ---
 
-## Never run the keepalive at the same time
+## Never run a second /cmd_vel publisher at the same time
 
-`logs/keepalive.py` publishes zero `/cmd_vel` continuously. It would interleave
-with real commands and make the rover stutter. It exists only as a fallback if a
-future firmware flash regresses the executor fix.
+Anything else publishing `/cmd_vel` (the old `logs/keepalive.py`, removed
+2026-09-26, streamed zeros) interleaves with teleop's commands and makes the
+rover stutter.

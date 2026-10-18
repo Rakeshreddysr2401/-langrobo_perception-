@@ -3,9 +3,9 @@
 
     python3 health_probe.py [window_s]
 
-`./rover status` runs `ros2 topic hz` once per topic, one after another: 14
-topics x 12 s is over two minutes, too slow for anything that must keep
-watching. This subscribes to all of them at once, raw (no message decoding, so
+`./rover status` used to run `ros2 topic hz` once per topic, one after another:
+14 topics x 12 s, over two minutes, too slow for anything that must keep
+watching (it uses this since 2026-10-18). This subscribes to all of them at once, raw (no message decoding, so
 images cost nothing), and counts arrivals. Also reports whether /cmd_vel is
 non-zero, so a caller can avoid restarting things while the rover drives.
 

@@ -225,36 +225,33 @@ Serial @115200 prints `IN tgt … | OUT velL/velR odom(...) | enc LF/LR/RF/RR` a
 - Spin **360°** in place; adjust `WHEEL_BASE_M` until odom yaw matches.
 - If speed oscillates or lags, tune PID `Kp` / `Ki`.
 
-### Phase 3 — fuse into the Jetson EKF
-Once `/wheel_odom` is trustworthy, add to `orin-nav-stack/config/ekf.yaml`:
-```yaml
-    # wheel odometry (ESP32 encoders) — fuse body vx
-    odom1: /wheel_odom
-    odom1_config: [false, false, false,
-                   false, false, false,
-                   true,  false, false,
-                   false, false, false,
-                   false, false, false]
-    odom1_differential: false
-    odom1_relative: false
-    odom1_queue_size: 10
-```
-(vx only; yaw-rate stays with the D555 gyro, which is better through pivots where
-wheels scrub.) Then bring up fusion: `./run_stack.sh fuse`.
+### Phase 3 — fusion (done differently)
+The planned robot_localization EKF (`orin-nav-stack/config/ekf.yaml`) was never
+kept: the wheels are fused by `fusion2` (`./rover fused`,
+phase1/nodes/fusion2_node.py) with LiDAR odometry and the gyro, and fusion2
+owns `odom→base_link`. LOCALIZATION.md has the measurements.
 
 ---
 
 ## 9. ROS interface summary
 
-| Topic | Type | Dir (ESP32) | QoS | Purpose |
-|---|---|---|---|---|
-| `/cmd_vel` | geometry_msgs/Twist | subscribe | best_effort | target body vx, wz |
-| `/wheel_odom` | nav_msgs/Odometry | publish | best_effort | encoder odom (frame odom→base_link), twist vx/vyaw for EKF — see §0 size caveat |
+As flashed (`rover_firmware_v2.ino`; three subscriptions, four publishers —
+the micro-ROS entity caps are why it is that short, and why there are no servos):
+
+| Topic | Type | Dir (ESP32) | Purpose |
+|---|---|---|---|
+| `/cmd_vel` | geometry_msgs/Twist | subscribe | target body vx, wz |
+| `/pid_gains` | geometry_msgs/Vector3 | subscribe | live PID tuning |
+| `/reset_odom` | geometry_msgs/Vector3 | subscribe | zero the on-board odometry |
+| `/wheel_state` | geometry_msgs/Vector3 | publish | measured velL, velR (m/s), commanded vx |
+| `/wheel_ticks` | geometry_msgs/Quaternion | publish | cumulative counts x=LF y=LR z=RF w=RR |
+| `/wheel_odom` | geometry_msgs/Vector3 | publish | x, y (m), z = theta, integrated at 50 Hz (not nav_msgs/Odometry: ~700 B, over the 512 B micro-ROS MTU) |
+| `/rover_diag` | geometry_msgs/Vector3 | publish | loop Hz, free heap KB, agent state |
 
 Watchdog: no `/cmd_vel` for 500 ms → motors stop. Agent-reconnect state machine drops
 only after 3 consecutive missed pings (reduces WiFi flapping) and recovers from agent
-restart / Pi5 reboot / WiFi drop without power-cycling. This node publishes **no TF** —
-the Jetson robot_localization EKF owns `odom→base_link` (`config/ekf.yaml`).
+restart / Pi5 reboot without power-cycling. This node publishes **no TF** —
+fusion2 on the Jetson owns `odom→base_link`.
 
 ---
 

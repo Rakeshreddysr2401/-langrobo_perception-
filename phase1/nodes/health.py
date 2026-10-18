@@ -60,7 +60,7 @@ def main():
     lidar_ok = [g.get('lidar_ok') for g in got]
     sd, sdd = s.get('sd_cm'), s.get('sd_deg')
     if not any(lidar_ok):
-        print(f'  pose      ✗ LiDAR odometry unhealthy for the whole window: running on gyro + wheels')
+        print('  pose      ✗ LiDAR odometry unhealthy for the whole window: running on gyro + wheels')
         print(f'              + VO (sd {sd} cm / {sdd} deg). Check ./rover lidar and /lidar/odom_status.')
         rc = 1
     else:

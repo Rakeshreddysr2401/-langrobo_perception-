@@ -11,25 +11,32 @@ that. Built one tested layer at a time; every claim below is measured.
 
 ## Start the rover — one command
 
-Power on the D555, Jetson, Pi 5, ESP32 (motor supply too) and the laptop, then on the Jetson:
+Power on the D555, Jetson, Pi 5, ESP32 (motor supply too) and the laptop, then
+from the Pi 5 (`cd ~/ros2_ws && ./scripts/fleet.sh rover`), or on the Jetson:
 
 ```bash
 cd ~/rover
-./rover up --voice
+./rover up                          # orin-nav:1.2 (Isaac ROS 4.6) by default since 2026-10-18
+IMAGE=orin-nav:1.1 ./rover up       # the previous image, proven on the real robot
 ```
+
+> **2026-10-18:** 1.2 has passed on the twin, not yet on the real robot
+> (ISAAC_ROS_4_6_UPGRADE.md step F), and the board has been switching off a few
+> minutes after boot since a power-supply change (§0 there, OPEN_ISSUES.md).
 
 It brings up and checks each layer in order: camera (D555 depth) → LiDAR → pose
 → fused pose → slam → nvblox map → nav2 → VLM → ESP32 wheels → Pi 5 teleop +
 brain → LangGraph Studio → Pi 5 voice + Bluetooth speaker → RViz on the laptop
 → ESP32 again. About 8 minutes. A layer that fails stops it and names itself.
-`./rover up` alone skips the voice check.
+`--voice` also (re)checks the Pi 5's voice; it starts at boot on its own anyway.
 
 - It **restarts the container** — for a cold power-on, not a stack that is already up.
   One layer failed? Fix it and continue by hand from that layer (STARTUP.md §2), don't re-run `up`.
 - At the end it prints the **Studio** link. It needs two steps: on the laptop
   `ssh -N -L 2024:localhost:2024 rakhi24@192.168.1.16`, then open
   <https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024>.
-- Talk to it: "**Kino**, what time is it?" — the name has to be in the sentence.
+- Talk to it: "**Kino**, what time is it?" — since 2026-10-12 every sentence reaches
+  the brain (no wake word yet); the name makes it certain the sentence is for it.
 - **Before anything drives:** `./rover wheels --nudge` (moves ~7 cm) — a live ESP32 link
   does not prove the motor supply is on. Teleop must be in AUTO.
 - Stop: `./rover stop` (OPERATIONS.md).
@@ -75,7 +82,8 @@ The Pi 5 brain (LangGraph, voice, teleop) is a separate repo: `~/ros2_ws` on the
 
 ```bash
 ./rover up                         # everything, cold (see STARTUP.md for the layers)
-./rover status                     # what is alive, and whether the pose is honest
+./rover health                     # every layer's rate in one ~15 s pass
+./rover status                     # the same rates + processes, and whether the pose is honest
 
 ./rover record return              # move it by hand, put it back on the tape: all ~0
 ./rover grade                      # the newest run vs LiDAR truth

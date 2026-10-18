@@ -70,9 +70,9 @@ if "imu_base" in d:
     m = d["imu_base"]
     w, a = m.angular_velocity, m.linear_acceleration
     print(f"   gyro   x {math.degrees(w.x):+8.3f}  y {math.degrees(w.y):+8.3f}  z {math.degrees(w.z):+8.3f}  deg/s")
-    print(f"          (z is yaw rate — the only axis used)")
+    print("          (z is yaw rate — the only axis used)")
     print(f"   accel  x {a.x:+8.3f}  y {a.y:+8.3f}  z {a.z:+8.3f}  m/s^2")
-    print(f"          (z should read about +9.8 = gravity, proving level)")
+    print("          (z should read about +9.8 = gravity, proving level)")
     print(f"   rate   {cnt.get('imu_base',0)/el:.1f} Hz")
 else:
     print("   NOT PUBLISHING")

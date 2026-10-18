@@ -234,7 +234,7 @@ it; `./rover drive` plans around it. See [LOCALIZATION.md](LOCALIZATION.md).
 | costmap topic silent but the node is fine | `always_send_full_costmap: false` — it only sends deltas after the first full map |
 | `Invalid frame ID "odom"` at startup | a race; the costmaps come up before the TF is flowing and recover |
 | rover sits still after a goal | stale row: it pivots since 2026-08-22. Look at the recoveries in `./rover logs nav` |
-| goal rejected as unreachable | the GOAL cell is blocked, or the rover is standing in one. `logs/around.py` shows which; `logs/where.py` lists what IS reachable |
+| goal rejected as unreachable | the GOAL cell is blocked, or the rover is standing in one. RViz's global costmap shows which; `./rover reach` says why in its status line |
 | RViz costmap frozen while the rover moves | a nav2 process died (planner_server hosts the global costmap). nav2 now runs under `nav2_supervise.sh`: any death restarts it whole within ~20 s; restarts are in `/tmp/nav_restarts.log` (in the container) |
 | planner_server segfaults (exit -11) | changing `footprint_padding` live with `ros2 param set`. **Don't**: edit nav2.yaml and `./rover nav` |
 | a gap the rover fits is solid cyan in RViz | cyan = the centre may not go there. A passable gap shows pink edges, cyan bands, and a coloured strip in the middle. Too tight for nav2's 5 cm padding: `./rover pass` (LOCALIZATION.md §13) |
@@ -553,13 +553,13 @@ ignores the field.
   `/cmd_vel` newer than 500 ms. An idle rover cannot creep.
 - **Lift the rover onto blocks** for any wheel test. It is safer than clear floor
   and the wheels spin freely.
-- **Never run `logs/keepalive.py` while teleoperating.** It publishes zero
-  `/cmd_vel` continuously, which would interleave with real commands. It exists
-  only as a fallback if a future flash regresses the executor fix.
+- **Never run anything that streams zero `/cmd_vel` while teleoperating**
+  (the old `logs/keepalive.py`, removed 2026-09-26, was one): it interleaves
+  with real commands and makes the rover stutter.
 
 ## Health, watchdog, saved room (2026-10-16)
 
-- `./rover health` — every layer's rate in one ~15 s pass (`status` takes 2+ min).
+- `./rover health` — every layer's rate in one ~15 s pass (`status` uses the same pass since 2026-10-18, plus processes and the pose check).
 - `rover-watchdog` (systemd, installed with `sudo ops/install_services.sh`) probes
   every 30 s, serves `http://<jetson>:8099/` (JSON at `/health`), and logs changes
   to `logs/watchdog.jsonl`. **Observe only.** To let it restart a dead layer:

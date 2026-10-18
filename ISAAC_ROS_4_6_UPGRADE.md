@@ -239,7 +239,8 @@ Twin = kino_sim `main` on Isaac Sim 6.2 (the 5.1 twin is retired). Jetson in 15 
 
   4/4 reached on both; the tablet (OPEN_ISSUES #3) as on every twin since 10-11.
   Open: the door pass at 0.2-1.2 cm (5.1 twin: 2.8 cm) and 93-106 s (5.1: 27 s).
-- The twin now defaults to 1.2 (`./rover`); 1.1 is the rollback only. The owner
+- `./rover` now defaults to 1.2 for the twin AND the real robot (`IMAGE=${IMAGE:-orin-nav:1.2}`);
+  1.1 is the rollback only (`IMAGE=orin-nav:1.1 ./rover up`). The owner
   deletes 1.1 after one more real-robot run on 1.2 (step F).
 - Twin camera rate: stereo 20-25 Hz, not 30 -- the twin's own limit (Python
   stand-in driver + laptop->router->Jetson WiFi ~6 MB/s), not the robot's.

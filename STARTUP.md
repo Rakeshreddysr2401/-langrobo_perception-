@@ -74,9 +74,9 @@ Two more traps worth knowing before you start:
 
 - **The D555 answers ping while completely dead.** It is a PoE network device
   speaking DDS, not a USB camera. Never diagnose it with `lsusb` or `ping`.
-- **`./rover status` on a cold container is slow, not broken.** It walks eleven
-  topics at ~12 s each — over two minutes to print a table of dashes. Start a
-  layer first; the layer gates are the fast answer.
+- **`./rover status` on a cold container prints a table of dashes** — nothing is
+  publishing yet. It measures every topic in one ~12 s pass (since 2026-10-18;
+  it used to take 2+ min). Start a layer first; the layer gates name what failed.
 
 ---
 
@@ -387,25 +387,17 @@ A PID that did not change means the restart did not happen.
 
 ## 6. LangGraph Studio — the link you asked for
 
-Not started at boot. `agent_node` runs the graph in-process and needs no server;
-Studio is a **separate dev server** you start by hand.
+`./rover up` starts it on the Pi 5 every time (its `[studio]` step); it is
+not needed for the robot to work — `agent_node` runs the graph in-process —
+it is a **dev server** that draws the graph and lets you step it.
 
-The launcher lives at `~/ros2_ws/scripts/start_studio.sh` on the Pi 5, and a
-version-controlled copy is in [`phase4/pi5/`](phase4/pi5/).
-
-**The Pi 5 repo also has its own `./scripts/dev.sh`**, which predates this one
-and does more: it starts a micro-ROS agent alongside Studio and uses the Fast
-DDS Discovery Server on `127.0.0.1:11811` (see that repo's `NETWORKING.md`).
-There is also `./scripts/dev_voice.sh`, which adds STT/TTS so you can talk to
-the graph while stepping it.
-
-Use `dev.sh` when the brain is **stopped** and Studio is your only client —
-that is what it is written for, and its header warns against running it
-alongside `langrobo-brain` because both drive `/cmd_vel` and both open
-the micro-ROS agent on the ESP32's serial port. `start_studio.sh` is the variant for the situation we are
-actually in: `agent_node` already running, so **no** micro-ROS agent, plain
-SUBNET discovery to match the running brain, and a separate episodic store.
-Read §6's warning about two `/cmd_vel` publishers before using either.
+The launcher is the Pi 5 repo's `~/ros2_ws/scripts/start_studio.sh` (one
+Studio only: a second start sees :2024 answering and exits). It runs beside
+the live brain: no micro-ROS agent, plain multicast DDS like everything else.
+The Pi 5's `./scripts/dev.sh` is the variant for when the brain is **stopped**
+(it also starts a micro-ROS agent). Never run Studio's graph and the brain's
+both driving: both publish `/cmd_vel`, and only `agent_node` hears the
+nav-done callback.
 
 ### Start it on the Pi 5
 

@@ -109,7 +109,6 @@ def main():
             if n.nearest() < 0.36:
                 print('  ✗ something inside 0.36 m: stopping the test'); n.stop(); return 1
             p0 = n.pose()
-            tstart = time.time()
             n.drive(0.0, sgn * wz, 2.0)
             gz_t = [t for t, _ in n.gz]
             w = n.rate(gz_t[-1] - 1.2, gz_t[-1], bias) if gz_t else float('nan')

@@ -1,4 +1,4 @@
-# Open issues — where things stand, 2026-10-09
+# Open issues — where things stand (newest first; last updated 2026-10-18)
 
 How the rover plans and moves, why it is limited, and the fix order F1-F5: [NAV_GUIDE.md](NAV_GUIDE.md) (2026-10-11).
 

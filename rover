@@ -34,7 +34,7 @@
 #   ./rover voice      Pi 5 STT/TTS + the speaker, on its own (safe any time —
 #                      it touches nothing on the Jetson and skips if already up)
 #   ./rover logs <n>   tail a layer's log (camera|vo|gyro|fused|lidar|slam)
-#   ./rover health     every layer's rate in ONE pass (~15 s), instead of status's 2+ min
+#   ./rover health     every layer's rate in ONE pass (~15 s)
 #   ./rover watchdog   start|stop|pause|resume|status|act — watches the layers, serves
 #                      http://<jetson>:8099, restarts a dead layer only when told (ops/)
 #   ./rover net        WiFi signal, link rate, jitter to the Pi 5, ROS traffic on the air
@@ -309,8 +309,16 @@ pivot_env(){
 
 # Measure a topic's rate. Rates are the honest signal: every failure this rig
 # has had was a rate collapsing, not a topic disappearing.
-rate_of(){
-  rexec "timeout 12 ros2 topic hz $1 --window 20 2>/dev/null | awk '/average rate/{r=\$3} END{print r+0}'" 2>/dev/null || echo 0
+# rate_probe.py, not `ros2 topic hz`: that decodes every message in Python and
+# under-reads big ones on the loaded Jetson (raw depth 11.5 Hz for a real 28),
+# and always ran its full 12 s. rate_probe counts raw arrivals and stops once
+# its window is full: ~5 s a gate (checked against `ros2 topic hz` on
+# /wheel_state, 20.0 vs 20.0 Hz, 2026-10-18). Slow topics (the 0.3 Hz map) get
+# a window long enough to see several messages.
+rate_of(){ # topic [min_hz]
+  local w=3
+  awk -v m="${2:-10}" 'BEGIN{exit !(m < 2)}' && w=12
+  rexec "timeout $((w + 10)) python3 $SRC/nodes/rate_probe.py $1 $w" 2>/dev/null | tail -1 | awk '{print $1+0}' || echo 0
 }
 
 # teleop's MANUAL mode streams zeros over every command. Its mode page is on
@@ -327,7 +335,7 @@ refuse_if_manual(){ # [message]
   case "$mode" in *'"manual": true'*) die "${1:-teleop is in MANUAL. Tap AUTO.}" ;; esac
 }
 assert_rate(){ # topic  min_hz  label
-  local hz; hz=$(rate_of "$1")
+  local hz; hz=$(rate_of "$1" "$2")
   local ok; ok=$(awk -v a="$hz" -v b="$2" 'BEGIN{print (a>=b)?1:0}')
   printf '      %-22s %7.1f Hz   (want >= %s)   %s\n' "$3" "$hz" "$2" \
     "$([ "$ok" = 1 ] && echo OK || echo FAIL)"
@@ -1440,6 +1448,9 @@ status)
   echo "  ------------------------------------------------------------------"
   # EVERY layer, not just the first three. A status command that stops at
   # `wheels` cannot answer "what is alive", which is the only thing it is for.
+  # ONE pass over every topic at once (health_probe.py, raw, ~12 s), not 14
+  # sequential 12 s `ros2 topic hz` runs (2+ min).
+  rates=$(rexec "python3 $SRC3/tools/health_probe.py 10" 2>/dev/null | tail -1)
   for row in \
       "camera:$CAM_NS/infra1/image_rect_raw:15" \
       "camera:$CAM_NS/depth/image_rect_raw:10" \
@@ -1456,7 +1467,9 @@ status)
       "exec:/goal_exec/obstacles:1" \
       "vlm:/camera/color/image_raw/compressed:2"; do
     l=${row%%:*}; rest=${row#*:}; t=${rest%:*}; want=${rest##*:}
-    r=$(rate_of "$t")
+    r=$(python3 -c 'import json,sys
+try: print(json.loads(sys.argv[1])["hz"].get(sys.argv[2], 0.0))
+except Exception: print(0.0)' "$rates" "$t")
     if awk "BEGIN{exit !($r >= $want)}"; then v="OK"; else
       if awk "BEGIN{exit !($r > 0)}"; then v="LOW"; else v="--"; fi
     fi

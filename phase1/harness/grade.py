@@ -102,7 +102,6 @@ LIDAR_DELAY = 0.13     # s: the live node's de-skew hold + compute
 def fused2(b, use=('lidar', 'vo', 'wheels', 'still'), lidar_poses=None):
     """Run fusion2 (phase1/nodes/fusion2.py) over the bag, events in the order
     they would ARRIVE live: LiDAR poses LIDAR_DELAY after their stamp."""
-    import math as _m
     from fusion2 import Fusion2
     f = Fusion2(use)
     ev = [(t, 0, ('g', w)) for t, w in b.gyro]
