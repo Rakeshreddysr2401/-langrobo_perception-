@@ -796,15 +796,46 @@ slam)
   # and a wrong lock corrupts the map -- ./rover slam --save before a risky
   # start, SLAM_FRESH=1 to ignore the saved map.
   SLAMCFG=$SRC2/config/slam_toolbox.yaml
+  rexec "rm -f /maps/.ref.pgm /maps/.ref.yaml"
   if [ "${SLAM_FRESH:-0}" != 1 ] && [ -s "$HOSTMAPS/last.posegraph" ] && [ -s "$HOSTMAPS/last.data" ]; then
-    sp=${SLAM_START_POSE:-$(tr -d '[:space:]' < "$HOSTMAPS/last.pose" 2>/dev/null)}
-    sp=${sp:-0,0,0}
-    rexec "cp $SRC2/config/slam_toolbox.yaml /tmp/slam_resume.yaml && printf '    map_file_name: /maps/last\n    map_start_pose: [%s]\n' '$sp' >> /tmp/slam_resume.yaml"
-    SLAMCFG=/tmp/slam_resume.yaml
-    echo "[slam] resuming the saved room maps/last ($(date -r "$HOSTMAPS/last.posegraph" '+%F %H:%M')) from pose [$sp]"
+    # WHERE AM I? (2026-10-18) Resuming from where the rover stood at the last save
+    # locked onto the wrong place after it was carried elsewhere, and the autosave
+    # then wrote the wrong lock over the good room. Now one lidar scan is matched
+    # against the saved room's picture (phase2/tools/relocalize.py, ~2 s) and the
+    # room is resumed only where it fits; else it is archived, never overwritten.
+    sp=${SLAM_START_POSE:-}
+    if [ -z "$sp" ] && [ -s "$HOSTMAPS/last.yaml" ]; then
+      hint=$(tr -d '[:space:]' < "$HOSTMAPS/last.pose" 2>/dev/null || true)
+      echo "[slam] where am I in the saved room? (one lidar scan against maps/last)"
+      rl=$(rexec "python3 $SRC2/tools/relocalize.py /maps/last.yaml ${hint:+--hint $hint}" 2>/dev/null | grep '^{' | tail -1 || true)
+      verdict=$(printf '%s' "$rl" | python3 -c 'import json,sys; print(json.load(sys.stdin)["verdict"])' 2>/dev/null || echo lost)
+      echo "        $verdict: $(printf '%s' "$rl" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["why"])' 2>/dev/null || echo 'no answer')"
+      if [ "$verdict" = locked ]; then
+        sp=$(printf '%s' "$rl" | python3 -c 'import json,sys; print("%.3f,%.3f,%.3f" % tuple(json.load(sys.stdin)["pose"]))')
+      fi
+    elif [ -z "$sp" ]; then
+      sp=$(tr -d '[:space:]' < "$HOSTMAPS/last.pose" 2>/dev/null || true)   # a room saved before relocalize: as before
+      sp=${sp:-0,0,0}
+      echo "[slam] (the saved room has no picture yet: resuming from its last pose, unchecked)"
+    fi
+    if [ -n "$sp" ]; then
+      rexec "cp $SRC2/config/slam_toolbox.yaml /tmp/slam_resume.yaml && printf '    map_file_name: /maps/last\n    map_start_pose: [%s]\n' '$sp' >> /tmp/slam_resume.yaml"
+      SLAMCFG=/tmp/slam_resume.yaml
+      # the autosave's reference: the room as it was before this run touched it
+      rexec "[ -s /maps/last.yaml ] && cp /maps/last.pgm /maps/.ref.pgm && sed 's/^image: .*/image: .ref.pgm/' /maps/last.yaml > /maps/.ref.yaml || true"
+      rexec "[ -s /maps/last.id ] || python3 -c 'import uuid; print(uuid.uuid4().hex[:12])' > /maps/last.id; echo resumed > /maps/last.state"
+      echo "[slam] resuming the saved room maps/last ($(date -r "$HOSTMAPS/last.posegraph" '+%F %H:%M'), id $(cat "$HOSTMAPS/last.id" 2>/dev/null)) from pose [$sp]"
+    else
+      arch="archive/home_$(date +%Y%m%d-%H%M)"
+      rexec "mkdir -p /maps/$arch && for e in posegraph data pgm yaml pose id; do [ -f /maps/last.\$e ] && mv /maps/last.\$e /maps/$arch/; done; true"
+      echo "[slam] NOT resuming ($verdict): the saved room is kept as maps/$arch/; starting an empty map"
+      echo "       (if the rover IS in that room: put it back on the room's start spot, or SLAM_START_POSE=x,y,th ./rover slam)"
+    fi
   else
     echo "[slam] no saved room (or SLAM_FRESH=1): starting an empty map"
   fi
+  # a new room gets a new id: the brain keeps saved places per room id (map_autosave publishes /home/room)
+  [ "$SLAMCFG" = /tmp/slam_resume.yaml ] || rexec "python3 -c 'import uuid; print(uuid.uuid4().hex[:12])' > /maps/last.id; echo new > /maps/last.state"
   echo "[slam] slam_toolbox (online async, mapping) -> map -> odom TF, /map"
   dexec "exec ros2 launch slam_toolbox online_async_launch.py \
             slam_params_file:=$SLAMCFG use_sim_time:=false autostart:=true > /tmp/slam.log 2>&1"
