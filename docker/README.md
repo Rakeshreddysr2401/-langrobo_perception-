@@ -2,7 +2,7 @@
 
 **Nothing here has been built or tested from this repo.** These files are a
 *record* of where `orin-nav:1.1` came from, copied in on 2026-08-11 as insurance
-against `../langrobo_perception/` disappearing. `rover` does not read them.
+against `../langrobo_perception/` disappearing (it was deleted 2026-10-18; its last state is the GitHub tag `archive/dev-0.0.6-final`). `rover` does not read them.
 
 ## The image `rover` actually runs
 
@@ -48,7 +48,7 @@ Nothing used it; deleted 2026-10-18.)
 
 ## Why the Dockerfile here does not save you
 
-`Dockerfile` is verbatim from `../langrobo_perception/orin-nav-stack/Dockerfile`.
+`Dockerfile` is verbatim from `orin-nav-stack/Dockerfile` of the old clone (tag `archive/dev-0.0.6-final`).
 Read it: it is fifteen lines of `COPY` on top of
 
 ```

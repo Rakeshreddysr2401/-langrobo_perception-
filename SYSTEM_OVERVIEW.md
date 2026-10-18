@@ -35,7 +35,7 @@ The order it is being built in, from the README and INTELLIGENCE_PLAN.md:
 
 | machine | address | repo (path → remote, branch) | its job |
 |---|---|---|---|
-| **Jetson Orin Nano** | 192.168.1.15 | `~/rover` → `-langrobo_perception-`, `rover-v1.1.15-find-follow` | **the body's brain**: sensors, pose, map, nav2, exact moves, pixel→goal. Everything runs in one Docker container (`rover`, image `orin-nav:1.2`; `orin-nav:1.1` kept only as the rollback) |
+| **Jetson Orin Nano** | 192.168.1.15 | `~/rover` → `-langrobo_perception-`, `rover-v1.1.16-review` | **the body's brain**: sensors, pose, map, nav2, exact moves, pixel→goal. Everything runs in one Docker container (`rover`, image `orin-nav:1.2`; `orin-nav:1.1` kept only as the rollback) |
 | **Pi 5** | 192.168.1.16 | `~/ros2_ws` → `pi5_ros2_ws`, `dev-1.4.1` | **the mind**: LangGraph brain (3 agents), voice (STT/TTS/wake word), Telegram, teleop web page, micro-ROS agent for the ESP32 |
 | **Laptop** | DHCP (192.168.1.9 on 2026-10-18), user `chotesh` | `~/kino_sim` → `kino_sim`, `main` | **a window and a twin**: the robot's hardware in Isaac Sim 6.2 (domain 42), and later RViz too (`./sim rviz [real]`, after ros-jazzy-desktop) |
 | **Old laptop** | 192.168.1.8 (DHCP), user `rakhi24` | — (`~/rover_live.sh`, `~/rover_live.rviz`, `~/rover_twin.rviz`, pushed by `./rover view`) | **the RViz station**: `./rover view` (real robot, domain 0) and `TWIN=1 ./rover view` (the twin, domain 42) open RViz here; ROS 2 Jazzy installed |
