@@ -105,6 +105,7 @@ class FakeReach:
         RN.PIVOT_FILE = Path('/nonexistent')       # GoalExec() unlearned -> patched below
         RN.GoalExec = lambda P_prior=None: G.GoalExec(P_prior=PIVOT)
         RN.TIGHT_SETTLE_S = 0.0
+        RN.TIGHT_FOLLOW_SETTLE_S = 0.0
 
     @property
     def scans(self):

@@ -161,6 +161,7 @@ TIGHT_ROUNDS = 2
 TIGHT_MOVES = 10
 TIGHT_REACH = (2.5, 2.1, 1.7, 1.3)
 TIGHT_SETTLE_S = 1.5
+TIGHT_FOLLOW_SETTLE_S = 0.3   # s between moves of one plan (goal_exec re-reads its points itself)
 # A plan the camera's map does not allow (LiDAR-only, see tight_round) drives
 # at most this far before it looks and plans again; and gives up after this
 # many moves goal_exec refused on the camera's points.
@@ -1045,6 +1046,14 @@ class Reach(GP.Pass):
     # refuses one that touches any camera point, so a real shoe still stops
     # it; drives are cut to TIGHT_LIDAR_LEG, and every move is followed by a
     # look and a new plan.
+    TIGHT_FOLLOW_M = 0.04                  # m: within this of where the plan expected -> its next move
+    TIGHT_FOLLOW_DEG = 4.0
+
+    def on_plan(self, expect):
+        """Is the rover where the tight plan expected it after the last move?"""
+        return (math.hypot(self.pose[0] - expect[0], self.pose[1] - expect[1]) <= self.TIGHT_FOLLOW_M
+                and abs(math.degrees(wrap(self.pose[2] - expect[2]))) <= self.TIGHT_FOLLOW_DEG)
+
     def tight_target(self, g):
         """(x, y) odom: the goal if within reach, else the farthest point
         toward it that fits -- along the HOUSE ROUTE when there is one (through
@@ -1081,14 +1090,24 @@ class Reach(GP.Pass):
             ge = GoalExec()                      # unlearned: plans with more margin
         self.dobs.set_active(True)
         moves, refused = 0, 0
+        # FOLLOW THE PLAN (real robot 2026-10-19, chairs): re-planning after every
+        # move cost ~10 s each (settle, a camera-point plan failing its whole
+        # budget, the house route again) for moves that had gone exactly as
+        # planned -- ~30 cm of progress per 13 s. Now the rest of the plan is kept
+        # with the pose it expects after each move; while the rover is where it
+        # expected (TIGHT_FOLLOW_M / _DEG, the learned pivot slide included) the
+        # next move is driven straight away. A refusal or a miss re-plans from
+        # where it really is. goal_exec still checks every move on fresh points.
+        tgt, queue, qmode, expect = None, [], 'all', None
         while moves < TIGHT_MOVES:
-            self.spin_for(TIGHT_SETTLE_S)
+            self.spin_for(TIGHT_FOLLOW_SETTLE_S if queue else TIGHT_SETTLE_S)
             if self.stop_req:
                 return 'cancelled'
             if time.time() > deadline:
                 self.say(attempt=attempt, phase='tight', outcome='failed', why='out of time for this goal')
                 return 'none' if not moves else 'failed'
-            tgt = self.tight_target(g)
+            if tgt is None:                      # once per round: the route is ~1 s on the Orin
+                tgt = self.tight_target(g)
             if tgt is None:
                 self.say(attempt=attempt, phase='tight', outcome='none', why='no point toward the goal fits')
                 return 'none' if not moves else 'failed'
@@ -1137,6 +1156,7 @@ class Reach(GP.Pass):
             n_run = 2 if (len(steps) > 1 and steps[0][0] == 'drive'
                           and abs(steps[0][1]) <= TIGHT_SETUP_M) else 1
             for kind, v in steps[:n_run]:
+                cut = mode == 'lidar' and kind == 'drive' and abs(v) > TIGHT_LIDAR_LEG
                 if mode == 'lidar' and kind == 'drive':
                     v = math.copysign(min(abs(v), TIGHT_LIDAR_LEG), v)
                 if kind == 'turn':
@@ -1146,10 +1166,15 @@ class Reach(GP.Pass):
                     r, why = self.run_goal_exec((p[0] + v * math.cos(p[2]), p[1] + v * math.sin(p[2]), p[2]))
                 moves += 1
                 self.say(attempt=attempt, phase='tight', move=TRT.describe([(kind, v)]), outcome=r, why=why)
+                done = queue.pop(0) if queue else None
+                # a LiDAR plan's drive cut short ends off the plan: plan again
+                expect = done[1] if (done and not cut and r == 'reached') else None
                 if r != 'reached' or self.stop_req:
                     break
             if r == 'cancelled' or self.stop_req:
                 return 'cancelled'
+            if r != 'reached' or expect is None:
+                queue, expect = [], None
             if r != 'reached':
                 refused += 1
                 if refused >= TIGHT_REFUSALS:
