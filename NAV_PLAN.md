@@ -3,6 +3,10 @@
 Owner's goal (2026-09-27): *"always take the best path, one that fits it —
 a long-term solution, managing itself, production grade."*
 
+**The working method since 2026-10-19** -- observe, record, measure, root cause with a number,
+reproduce in the twin, one change, keep only if measured better, commit with the evidence,
+document, real robot, repeat: `~/kino_sim/docs/IMPROVEMENT_LOOP.md`.
+
 ## Why tuning stopped working
 
 The same failure was hit three times on 2026-09-27 and "fixed" by a
