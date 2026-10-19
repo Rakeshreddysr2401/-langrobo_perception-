@@ -423,3 +423,49 @@ cancel). Jetson: slowest plan 1.9 s (budget 3).
 round; the camera map's thick dark door (from the hall) may still make the
 LiDAR-only plan the one used; the brain should aim "go through the door"
 past the opening, not at the leaf (Pi 5).
+
+## Session 2026-10-19 (twin, afternoon) — across the house without touching anything
+
+Owner: talk to KINO in the twin, find why "go near the sofa" and cross-room goals
+fail, fix one thing at a time, then the real robot. All of it on the twin
+(kino_sim apt_s1: living room with a 55-60 cm sofa / coffee-table squeeze, 90 cm
+corridor, bedroom and kitchen doors, clutter at 3 heights), judged on the TRUE pose.
+A fixed 5-leg loop was driven before and after each change
+(`./sim scenario apt_s1 --goals "0,-1.2,0;4.55,0.61,0;5.19,-2.12,3.142;6.59,2.48,1.571;0,-1.2,0"`).
+
+### What was wrong, the evidence, and the fix
+
+| # | what was wrong | evidence | fix (commit) |
+|---|---|---|---|
+| 1 | reach **crashed** on the escape's "drive + turn" move | TypeError on `math.degrees(tuple)`; reach dead, goal hung 300 s, later goals unanswered | all 3 move kinds driven; any error in one goal -> `failed: internal error`, reach keeps serving (d450db2) |
+| 2 | tight route **ping-pong** | plan "B5 L30 F85" -> B5, re-plan "F5 L30 F85" -> F5, x3 | a <= 10 cm set-up drive runs with the move it sets up (40364d2) |
+| 3 | LiDAR **blind within 2 cm of the body** | reach believed 5.7 cm, truth 0.4 cm; the escape turned into the coffee table (-3.3 cm). 21299 real scans: nothing of the rover in the plane | points dropped only INSIDE the outline + 5 mm (gap_pass, goal_exec_node, follow_node); costmap LiDAR min range 0.20 -> 0.05 (d5fe105) |
+| 4 | **drove under** a 28 cm tabletop | obstacle band stopped at 27 cm, rover 26.3 cm; mesh check: nothing of the table at 6-26.3 cm inside the outline; wheels jammed on its base | nvblox slice + depth_obstacles to 31 cm (9453551) |
+| 5 | house route and nav2 **disagreed** | route straight through the living-room clutter (LiDAR map, blind to ball / bin / bottle); nav2 went round the table; legs pulled the rover back and forth | route uses nav2's obstacles AND costs (87d7533) |
+| 6 | **pinned** along a whole side | 1.2 cm along the table: no short move opens space, MPPI refuses all (2 cm margin) -> 3 goals with 0.0 m driven; nav2's own retries then ran 120 s | escape **steering slide** on raw points; **pinned watch** (still 10 s + something inside 2 cm -> escape now). MPPI padding 0.01 tried and REVERTED (grazed the sofa 1.4 cm) (a285a82) |
+| 7 | plans **flip-flopped** | BT replanned every second and took any plan; the rover turned back | keep the path unless blocked / goal changed / 10 s, as nav2 ships it (f2f68e7) |
+
+### Measured on the loop (time per leg; slipper = 3 cm, below every sensor)
+
+| run | bedroom -> living | living -> corridor | corridor -> bedroom | bedroom -> kitchen | kitchen -> living | furniture touched |
+|---|---|---|---|---|---|---|
+| before | **failed** (16 cm driven) | 196 s | 31 s | 99 s | -- | none, but 0.6-1.7 cm close |
+| house route on, nothing else | 288 s | timeout | 151 s | 91 s | 245 s | **4 of 5 legs** |
+| + fixes 1-4, 6 | -- | 195 s | 32 s | 92 s | timeout | kitchen bin 0.8 cm |
+| **+ 5, 7, pinned watch** | (start) | **108 s** | **30 s** | **88 s** | **174 s** | **none** |
+
+### Pose drift (kino_sim `./sim odomprobe`)
+
+Fused /odom stayed 1-6 cm from the truth over 11-39 m from a clean start (brief
+5-30 cm spikes when the LiDAR odometry slips in fast turns). The 10-36 cm seen
+earlier came after contacts. The twin's cuVSLAM is 3-33 m off (a twin bug; the
+real graded VO is 0.03-10 cm), so the twin is harder on the fusion than the robot.
+
+### Open, in order
+
+1. **Real robot** (owner present): the loop's kind of goals at home, tight spots
+   first; `REACH_HOUSE_ROUTE` stays OFF on the real robot until then.
+2. MPPI and the collision monitor model a turn about base_link with no slide;
+   this skid-steer slides 6-16 cm per turn -> grazes in turns near walls.
+3. Small low things: a 7 cm toy block driven through, the 3 cm slipper unseen.
+4. Speed: legs still 1.5-3 min.

@@ -1,6 +1,23 @@
-# Open issues — where things stand (newest first; last updated 2026-10-18)
+# Open issues — where things stand (newest first; last updated 2026-10-19)
 
 How the rover plans and moves, why it is limited, and the fix order F1-F5: [NAV_GUIDE.md](NAV_GUIDE.md) (2026-10-11).
+
+## 2026-10-19 — twin: cross-room goals fixed, no furniture touched; real-robot test next
+
+Seven fixes (reach crash, tight-route ping-pong, LiDAR blind 2 cm beside the body,
+driving under low furniture, house route vs nav2, pinned beside furniture, plan
+flip-flop) took the twin's 5-leg cross-room loop from "bedroom -> living room fails,
+4 of 5 legs touch furniture" to **all 5 reached, nothing touched**. What, why and the
+numbers: [NAV_PLAN.md](NAV_PLAN.md) "Session 2026-10-19"; how it works now:
+[NAV_GUIDE.md](NAV_GUIDE.md) §2.2, §2.3, §5.
+
+| item | status |
+|---|---|
+| real-robot run of the same kind of goals (tight spots first, then rooms) | **next, owner present** |
+| `REACH_HOUSE_ROUTE=1` (legs along the house route) | twin-proven; OFF on the real robot until the run above |
+| grazes in turns near walls (nav2 assumes no skid-steer slide) | open |
+| 7 cm toy block driven through; 3 cm slipper unseen | open (perception) |
+| legs 1.5-3 min | open (speed) |
 
 ## 2026-10-18 — Isaac ROS 4.6 upgrade: `orin-nav:1.2` built, twin run (step E) passed; real-robot run (F) next
 

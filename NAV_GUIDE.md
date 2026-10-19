@@ -18,7 +18,7 @@ cells. They are out of date; read this page instead.
  ─────                    ──────────────                 ─────────────
  D555 depth ─► nvblox ─► ghost_clear ─┐
                                       ├─► global costmap ─► Smac Lattice planner ─► /plan
- C1 LiDAR /scan ──────────────────────┤     (8x8 m, 2.5 cm)       (1 Hz replan)
+ C1 LiDAR /scan ──────────────────────┤     (8x8 m, 2.5 cm)       (keeps its path; replans when blocked / 10 s)
                                       └─► local costmap  ─► MPPI controller ─► /cmd_vel_nav
                                             (4x4 m, 2.5 cm)        (10 Hz)
                                                                        │
@@ -35,7 +35,7 @@ Three layers make decisions, at three speeds:
 |---|---|---|---|
 | **brain** (Pi 5, Gemma + VLM) | *what* to do: "go near the door" → a goal pose | seconds | `~/ros2_ws` on the Pi 5 |
 | **reach_node** + nav2 behaviour tree | *what to try next* when a try fails | ~1 s | `phase3/nodes/reach_node.py`, `phase3/bt/` |
-| **planner + controller** | *which way*, *what velocity now* | 1 Hz / 10 Hz | nav2 |
+| **planner + controller** | *which way*, *what velocity now* | on a blocked path or every 10 s / 10 Hz | nav2 |
 
 Most "it moved stupidly" moments come from a lower layer doing exactly what its
 numbers told it. So learn the bottom first.
@@ -66,8 +66,8 @@ Global costmap, in order (`nav2.yaml` `plugins:`):
 
 | layer | source | what it adds | weakness |
 |---|---|---|---|
-| `nvblox_layer` | camera depth → nvblox 3D map → `ghost_clear` → 2D grid | low things the LiDAR misses (shoes, chair legs below 25 cm). **Remembers** them | sees 87° ahead only; does not decay, so people who walked by stay as "specks" (S10) |
-| `lidar_layer` | `/scan`, one plane at 25 cm, 360° | everything round the rover, live; raytracing clears stale marks | one height only |
+| `nvblox_layer` | camera depth → nvblox 3D map → `ghost_clear` → 2D grid, heights **3–31 cm** (31 since 2026-10-19: the rover is 26.3 cm, a 28 cm tabletop must be an obstacle) | low things the LiDAR misses (shoes, chair legs below 25 cm) and overhangs up to 31 cm. **Remembers** them | sees 87° ahead only; does not decay, so people who walked by stay as "specks" (S10) |
+| `lidar_layer` | `/scan`, one plane at 25 cm, 360°, returns from **5 cm** (20 cm until 2026-10-19 left ~15 cm in front of the nose unmarked) | everything round the rover, live; raytracing clears stale marks | one height only |
 | `footprint_clear` | our plugin (`phase3/plugins`) | cells under the rover's own outline are free — it's standing there | global only |
 | `inflation_layer` | the layers above | the cost ramp around every lethal cell | **see §2.4** |
 
@@ -90,6 +90,14 @@ corner swing  circumscribed 0.32 m → needs ~64 cm of floor to turn all the way
 Gaps narrower than ~44 cm show as **"no valid path"** from the planner.
 That's intended: reach's `tight_route` and gap pass then crawl them straight,
 with 2 cm a side (`reach_node.py` steps 0 and 3).
+
+The local pad (MPPI's HARD margin) stays **2 cm**. 1 cm was tried on
+2026-10-19 (twin): on 2.5 cm cells MPPI then drove a corner 1.4 cm into the
+sofa. Inside 2 cm MPPI refuses every motion; reach notices (the *pinned watch*,
+§5) and steps the rover off on raw points at 1 cm precision. reach, goal_exec
+and follow see LiDAR points right up to the outline (+5 mm); until 2026-10-19
+they dropped everything within 2 cm of it as "the rover itself", which hid
+furniture beside the body.
 
 ### 2.4 Inflation — the one setting that shapes every route
 
@@ -202,8 +210,9 @@ Every 0.1 s, MPPI:
 
 ## 5. Who decides what to try next
 
-1. **nav2's behaviour tree** (`phase3/bt/navigate_to_pose.xml`): replan at 1 Hz → follow → on failure: clear local costmap → BackUp 0.30 m → Wait 5 s, round-robin, up to 6 times. Spin is **removed** (2026-10-03: it hit a chair in a 45 cm gap).
-2. **reach_node** wraps nav2 and is the real recovery brain: tight route → way back along its own trail → look (turn the camera) → pass a narrow gap → wait → retry, up to 8 attempts / 300 s; same failure 3 times from one spot → stop and say so.
+1. **nav2's behaviour tree** (`phase3/bt/navigate_to_pose.xml`): keep the current path while it is valid; replan only when it is blocked, the goal changes, or it is 10 s old (2026-10-19; at 1 Hz each plan could pick the other way round and the rover turned back) → follow → on failure: clear local costmap → BackUp 0.30 m → Wait 5 s, round-robin, up to 6 times. Spin is **removed** (2026-10-03: it hit a chair in a 45 cm gap).
+2. **reach_node** wraps nav2 and is the real recovery brain: tight route → way back along its own trail → look (turn the camera) → pass a narrow gap → wait → retry, up to 8 attempts / 300 s; same failure 3 times from one spot → stop and say so. It watches nav2 while it drives: **dithering** (turning back and forth, no nearer) and, since 2026-10-19, **pinned** (still 10 s with something inside nav2's 2 cm margin) cancel nav2 and go to the escape. The **escape** steps off what the rover is parked against: a short drive, a turn about the learned pivot, drive-then-turn, or — along something the whole length of a side — a **steering slide** (crawl on, steering off the nearest point). A crash inside one goal no longer kills reach: the goal fails with "internal error" and reach keeps serving.
+   Far goals go in **legs**. With `REACH_HOUSE_ROUTE=1` (twin-proven 2026-10-19, still OFF on the real robot) the legs follow a route through the house map (`house_route.py`) that also carries nav2's own obstacles and costs, so the route and nav2 agree about which way round the furniture to go.
 3. **goal_exec** does the exact finish (~1.4 cm) and learns the pivot slide from every turn.
 
 That reach layer is **rules written from floor tests**. It is the right place
