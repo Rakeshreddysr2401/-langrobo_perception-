@@ -35,11 +35,17 @@ every tick while anyone subscribes, empty or not (silence = dead camera):
       box       pixels of the latest detection (absent dist/bearing: no
                 base_link TF yet)
 
-YOLO runs ON DEMAND (2026-07-18): it is the single biggest CPU cost on the
-6-core Orin, so it only runs at full detect_rate when something needs it (a
-target hunt is set, or a subscriber is on detections_3d/target_result);
-otherwise it trickles at idle_detect_rate. The look() feed is independent and
-always on. Tune with the detect_rate / idle_detect_rate params.
+The node SLEEPS while nothing wants its output (2026-10-20). Demand = a target
+hunt is set (/vision/target), or anyone subscribes to /vision/detections_3d,
+/vision/target_result or /vision/people (follow_node does, only while following;
+the Pi 5 brain no longer subscribes -- tools/approach.py). Asleep it holds NO
+image subscriptions, NO TF subscriptions and runs no YOLO; it wakes within
+WAKE_CHECK_S of demand and sleeps SLEEP_AFTER_S after the last demand.
+Measured on the twin (node alone, idle): the old design -- every 896x504 depth
+and every colour frame decoded into Python, a Python TF listener on /tf, YOLO
+trickling at 1 Hz -- cost 29 % CPU and 1.46 GB (YOLO's first inference alone
+creates a ~700 MB GPU context); the real robot showed 58 % + 1.1 GB with nobody
+listening. Awake it runs YOLO at detect_rate as before.
 
 It CAN also republish the color stream as JPEG on
 /camera/color/image_raw/compressed, which is what fed the brain's look() tool on
@@ -75,11 +81,13 @@ Design notes:
 """
 
 import json
+import threading
 import time
 
 import cv2
 import numpy as np
 import rclpy
+from rclpy.executors import ExternalShutdownException, SingleThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo, CompressedImage, Image
@@ -93,6 +101,9 @@ from tf2_ros import Buffer, TransformListener
 
 from person_tracker import PersonTracker
 from person_look import look_of
+
+WAKE_CHECK_S = 0.25     # demand is polled this often (subscriber counts: cheap)
+SLEEP_AFTER_S = 10.0    # asleep this long after the last demand (follow restarts, a re-asked hunt)
 
 
 def _decode_image(msg: Image) -> np.ndarray | None:
@@ -130,16 +141,7 @@ class Detections3DNode(Node):
         # their own thresholds, and the EMA in _smooth() rejects position outliers.
         self.declare_parameter("confidence", 0.35)
         self.declare_parameter("device", "cuda")
-        self.declare_parameter("detect_rate", 5.0)   # Hz — rate WHEN IN DEMAND
-        # On-demand gating: YOLO is the biggest CPU draw on the 6-core Orin
-        # (~half a core at 5Hz), but it is only useful when the brain is
-        # actually looking for something. "In demand" = a target hunt is set
-        # (/vision/target) OR someone subscribes to a detection output. When
-        # idle we drop YOLO to idle_detect_rate so /vision/detections_3d stays
-        # fresh for the Pi5 without burning the core; set 0.0 to stop YOLO
-        # entirely while idle (max saving — safe once the brain is confirmed to
-        # subscribe on demand). The look() feed is separate and always on.
-        self.declare_parameter("idle_detect_rate", 1.0)  # Hz — rate WHEN IDLE
+        self.declare_parameter("detect_rate", 5.0)   # Hz, while awake (see the module docstring: asleep = nothing)
         self.declare_parameter("max_range_m", 6.0)
         self.declare_parameter("min_range_m", 0.25)
         self.declare_parameter("depth_patch_px", 7)
@@ -201,20 +203,23 @@ class Detections3DNode(Node):
         # this node, and depending on start-up timing neither delivered anything:
         # three restarts in a row sat at "waiting for camera + TF" forever with
         # the camera at 18 Hz (faulthandler: both executors idle in wait).
+        # The listener's /tf subscriptions exist only while awake (_wake/_sleep); the
+        # node and its spin thread live for the whole process.
         self._tf_node = rclpy.create_node("detections_3d_tf")
-        self._tf_listener = TransformListener(self._tf_buffer, self._tf_node, spin_thread=True)
+        self._tf_listener = None
+        self._tf_exec = SingleThreadedExecutor()
+        self._tf_exec.add_node(self._tf_node)
+        threading.Thread(target=self._spin_tf, daemon=True).start()
         self._no_tf_logged = False
         # Per-label position tracks for temporal smoothing — see _smooth().
         self._track = {}          # label -> [x, y, z, last_seen_monotonic]
 
-        self.create_subscription(Image, p("color_topic"), self._on_color,
-                                 qos_profile_sensor_data)
-        self.create_subscription(Image, p("depth_topic"), self._on_depth,
-                                 qos_profile_sensor_data)
-        self.create_subscription(CameraInfo, p("color_info_topic"), self._on_color_info,
-                                 qos_profile_sensor_data)
-        self.create_subscription(CameraInfo, p("depth_info_topic"), self._on_depth_info,
-                                 qos_profile_sensor_data)
+        # The camera subscriptions: made on wake, destroyed on sleep.
+        self._cam_topics = [(Image, p("color_topic"), self._on_color),
+                            (Image, p("depth_topic"), self._on_depth),
+                            (CameraInfo, p("color_info_topic"), self._on_color_info),
+                            (CameraInfo, p("depth_info_topic"), self._on_depth_info)]
+        self._cam_subs = []
         self._pub = self.create_publisher(String, p("output_topic"), 10)
 
         # Target finder (brain visual servoing) — see module docstring.
@@ -229,14 +234,49 @@ class Detections3DNode(Node):
                 CompressedImage, "/camera/color/image_raw/compressed", 1)
             self.create_timer(1.0 / look_rate, self._publish_look_feed)
 
-        # Timer ticks at the ACTIVE rate; when idle, _tick self-throttles YOLO
-        # to idle_detect_rate (or skips it entirely if that is 0).
-        idle_rate = float(p("idle_detect_rate"))
-        self._idle_period = (1.0 / idle_rate) if idle_rate > 0 else None
-        self._last_infer_mono = 0.0
-        self._in_demand = None  # tri-state so the first transition logs
+        self._last_demand = 0.0
+        self.create_timer(WAKE_CHECK_S, self._wake_check)
         self.create_timer(1.0 / float(p("detect_rate")), self._tick)
-        self.get_logger().info("detections_3d ready — waiting for camera + TF")
+        self.get_logger().info("detections_3d ready — asleep until something wants detections")
+
+    def _spin_tf(self):
+        try:
+            self._tf_exec.spin()
+        except ExternalShutdownException:   # the process is stopping: quietly
+            pass
+
+    # ── Sleep / wake ──────────────────────────────────────────────────────
+
+    @property
+    def _awake(self):
+        return bool(self._cam_subs)
+
+    def _wake_check(self):
+        now = time.monotonic()
+        if self._demand():
+            self._last_demand = now
+            if not self._awake:
+                self._wake()
+        elif self._awake and now - self._last_demand > SLEEP_AFTER_S:
+            self._sleep()
+
+    def _wake(self):
+        self._cam_subs = [self.create_subscription(typ, topic, cb, qos_profile_sensor_data)
+                          for typ, topic, cb in self._cam_topics]
+        # a FRESH buffer: the old one holds the pose from before the sleep, and the
+        # "newest TF" fallback in _lookup_tf would place objects with it
+        self._tf_buffer = Buffer()
+        self._tf_listener = TransformListener(self._tf_buffer, self._tf_node)
+        self.get_logger().info("awake (demand): camera + TF subscribed, YOLO on")
+
+    def _sleep(self):
+        for sub in self._cam_subs:
+            self.destroy_subscription(sub)
+        self._cam_subs = []
+        self._tf_listener.unregister()
+        self._tf_listener = None
+        self._color = self._depth = None    # never run on a frame from before the sleep
+        self.get_logger().info(f"asleep: no demand for {SLEEP_AFTER_S:.0f} s -- camera + TF unsubscribed")
 
     # ── Subscriptions (cache latest) ──────────────────────────────────────
 
@@ -367,22 +407,11 @@ class Detections3DNode(Node):
             return None
 
     def _tick(self):
+        # Awake but the demand just ended (the SLEEP_AFTER_S grace): no YOLO.
+        if not self._awake or not self._demand():
+            return
         if self._color is None or self._color_info is None:
             return
-
-        # On-demand gate: only spend YOLO when something needs it. Idle ->
-        # trickle at idle_detect_rate (or skip if disabled). Log transitions.
-        demand = self._demand()
-        if demand != self._in_demand:
-            self.get_logger().info(
-                "YOLO active (demand)" if demand else "YOLO idle (no demand)")
-            self._in_demand = demand
-        if not demand:
-            if self._idle_period is None:
-                return
-            if time.monotonic() - self._last_infer_mono < self._idle_period:
-                return
-        self._last_infer_mono = time.monotonic()
 
         color_msg, depth_msg = self._color, self._depth
         # Snapshot the pose that belongs to THIS frame before spending 100-250 ms
@@ -550,7 +579,7 @@ def main(args=None):
     node = Detections3DNode()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     node.destroy_node()
 
