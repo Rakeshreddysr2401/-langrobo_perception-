@@ -130,6 +130,24 @@ lidar:
   # the C1's base sits directly on the frame top (owner, 2026-09-24)
   yaw:           {value: 1.5463, status: calibrated, source: "./rover lidar --calibrate, +88.60 deg, 5 legs, spread 0.76 deg", date: 2026-09-22}
 
+# Two front ultrasonic sensors (HC-SR04 type, run at 3.3 V) at the front corners, on
+# their own ESP32 (phase1/firmware/HARDWARE.md section 2b), owner 2026-10-19: each
+# centre 6.5 cm above the floor (just above the frame's bottom, 6 cm), the two 28 cm
+# apart (the frame's width), set a little outside the frame. Bench: both read a flat
+# target 15 cm away at 14.4-15.5 / 15.0 cm. Frames: sonar_left / sonar_right, x along
+# the beam; /sonar/left and /sonar/right (sensor_msgs/Range) are stamped in them.
+sonar:
+  z:          {value: 0.065, status: described, source: "owner: transducer centre 6.5 cm above the floor", date: 2026-10-19}
+  spacing:    {value: 0.28,  status: described, source: "owner: 28 cm between the two sensors' centres", date: 2026-10-19}
+  face_inset: {value: 0.0,   status: assumed, source: "faces flush with the nose of the frame (+ = set back) -- to measure", date: 2026-10-19}
+  yaw_out:    {value: 0.0,   status: assumed, source: "both point straight ahead (+ = turned outward) -- to measure", date: 2026-10-19}
+  pitch_up:   {value: 0.0,   status: assumed, source: "level (+ = tilted up) -- to measure", date: 2026-10-19}
+  left_is_s1: {value: true,  status: assumed, source: "S1 (TRIG GPIO5 / ECHO GPIO19) is the LEFT one, seen from behind -- to confirm", date: 2026-10-19}
+  fov:        {value: 0.26,  status: datasheet, source: "HC-SR04: ~15 deg half-angle cone (field of view ~30 deg)"}
+  min_range:  {value: 0.02,  status: datasheet, source: "HC-SR04: 2 cm"}
+  max_range:  {value: 4.0,   status: datasheet, source: "HC-SR04: 4 m (bench: a wall at 1.9 m read steadily)"}
+  case:       {value: [0.02, 0.045, 0.02], status: datasheet, source: "HC-SR04 board with its two transducers, depth x width x height"}
+
 # Everything else on the rover (battery, Jetson, Pi 5, motors, drivers, power
 # bank...), added as each is measured. Each is a box in base_link:
 #   - {name: battery, size: [x, y, z], centre: [x, y, z], mass: null, status: measured, date: ...}

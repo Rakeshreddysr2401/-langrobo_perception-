@@ -102,6 +102,11 @@ def derive(p):
     g['lidar'] = (lx, v['lidar.y'], g['frame_top'] + v['lidar.plane_above_base'])
     g['lidar_yaw'] = v['lidar.yaw']
 
+    # the two front sonars: at the front corners, faces flush with the nose unless inset
+    sx = g['nose_x'] - v['sonar.face_inset']
+    g['sonar'] = {'sonar_left': ((sx, v['sonar.spacing'] / 2, v['sonar.z']), (0.0, -v['sonar.pitch_up'], v['sonar.yaw_out'])),
+                  'sonar_right': ((sx, -v['sonar.spacing'] / 2, v['sonar.z']), (0.0, -v['sonar.pitch_up'], -v['sonar.yaw_out']))}
+
     # the outer envelope: whatever sticks out furthest, in each direction
     tyre_out = g['wheel_y'] + v['wheels.width'] / 2
     g['env_front'] = max(g['nose_x'], g['wheel_x'] + g['wheel_r'], glass)
@@ -181,6 +186,13 @@ def urdf(p, g):
     out.append(joint('lidar_case_joint', 'lidar_case', g['lidar_case']))
     out.append(link('laser'))
     out.append(joint('laser_joint', 'laser', g['lidar'], (0, 0, g['lidar_yaw'])))
+
+    out.append('\n  <!-- the two front sonars (HC-SR04): x along the beam; /sonar/left and\n'
+               '       /sonar/right (sensor_msgs/Range) are stamped in these frames. -->\n')
+    cs = v['sonar.case']
+    for name, (xyz, rpy) in g['sonar'].items():
+        out.append(link(name, box(*cs), origin((-cs[0] / 2, 0, 0)), GREY))
+        out.append(joint(f'{name}_joint', name, xyz, rpy))
 
     for c in p.get('components') or []:
         out.append(f'\n  <!-- {c["name"]}: {c.get("status", "")} {c.get("date", "")} -->\n')
