@@ -612,13 +612,34 @@ class Reach(GP.Pass):
                            EM.body_gap(EM.moved(cells, dx, a, P)) - self.CELL_SLACK)
             best = EM.best_move(gap_of, g0, P)
             if best is None:
+                # along something the whole length of a side: crawl on, steering off
+                # it (escape_moves.py STEERING SLIDE has why) -- if nothing is ahead
+                both = np.vstack([b for b in (pts, cells) if b is not None and len(b)]) \
+                    if any(b is not None and len(b) for b in (pts, cells)) else None
+                if EM.slide_clear(both):
+                    self.say(attempt=attempt, phase='escape', gap_cm=round(g0 * 100, 1), slide_cm=round(EM.SLIDE_L * 100))
+                    r, why = self.slide_along(g0)
+                    self.say(attempt=attempt, phase='escape', outcome=r, why=why)
+                    if r != 'reached':
+                        break
+                    moved_any = True
+                    continue
                 self.say(attempt=attempt, phase='escape', gap_cm=round(g0 * 100, 1),
                          outcome='no short move or turn opens space')
                 break
             kind, v, end = best
+            # best_move has THREE kinds: drive (m), turn (rad), drive+turn ((m, rad)).
+            # The combo used to fall into the turn branch and crash reach on
+            # math.degrees(tuple) (twin 2026-10-19: rover against the bedroom wall,
+            # reach died, the goal hung 300 s with nobody answering).
+            dx, a = (v, 0.0) if kind == 'drive' else (0.0, v) if kind == 'turn' else v
             self.say(attempt=attempt, phase='escape', gap_cm=round(g0 * 100, 1), to_gap_cm=round(end * 100, 1),
-                     **({'move_cm': round(v * 100)} if kind == 'drive' else {'turn_deg': round(math.degrees(v))}))
-            r, why = self.drive_straight(v, g0) if kind == 'drive' else self.turn_in_place(v, g0)
+                     **({'move_cm': round(dx * 100)} if dx else {}), **({'turn_deg': round(math.degrees(a))} if a else {}))
+            r, why = 'reached', ''
+            if dx:
+                r, why = self.drive_straight(dx, g0)
+            if a and r == 'reached':
+                r, why = self.turn_in_place(a, g0)
             self.say(attempt=attempt, phase='escape', outcome=r, why=why)
             if r != 'reached':
                 break
@@ -1020,6 +1041,17 @@ class Reach(GP.Pass):
         self.pursuing = True
         try:
             self._pursue(m)
+        except Exception as e:  # noqa: BLE001 - one goal's bug must not kill reach
+            # A crash here used to END reach: the goal hung with no final status
+            # and every later goal went unanswered (2026-10-19, the escape
+            # TypeError). Now: stop, say why, keep serving.
+            import traceback
+            self.get_logger().error('goal crashed -- reach keeps running:\n' + traceback.format_exc())
+            if getattr(self, 'nav_gh', None) is not None:
+                self.nav_gh.cancel_goal_async()
+            self.cancel.publish(Empty())
+            self.stop()
+            self.say(result='failed', why=f'internal error in reach: {type(e).__name__}: {e}')
         finally:
             self.pursuing = False
             self.dobs.set_active(False)
