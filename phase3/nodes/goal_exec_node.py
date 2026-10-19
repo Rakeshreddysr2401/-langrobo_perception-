@@ -63,7 +63,8 @@ from tf2_ros import Buffer, TransformListener
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from depth_obstacles import MIN_HITS  # noqa: E402
 from fused_obstacles import make_obstacles  # noqa: E402
-from goal_exec import GoalExec, wrap  # noqa: E402
+from goal_exec import FRONT, REAR, SIDE, GoalExec, wrap  # noqa: E402
+OWN_PAD = 0.005   # m: LiDAR points this far past the outline still count as the rover
 
 # ROVER_STATE_DIR (default /logs): a second instance -- the twin's, on its own ROS domain -- keeps its own state
 PIVOT_FILE = Path(os.environ.get('ROVER_STATE_DIR', '/logs')) / 'goal_exec_pivot.json'
@@ -147,7 +148,14 @@ class GoalExecNode(Node):
         ok = np.isfinite(r) & (r > 0.05) & (r < 8.0)
         x, y, yaw = self.mount
         p = np.stack([r[ok] * np.cos(a[ok] + yaw) + x, r[ok] * np.sin(a[ok] + yaw) + y], 1)
-        own = (p[:, 0] < 0.202) & (p[:, 0] > -0.198) & (np.abs(p[:, 1]) < 0.21)   # the rover itself
+        # The rover itself: points INSIDE its outline (+ OWN_PAD). Was a band 2 cm
+        # PAST the outline (2026-09-26), and that band hid real obstacles beside
+        # the body: twin apt_s1 2026-10-19, a coffee-table panel 0.4 cm off the
+        # side read as a 5.7 cm gap, and the escape turned into it (-3.3 cm).
+        # Nothing of the rover is in the scan plane (25 cm, above the frame): in
+        # 21299 real scans (survey 2026-10-18) no return came within 6 cm of the
+        # outline, and the closest of all was 17.8 cm from the LiDAR.
+        own = (p[:, 0] < FRONT + OWN_PAD) & (p[:, 0] > -REAR - OWN_PAD) & (np.abs(p[:, 1]) < SIDE + OWN_PAD)
         self.pts = p[~own]
         self.pts_t = time.time()
 

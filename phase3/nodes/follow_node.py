@@ -54,7 +54,7 @@ from tf2_ros import Buffer, TransformListener
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from follow import GAP, DIST_DEADBAND, SIDE_MARGIN, Follower  # noqa: E402
-from goal_exec import FRONT, SIDE  # noqa: E402
+from goal_exec import FRONT, REAR, SIDE  # noqa: E402
 from fused_obstacles import make_obstacles  # noqa: E402
 
 SD_MAX_CM = 3.0          # = goal_exec_node
@@ -140,7 +140,9 @@ class FollowNode(Node):
         ok = np.isfinite(r) & (r > 0.05) & (r < 8.0)
         x, y, yaw = self.mount
         p = np.stack([r[ok] * np.cos(a[ok] + yaw) + x, r[ok] * np.sin(a[ok] + yaw) + y], 1)
-        own = (p[:, 0] < 0.202) & (p[:, 0] > -0.198) & (np.abs(p[:, 1]) < 0.21)   # the rover itself
+        # the rover itself: inside the outline + 5 mm (was +2 cm: hid what is beside
+        # the body; see goal_exec_node.py OWN_PAD)
+        own = (p[:, 0] < FRONT + 0.005) & (p[:, 0] > -REAR - 0.005) & (np.abs(p[:, 1]) < SIDE + 0.005)
         self.pts = p[~own]
         self.pts_t = time.time()
 

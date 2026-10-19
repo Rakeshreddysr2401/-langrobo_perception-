@@ -582,11 +582,15 @@ global_costmap:
           # the scan is at z 0.25 in odom (the laser plane, description/)
           min_obstacle_height: 0.0
           max_obstacle_height: 0.30
-          # nothing of the rover's own is in the plane; 0.20 keeps a stray
-          # return off the chassis from marking the rover's own cell
-          obstacle_min_range: 0.20
+          # 0.05 (the C1 driver's range_min) from 0.20, 2026-10-19. 0.20 left
+          # everything within ~15 cm of the nose (the LiDAR is 4.8 cm behind it)
+          # and right beside the LiDAR unmarked -- and the camera is blind under
+          # ~40 cm, so nothing saw it. Nothing of the rover is in the plane (21299
+          # real scans, survey 2026-10-18: no return within 6 cm of the outline);
+          # a stray return inside the body is cleared by footprint_clearing_enabled.
+          obstacle_min_range: 0.05
           obstacle_max_range: 6.0
-          raytrace_min_range: 0.20
+          raytrace_min_range: 0.05
           raytrace_max_range: 8.0
           # true from false, 2026-09-26: the C1 reports inf where no echo came
           # back (95 of 720 beams in a room). With false those beams clear
@@ -813,11 +817,15 @@ local_costmap:
           # the scan is at z 0.25 in odom (the laser plane, description/)
           min_obstacle_height: 0.0
           max_obstacle_height: 0.30
-          # nothing of the rover's own is in the plane; 0.20 keeps a stray
-          # return off the chassis from marking the rover's own cell
-          obstacle_min_range: 0.20
+          # 0.05 (the C1 driver's range_min) from 0.20, 2026-10-19. 0.20 left
+          # everything within ~15 cm of the nose (the LiDAR is 4.8 cm behind it)
+          # and right beside the LiDAR unmarked -- and the camera is blind under
+          # ~40 cm, so nothing saw it. Nothing of the rover is in the plane (21299
+          # real scans, survey 2026-10-18: no return within 6 cm of the outline);
+          # a stray return inside the body is cleared by footprint_clearing_enabled.
+          obstacle_min_range: 0.05
           obstacle_max_range: 6.0
-          raytrace_min_range: 0.20
+          raytrace_min_range: 0.05
           raytrace_max_range: 8.0
           # true from false, 2026-09-26: the C1 reports inf where no echo came
           # back (95 of 720 beams in a room). With false those beams clear
