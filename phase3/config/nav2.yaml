@@ -854,10 +854,18 @@ local_costmap:
         # "Collision Ahead" (3 of 3 goals timed out, 172-312 warnings each).
         # Spread to 0.80 at 2.0, routes keep to the middle of any space up to
         # ~1.6 m wide (owner, same day: "the line is right of centre").
-        inflation_radius: 0.80
-        # 2.0: 10.0 was tried and nav2 then segfaulted; 30 min back on 2.0
-        # (with drive tests in it) had no crash.
-        cost_scaling_factor: 2.0
+        # LOCAL ONLY, 2026-10-19 (twin, apt_s1): 0.45 / 5.0, from the global's 0.80 /
+        # 2.0. The wide soft ramp is for the PLANNER (routes down the middle --
+        # global_costmap keeps it). MPPI follows that route already; here the
+        # ramp only fed its CostCritic (weight 6): in a furnished room 79 % of
+        # the free floor in this 4 m window read >= 50/100 (median 71; 63 at a
+        # spot 42 cm from anything), every sample cost more than standing still,
+        # and MPPI swung the heading back and forth by a table, a bin, a ball and
+        # chair legs for 30-300 s (two runs). At 0.45 / 5.0: 43 %. The radius stays
+        # >= 0.334 (the padded footprint's circumscribed radius; below it the
+        # planner segfaulted, 2026-09-27); 5.0, not the 10.0 that preceded a crash.
+        inflation_radius: 0.45
+        cost_scaling_factor: 5.0
 
 behavior_server:
   ros__parameters:

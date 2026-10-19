@@ -65,6 +65,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'tools'))
 import gap_pass as GP  # noqa: E402
 import tight_route as TRT  # noqa: E402
 import trail as TR  # noqa: E402
+import escape_moves as EM  # noqa: E402
+import house_route as HR  # noqa: E402
 from goal_exec import FRONT as GE_FRONT, REAR as GE_REAR, SIDE, GoalExec, wrap  # noqa: E402
 
 EXACT_RANGE = 1.2      # m: closer than this, goal_exec alone (its MAX_LEG is 1.5)
@@ -86,6 +88,12 @@ PASS_D_FAR = (1.8, 1.3, 0.9)
 # "nav2 failed" in 117 s; in a real home, any room past ~4 m. Each leg: the
 # farthest point toward the goal, up to LEG_MAX, that fits and plans.
 LEG_MAX = 3.2          # m: well inside the 4 m half-window
+# A leg's end is a WAYPOINT, not a goal: within LEG_DONE_M it is done, any heading.
+# Twin 2026-10-19 (apt_s1, recorded): each leg went to nav2 as a full goal (10 cm
+# and 14 deg), the waypoint fell between a ball, a bin and chair legs, and MPPI
+# spent 76 s within 8-23 cm of it, turning 170 deg back and forth to satisfy the
+# heading -- then the next leg re-planned from there anyway.
+LEG_DONE_M = 0.35
 LEG_MIN = 1.0
 LEG_STEP = 0.4
 MAX_LEGS = 12
@@ -187,6 +195,9 @@ class Reach(GP.Pass):
         self.create_subscription(OccupancyGrid, '/local_costmap/costmap', lambda m: setattr(self, 'lcm', m), latched)
         # the planner's own costmap: a snapped goal must be one IT accepts
         self.create_subscription(OccupancyGrid, '/global_costmap/costmap', lambda m: setattr(self, 'gcm', m), latched)
+        # the HOUSE map (slam_toolbox): rooms and doors beyond nav2's 8 m window, for routing legs
+        self.house = None
+        self.create_subscription(OccupancyGrid, '/map', lambda m: setattr(self, 'house', m), latched)
         self.create_subscription(Empty, '/reach/cancel', lambda _: setattr(self, 'stop_req', True), 10)
         # where reach has driven: its own drives only, so a carry is not a road
         self.trail = TR.Trail()
@@ -309,7 +320,7 @@ class Reach(GP.Pass):
                 c.call_async(ClearEntireCostmap.Request())
         self.spin_for(0.5)
 
-    def run_nav2(self, g, timeout=NAV_TIMEOUT):
+    def run_nav2(self, g, timeout=NAV_TIMEOUT, done_within=None):
         if not self.nav.wait_for_server(timeout_sec=3):
             return 'failed', 'nav2 not up'
         try:
@@ -328,8 +339,23 @@ class Reach(GP.Pass):
             return 'failed', 'nav2 rejected the goal'
         self.nav_gh = gh                           # cancelled on shutdown (main)
         res = gh.get_result_async()
+        watch = []                                 # (t, x, y, th): the dither watch
         while not res.done():
             self.spin_for(0.1)
+            if self.pose is not None:
+                if done_within is not None and self.dist(g) <= done_within:
+                    gh.cancel_goal_async()          # a waypoint: near is enough
+                    self.spin_for(0.3)
+                    self.nav_gh = None
+                    return 'reached', f'waypoint within {done_within * 100:.0f} cm'
+                watch.append((time.time(),) + tuple(self.pose[:3]))
+                why = self.dithering(watch, g)
+                if why:
+                    gh.cancel_goal_async()
+                    self.spin_for(0.5)
+                    self.nav_gh = None
+                    self.stop()
+                    return 'failed', why
             if self.stop_req or time.time() - t0 > timeout:
                 gh.cancel_goal_async()
                 self.spin_for(0.5)
@@ -343,6 +369,63 @@ class Reach(GP.Pass):
         if st == GoalStatus.STATUS_SUCCEEDED:
             return 'reached', ''
         return 'failed', self.nav_reason()
+
+    # ── dither watch ──────────────────────────────────────────────────────────
+    # Twin, apt_s1 2026-10-19: the lattice routed through the 57 cm squeeze by
+    # the sofa (38 cm rover: room); at its mouth MPPI swung the heading back and
+    # forth (up to 80 deg) for ~30 s, 0.1 m of progress, then nav2 re-planned
+    # the long way round: 14.5 m and 123 s for a 4.9 m goal. nav2's progress
+    # checker cannot see it: a 29 deg turn COUNTS as progress (it has to, for
+    # rotate-to-heading). So reach watches: DITHER_S with no net DITHER_GAIN_M
+    # nearer the goal, inside DITHER_BOX_M, the heading reversing DITHER_FLIPS
+    # times and DITHER_RAD of turning in all (tested on the apt_s1 track: fires
+    # at 26 s; not on driving, creeping, re-aiming, slaloms or detours) -> cancel, "narrow: dithering", and the tight route
+    # (straight moves that fit) takes the gap instead.
+    DITHER_S = 20.0
+    DITHER_BOX_M = 0.50                    # stays within this of where the window began ...
+    DITHER_GAIN_M = 0.15                   # ... and is no nearer the goal, start to end, than this
+    DITHER_FLIPS = 2
+    DITHER_RAD = 1.5
+    DITHER_GOAL_M = 0.35                   # at the goal, turning to its heading is the job
+
+    def dithering(self, watch, g):
+        now = watch[-1][0]
+        while watch and watch[0][0] < now - self.DITHER_S - 0.5:
+            watch.pop(0)
+        if now - watch[0][0] < self.DITHER_S or self.dist(g) < self.DITHER_GOAL_M:
+            return ''
+        x0, y0 = watch[0][1], watch[0][2]
+        if max(math.hypot(x - x0, y - y0) for _, x, y, _ in watch) > self.DITHER_BOX_M:
+            return ''
+        d0 = math.hypot(g[0] - x0, g[1] - y0)
+        if d0 - math.hypot(g[0] - watch[-1][1], g[1] - watch[-1][2]) > self.DITHER_GAIN_M:
+            return ''
+        flips, turned, sign = 0, 0.0, 0
+        for a, b in zip(watch, watch[1:]):
+            d = wrap(b[3] - a[3])
+            turned += abs(d)
+            if abs(d) > 0.02:
+                sg = 1 if d > 0 else -1
+                if sign and sg != sign:
+                    flips += 1
+                sign = sg
+        if flips >= self.DITHER_FLIPS and turned >= self.DITHER_RAD:
+            return (f'narrow: dithering ({math.degrees(turned):.0f} deg of turning, {flips} reversals, '
+                    f'no nearer the goal in {self.DITHER_S:.0f} s)')
+        return ''
+
+    def snap_note(self, snapped):
+        """{'snapped_cm': n, 'taken': ...} when the goal had to move off something:
+        the brain says "that spot is taken; I stopped next to it" instead of
+        pretending it stands where it was asked to."""
+        if not snapped or self.pose is None:
+            return {}
+        a = snapped[0]
+        d = math.hypot(a[0] - self.pose[0], a[1] - self.pose[1])
+        if d <= ARRIVED_M:
+            return {}
+        return {'snapped_cm': round(d * 100),
+                'taken': 'the spot asked for is occupied; stopped at the nearest place that fits'}
 
     def nav_reason(self):
         """What nav2 last complained about (its log is the only place it says)."""
@@ -500,26 +583,73 @@ class Reach(GP.Pass):
         pts = np.vstack(scans + [self.dobs.points_base(self.pose)]) if scans else None
         return self.outside_body(pts), self.outside_body(self.costmap_cells())
 
+    ESCAPE_CLEAR = 0.06                    # m: done when this much is open (the planner pads 4 cm)
+    ESCAPE_MOVES = 3
+
+    def pivots(self):
+        """Where this rover turns about, per direction (goal_exec learns it)."""
+        try:
+            P = json.loads(PIVOT_FILE.read_text())
+            return {+1: np.array(P['1'], float), -1: np.array(P['-1'], float)}
+        except (OSError, ValueError, KeyError):
+            return {+1: np.zeros(2), -1: np.zeros(2)}
+
     def escape(self, attempt):
-        """One short straight move away from contact. True if it moved."""
-        pts, cells = self.near_now(self.scans)
-        g0 = self.gap_all(pts, cells)
-        if g0 > self.ESCAPE_NEAR:
-            return False
-        best = None
-        for step in self.ESCAPE_STEPS:
-            sweep = min(self.gap_all(pts, cells, s) for s in np.linspace(0.01 * np.sign(step), step, 6))
-            end = self.gap_all(pts, cells, step)
-            if sweep >= g0 - 0.002 and end > g0 + 0.01 and (best is None or end > best[1]):
-                best = (step, end)
-        if best is None:
-            self.say(attempt=attempt, phase='escape', gap_cm=round(g0 * 100, 1), outcome='no straight move opens space')
-            return False
-        step, end = best
-        self.say(attempt=attempt, phase='escape', gap_cm=round(g0 * 100, 1), move_cm=round(step * 100), to_gap_cm=round(end * 100, 1))
-        r, why = self.drive_straight(step, g0)
-        self.say(attempt=attempt, phase='escape', outcome=r, why=why)
-        return r == 'reached'
+        """Short moves off what the rover is parked against -- straight OR a turn
+        on the spot (escape_moves.py has why: a thing beside the body is not
+        cleared by any straight move) -- until ESCAPE_CLEAR is open or nothing
+        helps. True if it moved."""
+        moved_any = False
+        P = self.pivots()
+        for k in range(self.ESCAPE_MOVES):
+            pts, cells = self.near_now(self.scans)
+            g0 = self.gap_all(pts, cells)
+            if g0 > (self.ESCAPE_NEAR if k == 0 else self.ESCAPE_CLEAR):
+                break
+
+            def gap_of(dx=0.0, a=0.0, P=(0.0, 0.0)):
+                return min(EM.body_gap(EM.moved(pts, dx, a, P)),
+                           EM.body_gap(EM.moved(cells, dx, a, P)) - self.CELL_SLACK)
+            best = EM.best_move(gap_of, g0, P)
+            if best is None:
+                self.say(attempt=attempt, phase='escape', gap_cm=round(g0 * 100, 1),
+                         outcome='no short move or turn opens space')
+                break
+            kind, v, end = best
+            self.say(attempt=attempt, phase='escape', gap_cm=round(g0 * 100, 1), to_gap_cm=round(end * 100, 1),
+                     **({'move_cm': round(v * 100)} if kind == 'drive' else {'turn_deg': round(math.degrees(v))}))
+            r, why = self.drive_straight(v, g0) if kind == 'drive' else self.turn_in_place(v, g0)
+            self.say(attempt=attempt, phase='escape', outcome=r, why=why)
+            if r != 'reached':
+                break
+            moved_any = True
+        return moved_any
+
+    ESCAPE_WZ = 1.0                        # rad/s commanded = goal_exec WZ_MIN (~0.3 rad/s actual)
+
+    def turn_in_place(self, a, g0):
+        """Turn a (rad) on the spot, closed on fresh points every tick; stops the
+        moment the gap to anything shrinks (the slide is real, not modelled here)."""
+        th0 = self.pose[2]
+        sgn = 1.0 if a > 0 else -1.0
+        t0 = time.time()
+        try:
+            while time.time() - t0 < abs(a) / 0.15 + 3.0:
+                if self.stop_req:
+                    return 'cancelled', ''
+                done = abs(wrap(self.pose[2] - th0))
+                if done >= abs(a) - math.radians(2):
+                    return 'reached', f'turned {math.degrees(done):.0f} deg'
+                pts, cells = self.near_now(self.scans[-1:])
+                if self.gap_all(pts, cells) < g0 - 0.005:
+                    return 'failed', f'gap closing after {math.degrees(done):.0f} deg -- stopped'
+                cmd = Twist()
+                cmd.angular.z = sgn * self.ESCAPE_WZ
+                self.cmd.publish(cmd)
+                self.spin_for(0.05)
+            return 'failed', 'timed out'
+        finally:
+            self.stop()
 
     ESCAPE_VX = 0.05                       # m/s, goal_exec's pass speed
 
@@ -576,6 +706,26 @@ class Reach(GP.Pass):
     APPROACH_BACK = (0.5, 0.9, 1.3, 1.8, 2.4)   # m short of the goal, nearest first
     APPROACH_GAIN = 0.30                       # m closer each round, or stop
     LOOK_S = 2.5                               # s facing the goal for nvblox
+
+    def planner_says_no(self, g):
+        """True only when the planner ANSWERED and found no route to g. No server,
+        no answer in time (a busy CPU) or a refused request is not a no: then nav2
+        is asked as before, so a slow planner never turns into a false refusal."""
+        if not self.planner.wait_for_server(timeout_sec=2):
+            return False
+        goal = ComputePathToPose.Goal()
+        goal.goal = pose_msg('odom', *g)
+        goal.use_start = False
+        f = self.planner.send_goal_async(goal)
+        t0 = time.time()
+        while not f.done() and time.time() - t0 < 5:
+            self.spin_for(0.05)
+        if not f.done() or not f.result().accepted:
+            return False
+        r = f.result().get_result_async()
+        while not r.done() and time.time() - t0 < 10:
+            self.spin_for(0.05)
+        return r.done() and len(r.result().result.path.poses) == 0
 
     def plan_ok(self, g):
         """Does the planner have a route to g (odom)? Planning only, no motion."""
@@ -692,9 +842,45 @@ class Reach(GP.Pass):
         self.say(attempt=attempt, phase='pass_far', D=round(D, 2), outcome=out)
         return out
 
+    def house_route(self, g):
+        """(route [(x, y) odom], length m) through the house map to g (odom), or (None, why).
+        house_route.py has why: legs on the straight line ran into walls and furniture."""
+        # OFF unless REACH_HOUSE_ROUTE=1: not yet proven on the twin (apt_s1 2026-10-19: both
+        # cross-room goals still failed with it on). Off = the straight-line legs as before.
+        if os.environ.get('REACH_HOUSE_ROUTE', '0') != '1':
+            return None, 'house routing off'
+        m = self.house
+        if m is None or self.pose is None:
+            return None, 'no house map'
+        try:
+            tr = self.buf.lookup_transform(m.header.frame_id or 'map', 'odom', Time()).transform
+        except Exception:  # noqa: BLE001 - no map -> odom yet
+            return None, 'no map -> odom transform'
+        th = yaw_of(tr.rotation)
+        c, s_ = math.cos(th), math.sin(th)
+        tx, ty = tr.translation.x, tr.translation.y
+        to_map = lambda x, y: (tx + c * x - s_ * y, ty + s_ * x + c * y)
+        to_odom = lambda x, y: (c * (x - tx) + s_ * (y - ty), -s_ * (x - tx) + c * (y - ty))
+        data = np.array(m.data, dtype=np.int16).reshape(m.info.height, m.info.width)
+        pts, L = HR.route(data, m.info.resolution, m.info.origin.position.x, m.info.origin.position.y,
+                          to_map(*self.pose[:2]), to_map(*g[:2]))
+        if pts is None:
+            return None, L
+        return [to_odom(*p) for p in pts], L
+
     def leg_point(self, g):
-        """The farthest point toward g, at most LEG_MAX away, that fits the
-        rover and the planner can reach; None if there is none."""
+        """The farthest point along the HOUSE ROUTE to g, at most LEG_MAX along it, that
+        fits the rover and the planner can reach; the straight line when there is no
+        route. None if neither has one."""
+        route, L = self.house_route(g)
+        if route is not None:
+            r = min(LEG_MAX, L)
+            while r >= LEG_MIN:
+                (x, y), th = HR.along(route, r)
+                cand, _, gap = self.fit((x, y, th))
+                if not (gap == gap and gap < self.SNAP_GAP) and self.plan_ok(cand):
+                    return cand
+                r -= LEG_STEP
         bearing = math.atan2(g[1] - self.pose[1], g[0] - self.pose[0])
         ux, uy = math.cos(bearing), math.sin(bearing)
         r = min(LEG_MAX, self.dist(g))
@@ -709,17 +895,22 @@ class Reach(GP.Pass):
         """Drive legs until g is within LEG_MAX. (True, '') or (False, why)."""
         for k in range(MAX_LEGS):
             d0 = self.dist(g)
-            if d0 <= LEG_MAX or self.stop_req:
+            route, L = self.house_route(g)
+            # near in a straight line but far by the route (behind a wall): legs too
+            far = L if route is not None else d0
+            if far <= LEG_MAX or self.stop_req:
                 return True, ''
             leg = self.leg_point(g)
             if leg is None:
                 return False, 'no reachable point toward the goal (legs)'
             self.say(attempt=attempt, phase='leg', leg=k + 1, dist_m=round(d0, 2),
                      leg_m=round(math.hypot(leg[0] - self.pose[0], leg[1] - self.pose[1]), 2))
-            r, why = self.run_nav2(leg)
+            r, why = self.run_nav2(leg, done_within=LEG_DONE_M)
             if self.stop_req:
                 return False, 'cancelled'
-            if d0 - self.dist(g) < 0.3:
+            route2, L2 = self.house_route(g)
+            gained = (far - L2) if route is not None and route2 is not None else d0 - self.dist(g)
+            if gained < 0.3:
                 return False, f'leg made no progress ({r}: {why})'
         return self.dist(g) <= LEG_MAX, f'still {self.dist(g):.1f} m away after {MAX_LEGS} legs'
 
@@ -843,6 +1034,8 @@ class Reach(GP.Pass):
             return
         self.approach_best = float('inf')
         g, moved, gap = self.fit(g)
+        g_asked = g if moved == 0 else self.goal_odom(m) or g
+        snapped = [g_asked]                     # [the goal as asked]; snap_note measures from it
         if moved > 0:
             self.say(phase='snap', moved_cm=round(moved * 100), gap_cm=round(gap * 100, 1),
                      why='the goal as clicked touches something; nearest pose that fits')
@@ -871,6 +1064,12 @@ class Reach(GP.Pass):
                 d = self.dist(g)
             if legs_failed:
                 r, why = 'failed', legs_failed
+            elif (d > EXACT_RANGE or go_nav2) and self.planner_says_no(g):
+                # Ask the planner first (~1-2 s). Without it a goal with no
+                # route cost a whole nav2 run -- its behaviour tree replans
+                # and backs up for ~33 s before saying "no path" (real robot
+                # 2026-10-18: 4 such runs, 250 s, for one occupied goal).
+                r, why = 'failed', 'no path: planner found none (asked before driving)'
             elif d > EXACT_RANGE or go_nav2:
                 self.say(attempt=attempt, phase='nav2', dist_m=round(d, 2))
                 r, why = self.run_nav2(g)
@@ -907,12 +1106,24 @@ class Reach(GP.Pass):
             if r == 'failed' and self.arrived(g):
                 self.stop()
                 self.say(result='reached', attempt=attempt, dist_cm=round(self.dist(g) * 100, 1),
-                         secs=round(time.time() - t0), tried=tried,
+                         secs=round(time.time() - t0), tried=tried, **self.snap_note(snapped),
                          note=f'within nav2 tolerance; the exact finish did not fit ({why})')
+                return
+            # AT the spot, only the heading left: that is arrival. Twin 2026-10-19
+            # (ledge_probe, the real robot's shelf-ledge goal): 2-5 cm from the goal
+            # from 121 s on, the ledge in the way of the last turn; nav2 "no motion
+            # that fits" three times and the goal ended FAILED at 267 s -- while
+            # standing where it was sent. "Go near X" is about the place.
+            if r == 'failed' and self.dist(g) <= ARRIVED_M:
+                self.stop()
+                off = abs(math.degrees(wrap(g[2] - self.pose[2])))
+                self.say(result='reached', attempt=attempt, dist_cm=round(self.dist(g) * 100, 1),
+                         secs=round(time.time() - t0), tried=tried, **self.snap_note(snapped),
+                         note=f'at the spot; could not turn to the goal heading ({off:.0f} deg off): {why}')
                 return
             if r == 'reached':
                 self.say(result='reached', attempt=attempt, dist_cm=round(self.dist(g) * 100, 1),
-                         secs=round(time.time() - t0), tried=tried)
+                         secs=round(time.time() - t0), tried=tried, **self.snap_note(snapped))
                 return
             if r == 'cancelled' or self.stop_req:
                 break
@@ -939,6 +1150,27 @@ class Reach(GP.Pass):
                          **({'note': way_note} if way_note else {}))
                 return
             prev_fail = (why, self.pose[:2])
+            # The goal may have turned out to be occupied once seen: fit() ran
+            # when the goal came in, on the map of THAT moment, and unseen floor
+            # is left alone. Real robot 2026-10-18: a goal on a shelf ledge the
+            # camera had not seen yet -- 4 x "no path", 250 s, failed. Fit again
+            # on what the map shows now.
+            g2, moved2, gap2 = self.fit(g)
+            if moved2 > 0:
+                g = g2
+                if m.header.frame_id == 'map':
+                    gm = self.goal_odom(m)
+                    snap = (g[0] - gm[0], g[1] - gm[1]) if gm else snap
+                same = 1
+                self.say(attempt=attempt, phase='snap', moved_cm=round(moved2 * 100), gap_cm=round(gap2 * 100, 1),
+                         why='the goal touches something now that it has been seen; nearest pose that fits')
+                continue
+            if gap2 == gap2 and gap2 < 0:           # not NaN: inside something, and nothing fits near it
+                self.stop()
+                self.say(result='failed', attempt=attempt, secs=round(time.time() - t0), tried=tried,
+                         why=f'the goal is inside something (now seen: {round(-gap2 * 100)} cm into it) '
+                             f'and no spot within {round(self.SNAP_R * 100)} cm fits the rover')
+                return
             self.say(attempt=attempt, phase='recover', why=why)
             # ── recover: stop, clear, look, then pass if narrow, else wait ──
             self.stop()
