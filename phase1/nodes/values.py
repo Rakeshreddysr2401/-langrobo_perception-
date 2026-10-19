@@ -29,7 +29,7 @@ def cb(k):
 n.create_subscription(Odometry, "/vo/odom", cb("odom"), qos_profile_sensor_data)
 n.create_subscription(String, "/vo/status", cb("status"), 10)
 n.create_subscription(Imu, "/gyro/base", cb("imu_base"), qos_profile_sensor_data)
-n.create_subscription(Imu, "/camera/camera0/imu", cb("imu_raw"), qos_profile_sensor_data)
+n.create_subscription(Imu, "/camera/camera0/motion/sample", cb("imu_raw"), qos_profile_sensor_data)
 n.create_subscription(Vector3, "/wheel_state", cb("wheel"), qos_profile_sensor_data)
 
 t0 = time.time()
