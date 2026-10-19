@@ -1,6 +1,6 @@
 
 <!--
-  This Behavior Tree replans the global path periodically at 1 Hz and it also has
+  This Behavior Tree keeps its global path while it is valid (replans when blocked, the goal changes, or every 10 s) and it also has
   recovery actions specific to planning / control as well as general system issues.
   This will be continuous if a kinematically valid planner is selected.
 -->
@@ -10,9 +10,28 @@
       <PipelineSequence name="NavigateWithReplanning">
         <ControllerSelector selected_controller="{selected_controller}" default_controller="FollowPath" topic_name="controller_selector"/>
         <PlannerSelector selected_planner="{selected_planner}" default_planner="GridBased" topic_name="planner_selector"/>
-        <RateController hz="1.0">
+        <!-- KEEP THE PATH while it is still good (2026-10-19). Replanning every
+             second let each new plan pick a different way round (apt_s1 living
+             room -> corridor: the plan flipped between the direct way past the
+             chairs and a loop round the coffee table; the rover turned back each
+             time, 203 s and 12 m for a 4-5 m trip). As nav2 ships it
+             (nav_to_pose_with_consistent_replanning_and_if_path_becomes_invalid):
+             replan only when the path is blocked, the goal changes, or the path
+             is 10 s old. -->
+        <RateController hz="2.0">
           <RecoveryNode number_of_retries="1" name="ComputePathToPose">
-            <ComputePathToPose goal="{goal}" path="{path}" planner_id="{selected_planner}" error_code_id="{compute_path_error_code}"/>
+            <Fallback>
+              <ReactiveSequence>
+                <Inverter>
+                  <PathExpiringTimer seconds="10" path="{path}"/>
+                </Inverter>
+                <Inverter>
+                  <GlobalUpdatedGoal/>
+                </Inverter>
+                <IsPathValid path="{path}"/>
+              </ReactiveSequence>
+              <ComputePathToPose goal="{goal}" path="{path}" planner_id="{selected_planner}" error_code_id="{compute_path_error_code}"/>
+            </Fallback>
             <Sequence>
               <WouldAPlannerRecoveryHelp error_code="{compute_path_error_code}"/>
               <!-- no ClearGlobalCostmap here (2026-09-27): three nav2 segfaults were
