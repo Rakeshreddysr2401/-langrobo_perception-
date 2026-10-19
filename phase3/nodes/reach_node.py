@@ -934,10 +934,12 @@ class Reach(GP.Pass):
     def house_route(self, g):
         """(route [(x, y) odom], length m) through the house map to g (odom), or (None, why).
         house_route.py has why: legs on the straight line ran into walls and furniture."""
-        # OFF unless REACH_HOUSE_ROUTE=1: being proven on the twin (2026-10-19: with it on,
-        # bedroom -> living room reached, which the straight-line legs never did; nav2's
-        # obstacles now added so both plan on the same things). Off = straight-line legs.
-        if os.environ.get('REACH_HOUSE_ROUTE', '0') != '1':
+        # ON by default since 2026-10-19 evening (REACH_HOUSE_ROUTE=0 turns it off: the
+        # straight-line legs). Twin: the 5-leg cross-room loop went from "bedroom ->
+        # living room fails" to all reached, nothing touched. Real robot, the same
+        # evening: far goals that failed "no path ... 3 times" with straight legs
+        # (4.3 m, 343 s) went through a 49 cm bedroom door and out again.
+        if os.environ.get('REACH_HOUSE_ROUTE', '1') != '1':
             return None, 'house routing off'
         m = self.house
         if m is None or self.pose is None:
