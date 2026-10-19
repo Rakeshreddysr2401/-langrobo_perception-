@@ -96,6 +96,38 @@ both EN held HIGH. (This is different from the old L298N IN1/IN2+ENA scheme.)
 
 ---
 
+## 2b. Front ultrasonic sensors — 2× HC-SR04 (PLANNED 2026-10-19, not yet fitted)
+
+Two ultrasonic sensors on the front (owner, 2026-10-19), for what the LiDAR (one
+plane at 25 cm) and the camera (blind under ~40 cm, 87° ahead only) both miss
+close in front: low things, chair feet, a towel's hem. Model assumed **HC-SR04**
+(5 V, range from ~2 cm) — confirm; a JSN-SR04T is blind for its first 20-25 cm.
+
+**First proposed pins (GPIO 5/19 and 18/21) are TAKEN** — 5 = right LPWM, 19 = left
+LPWM, 18 = left RPWM, 21 = left R_EN (§2): wired there, the wheels would move when
+a sensor fires and the 5 V echo would reach a motor driver input.
+
+Free on the DevKit V1 (WROOM-32, no PSRAM): **4, 14, 16, 17**. Not usable: 6-11
+(flash), 1/3 (USB serial = micro-ROS), 0/2/12/15 (boot strapping), 34-39 input-only
+(and all taken by encoders).
+
+| HC-SR04 pin | Left sensor → ESP32 | Right sensor → ESP32 | Notes |
+|---|---|---|---|
+| VCC | 5V / VIN | 5V / VIN | ~15 mA each |
+| GND | common GND | common GND | §7 |
+| TRIG | **GPIO16** | **GPIO14** | 10 µs pulse out. GPIO14 flickers at boot: on TRIG that is only a harmless ping |
+| ECHO | **GPIO17** via divider | **GPIO4** via divider | **5 V out: 1 kΩ in series + 2 kΩ to GND = 3.3 V at the GPIO** (or use the 3.3 V HC-SR04P / RCWL-1601 from 3V3) |
+
+Firmware plan (not written yet): ping LEFT and RIGHT alternately (one at a time,
+no cross-talk), ~15 Hz each, non-blocking (echo timed by interrupt, 25 ms timeout
+= ~4 m), publish `sensor_msgs/Range` on `/sonar/left` and `/sonar/right`
+(frames `sonar_left` / `sonar_right` in description/params.yaml; field of view
+~0.26 rad, min 0.02 m, max 4.0 m, `inf` on no echo). Then: the twin simulates
+the same (kino_sim, first), nav2's collision monitor and costmap read them, and
+reach / goal_exec use them as a close-range check at bumper height.
+Needed from the owner: model, mounting height above the floor, left/right
+offsets, and the angle each points.
+
 ## 3. Motors & encoders — Rhino GB37 12V (180 RPM variant)
 
 | Spec | Value |
