@@ -1037,10 +1037,21 @@ class Reach(GP.Pass):
     # look and a new plan.
     def tight_target(self, g):
         """(x, y) odom: the goal if within reach, else the farthest point
-        toward it that fits; None if none does."""
+        toward it that fits -- along the HOUSE ROUTE when there is one (through
+        the door, not the wall: 2026-10-19), else on the straight line; None if
+        none does."""
         d = self.dist(g)
         if d <= TIGHT_REACH[0]:
             return g[0], g[1]
+        route, L = self.house_route(g)
+        if route is not None:
+            for r in TIGHT_REACH:
+                if r >= L:
+                    continue
+                (x, y), th = HR.along(route, r)
+                cand, _, gap = self.fit((x, y, th))
+                if not (gap == gap and gap < self.SNAP_GAP):
+                    return cand[0], cand[1]
         bearing = math.atan2(g[1] - self.pose[1], g[0] - self.pose[0])
         ux, uy = math.cos(bearing), math.sin(bearing)
         for r in TIGHT_REACH:
@@ -1190,6 +1201,14 @@ class Reach(GP.Pass):
                 d = self.dist(g)
             if legs_failed:
                 r, why = 'failed', legs_failed
+                # No leg point the planner can reach: the route goes through a gap
+                # nav2 cannot plan (real robot 2026-10-19: back out through the 49 cm
+                # bedroom door; nav2's 16 headings and 4 cm padding do not fit it).
+                # That is "no path" for the recoveries: the tight route takes the
+                # gap on the raw points, aimed along the house route. It used to
+                # only wait and ask nav2 again -- 3 x, 41 s, not one move.
+                if legs_failed.startswith('no reachable point'):
+                    why = 'no path: ' + legs_failed
             elif (d > EXACT_RANGE or go_nav2) and self.planner_says_no(g):
                 # Ask the planner first (~1-2 s). Without it a goal with no
                 # route cost a whole nav2 run -- its behaviour tree replans
