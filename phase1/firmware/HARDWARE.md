@@ -117,7 +117,10 @@ motors, §2), USB-cabled to the Pi 5 like the wheels' board:
 and the wheels' micro-ROS agent must never open the sonar board. Address both by
 `/dev/serial/by-id/...` (or a udev rule giving fixed names) once it is plugged in.
 
-Plan (not written yet): the sonar ESP32 pings the two sensors alternately (no
+BUILT 2026-10-19: MicroPython 1.24 + `phase1/firmware/sonar/main.py` on the sonar ESP32
+(update it with `sonar/upload_main.py PORT main.py`, from the Pi 5); the Pi 5's
+`scripts/sonar_node.py` (service langrobo-sonar) publishes the topics. The design: the
+sonar ESP32 pings the two sensors alternately (no
 cross-talk), ~15 Hz each, and prints one line per reading over USB serial; a small
 node on the Pi 5 publishes `sensor_msgs/Range` on `/sonar/left` and `/sonar/right`
 (fov ~0.26 rad, min 0.02 m, max 4.0 m, `inf` on no echo). Kept apart from the
