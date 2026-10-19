@@ -986,10 +986,32 @@ collision_monitor:
       visualize: true
       polygon_pub_topic: collision_monitor/approach
       enabled: true
-    observation_sources: [scan]
+    # + the two front sonars (2026-10-19; description/params.yaml `sonar`): what is
+    # low and close in front, under the LiDAR's plane and inside the camera's
+    # blind 40 cm. A cone says how far, not where, so each echo becomes an arc
+    # across it -- here that is right: `approach` only caps the speed so contact
+    # stays >= time_before_collision away, and stops only for points already in
+    # the body + 1 cm, so a doorframe heard beside the path slows the rover
+    # briefly, never blocks it. source_timeout 0.0: a silent sonar (board
+    # unplugged, rebooting) is NOT a reason to stop -- nav2 stops on any stale
+    # source otherwise; the LiDAR keeps its 1 s timeout. The sonar node publishes
+    # +inf (no echo) while its board is missing, so its last reading never lingers.
+    observation_sources: [scan, sonar_left, sonar_right]
     scan:
       type: scan
       topic: /scan
       min_height: 0.0
       max_height: 0.30
+      enabled: true
+    sonar_left:
+      type: range
+      topic: /sonar/left
+      obstacles_angle: 0.0349          # a point every 2 deg across the cone
+      source_timeout: 0.0
+      enabled: true
+    sonar_right:
+      type: range
+      topic: /sonar/right
+      obstacles_angle: 0.0349
+      source_timeout: 0.0
       enabled: true
