@@ -171,7 +171,9 @@ ssh 192.168.1.16 'grep -n create_subscription \
   ~/ros2_ws/src/langrobo_ros/langrobo_ros/ros2_bridge.py'
 ```
 
-If `/vision/detections_3d` is not in that output, skip `detect`.
+If `/vision/detections_3d` is not in that output, skip `detect`. (Since 2026-10-20
+it costs ~1 % CPU while nothing subscribes: it sleeps -- no camera, no TF, no YOLO --
+and wakes for follow or a target hunt; NAV_PLAN.md "2026-10-20".)
 
 **`follow` is part of `up` since 2026-10-11** ("Kino, follow me" / "come to me";
 the Pi 5 brain has the tool on with `LANGROBO_FOLLOW=1`). It starts `detect` (YOLO

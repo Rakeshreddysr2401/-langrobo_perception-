@@ -995,11 +995,10 @@ up)
   # "Kino, follow me" (detect + follow_node). The brain has the tool on
   # (LANGROBO_FOLLOW=1), and with this layer started by hand it failed after
   # every power cycle (2026-10-11). Not fatal: the robot works without it.
-  # YOLO idles until someone asks for people, so it costs ~nothing at rest.
-  if [ "$TWIN" != 1 ]; then
-    echo
-    "$0" follow || echo "  ! follow did not come up -- the rest of the robot is fine; retry: ./rover follow"
-  fi
+  # detections_3d sleeps until someone wants detections (~1 % CPU). The twin
+  # runs it too (2026-10-20): skipping it there hid its 58 % idle overload.
+  echo
+  "$0" follow || echo "  ! follow did not come up -- the rest of the robot is fine; retry: ./rover follow"
 
   echo
   echo "[wheels] ESP32 link — first check"
@@ -1180,8 +1179,8 @@ detect)
          | python3 -c 'import sys,json,re; d=sys.stdin.read(); m=re.search(r\"objects.:\s*(\[.*?\])\", d, re.S); print(\"      \" + (\", \".join(sorted({o[\\\"label\\\"] for o in json.loads(m.group(1))})) if m else \"nothing in view\"))' 2>/dev/null" \
     || echo "      nothing in view"
   echo
-  echo "  This lights up the brain's approach_object, where_is,"
-  echo "  list_known_objects, scan_surroundings and the world_model service."
+  echo "  Used by: follow me (/vision/people) and the target hunt (/vision/target)."
+  echo "  It sleeps (no camera, no YOLO) while nothing subscribes; this sample woke it once."
   echo "  Log: ./rover logs detections_3d"
   ;;
 

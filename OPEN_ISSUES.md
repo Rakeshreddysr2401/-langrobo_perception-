@@ -15,7 +15,7 @@ numbers: [NAV_PLAN.md](NAV_PLAN.md) "Session 2026-10-19"; how it works now:
 |---|---|
 | real-robot run (owner at RViz, evening) | **done**: same room 3/3; through the 49 cm bedroom door and back out after 3 more fixes (NAV_PLAN.md "The same evening on the REAL robot") |
 | house route (legs along a route through the doors) | **ON by default** since 19b2026 (`REACH_HOUSE_ROUTE=0` turns it off) |
-| `detections_3d.py` (follow layer): 58% CPU + 1.1 GB RAM while publishing nothing; the Orin was at load 24, 157 MB free | **open** -- why it publishes nothing; do not run it until fixed |
+| `detections_3d.py` (follow layer): 58% CPU + 1.1 GB RAM while publishing nothing; the Orin was at load 24, 157 MB free | **fixed** 00ab7aa (twin): it SLEEPS while nothing subscribes -- 1 % CPU (was 29 % on the twin); wakes in 0.2-0.4 s for follow / a target hunt (follow_node 386ddf9 waits for it). Nothing subscribed: the brain dropped its consumer. Real-robot check at the next bring-up |
 | camera map: something ~32 cm ahead in the bedroom doorway (2 refusals, ~45 s) | open: look at bag `20261019-183641_rviz_real3` |
 | nav2-driven goals end up to ~10 cm off (turn-only finish, by design) | open: straight nudge along the heading, twin first |
 | front sonars (owner's HC-SR04s on their own ESP32 -> Pi 5 -> `/sonar/*`) in the collision monitor, as a witness and to vouch camera specks away | **built, live**, not drive-tested (NAV_PLAN.md "Later the same evening"); twin chairs / door + a hidden low object, then the robot |

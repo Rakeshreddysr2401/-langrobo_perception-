@@ -546,3 +546,24 @@ then the robot); the sonar service installed at boot (`sudo` on the Pi 5);
 S1-left and straight-ahead mounting confirmed (`assumed` in params.yaml).
 The Pi 5 dropped off the network the same night (no ping): power is the
 first suspect -- it now feeds two ESP32s over USB.
+
+## 2026-10-20: the Orin overload by detections_3d (fixed on the twin)
+
+Real 2026-10-19: `detections_3d.py` at 58 % CPU + 1.1 GB with nobody subscribed.
+The twin never showed it: `TWIN=1 ./rover up` skipped the follow/detect layer.
+Started there by hand it sat at 29 % / 1.46 GB, idle. By elimination (twin, node
+alone, 30 s): the 1 Hz idle YOLO 4 % + ~700 MB (its first inference creates the
+GPU context), every depth (896x504) and colour frame into Python 7 %, and a Python
+TF listener on /tf 18 % -- all for no reader (the Pi 5 brain dropped its detections
+consumer; tools/approach.py).
+
+| commit | change | measured (twin) |
+|---|---|---|
+| 00ab7aa | detections_3d SLEEPS without demand (target hunt, or a subscriber to detections_3d / target_result / people): no camera, no /tf, no YOLO; wakes in <= 0.25 s, sleeps 10 s after; a fresh TF buffer per wake | asleep 1.1-1.4 % CPU (was 29 %); first answer 0.2-0.4 s warm, 1.7-3.9 s on the first wake after a start; awake 48 % (YOLO 5 Hz, its job) |
+| 386ddf9 | follow_node waits up to DETECT_WAKE_S 5 (+1) s for the first /vision/people; its 3 s pick window counts from that first message | "follow me", nobody in view: 'finding' in 0.5 s; tests pass |
+| (this) | `TWIN=1 ./rover up` runs the follow layer like the robot; the detect gate's text | full twin bring-up |
+
+Memory: once woken, the GPU context stays (1.46 GB). The detect gate's 8 s "what it
+can see" sample wakes it at every bring-up, so follow-me's first answer is fast;
+the Jetson keeps ~2.3 GB available. Next: confirm on the real robot (`./rover up`,
+then `docker exec rover top`).
