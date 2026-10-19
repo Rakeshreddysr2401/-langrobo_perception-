@@ -73,6 +73,19 @@ class FakeReach:
     status_text = staticmethod(RN.Reach.status_text)
     tight_round = RN.Reach.tight_round
     tight_target = RN.Reach.tight_target
+    on_plan = RN.Reach.on_plan
+    TIGHT_FOLLOW_M, TIGHT_FOLLOW_DEG = RN.Reach.TIGHT_FOLLOW_M, RN.Reach.TIGHT_FOLLOW_DEG
+
+    def house_route(self, g):
+        return None, "no house map in this test"
+
+    class sonar:                       # no sonars in this test (as with an old URDF)
+        used = 0
+
+        @staticmethod
+        def points(known):
+            return np.zeros((0, 2))
+
     show_tight = RN.Reach.show_tight
     _mk = RN.Reach._mk
 

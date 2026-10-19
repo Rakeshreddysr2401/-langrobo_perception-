@@ -68,6 +68,7 @@ import trail as TR  # noqa: E402
 import escape_moves as EM  # noqa: E402
 import house_route as HR  # noqa: E402
 from goal_exec import FRONT as GE_FRONT, REAR as GE_REAR, SIDE, GoalExec, wrap  # noqa: E402
+from sonar_feed import SonarFeed  # noqa: E402
 
 EXACT_RANGE = 1.2      # m: closer than this, goal_exec alone (its MAX_LEG is 1.5)
 MAX_ATTEMPTS = 8
@@ -188,6 +189,7 @@ class Reach(GP.Pass):
         self.ge_goal = self.create_publisher(PoseStamped, '/goal_exec/goal', 10)
         self.ge_turn = self.create_publisher(PoseStamped, '/goal_exec/turn', 10)
         self.pub_status = self.create_publisher(String, '/reach/status', 10)
+        self.sonar = SonarFeed(self, self.buf)   # unexplained close echoes -> obstacle points
         # RViz: what reach is doing, over the rover, and the tight route's plan
         self.pub_mk = self.create_publisher(MarkerArray, '/reach/markers', QoSProfile(
             depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL, reliability=ReliabilityPolicy.RELIABLE))
@@ -617,6 +619,9 @@ class Reach(GP.Pass):
     def near_now(self, scans):
         """Obstacle points + costmap cells around the rover, base_link, body excluded."""
         pts = np.vstack(scans + [self.dobs.points_base(self.pose)]) if scans else None
+        sp = self.sonar.points(pts)
+        if len(sp):
+            pts = sp if pts is None else np.vstack([pts, sp])
         return self.outside_body(pts), self.outside_body(self.costmap_cells())
 
     ESCAPE_CLEAR = 0.06                    # m: done when this much is open (the planner pads 4 cm)
@@ -1088,28 +1093,37 @@ class Reach(GP.Pass):
                 self.say(attempt=attempt, phase='tight', outcome='reached', moves=moves,
                          dist_m=round(self.dist(g), 2))
                 return 'reached'
-            c, s = math.cos(self.pose[2]), math.sin(self.pose[2])
-            dx, dy = tgt[0] - self.pose[0], tgt[1] - self.pose[1]
-            tb = (c * dx + s * dy, -s * dx + c * dy)
-            lidar = self.outside_body(np.vstack(self.scans)) if self.scans else np.zeros((0, 2))
-            camera = self.outside_body(self.dobs.points_base(self.pose))
-            every = np.vstack([lidar, camera]) if len(camera) else lidar
-            steps, info = TRT.plan(every, tb, ge, budget_s=TIGHT_BUDGET_S)
-            mode = 'all'
-            if steps is None:
-                steps, info = TRT.plan(lidar, tb, ge, budget_s=TIGHT_BUDGET_S)
-                mode = 'lidar'
-            self.say(attempt=attempt, phase='tight', mode=mode if steps else 'none',
-                     plan=TRT.describe(steps) if steps else '', ms=info.get('ms'),
-                     expanded=info.get('expanded'), why=info.get('why', ''),
-                     target=[round(tgt[0], 2), round(tgt[1], 2)])
-            self.show_tight(steps, mode, tgt, ge)
-            if not steps:
-                return 'none' if not moves else 'failed'
-            # the camera map just switched on may not have arrived yet: then
-            # ALL was the LiDAR alone, and is driven like a LiDAR plan
-            if mode == 'all' and self.dobs.age() > 3.0:
-                mode = 'lidar'
+            if queue and expect is not None and self.on_plan(expect):
+                steps, mode = [st for st, _ in queue], qmode
+                self.say(attempt=attempt, phase='tight', follow=TRT.describe(steps))
+            else:
+                c, s = math.cos(self.pose[2]), math.sin(self.pose[2])
+                dx, dy = tgt[0] - self.pose[0], tgt[1] - self.pose[1]
+                tb = (c * dx + s * dy, -s * dx + c * dy)
+                lidar = self.outside_body(np.vstack(self.scans)) if self.scans else np.zeros((0, 2))
+                camera = self.outside_body(self.dobs.points_base(self.pose))
+                every = np.vstack([lidar, camera]) if len(camera) else lidar
+                # what the sonars hear close ahead that neither has: in both plans
+                sp = self.outside_body(self.sonar.points(every))
+                if len(sp):
+                    every, lidar = np.vstack([every, sp]), np.vstack([lidar, sp])
+                steps, info = TRT.plan(every, tb, ge, budget_s=TIGHT_BUDGET_S)
+                mode = 'all'
+                if steps is None:
+                    steps, info = TRT.plan(lidar, tb, ge, budget_s=TIGHT_BUDGET_S)
+                    mode = 'lidar'
+                self.say(attempt=attempt, phase='tight', mode=mode if steps else 'none',
+                         plan=TRT.describe(steps) if steps else '', ms=info.get('ms'),
+                         expanded=info.get('expanded'), why=info.get('why', ''),
+                         target=[round(tgt[0], 2), round(tgt[1], 2)])
+                self.show_tight(steps, mode, tgt, ge)
+                if not steps:
+                    return 'none' if not moves else 'failed'
+                # the camera map just switched on may not have arrived yet: then
+                # ALL was the LiDAR alone, and is driven like a LiDAR plan
+                if mode == 'all' and self.dobs.age() > 3.0:
+                    mode = 'lidar'
+                queue, qmode = list(zip(steps, TRT.poses_of(steps, tuple(self.pose[:3]), ge)[1:])), mode
             # A short set-up drive is driven TOGETHER with the move it sets up.
             # Alone, the replan after it undid it: "B5 L30 F85" -> B5, then
             # "F5 L30 F85" -> F5, then B5 again, three rounds (twin apt_s1

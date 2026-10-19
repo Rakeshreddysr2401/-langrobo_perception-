@@ -64,6 +64,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from depth_obstacles import MIN_HITS  # noqa: E402
 from fused_obstacles import make_obstacles  # noqa: E402
 from goal_exec import FRONT, REAR, SIDE, GoalExec, wrap  # noqa: E402
+from sonar_feed import SonarFeed  # noqa: E402
 OWN_PAD = 0.005   # m: LiDAR points this far past the outline still count as the rover
 
 # ROVER_STATE_DIR (default /logs): a second instance -- the twin's, on its own ROS domain -- keeps its own state
@@ -122,6 +123,9 @@ class GoalExecNode(Node):
         self.create_subscription(Empty, '/goal_exec/cancel', self._cancel, 10)
         self.buf = Buffer()
         self.tfl = TransformListener(self.buf, self)
+        # the front sonars as a witness: an echo close ahead that the LiDAR and the
+        # camera map cannot explain becomes one more obstacle point (sonar_witness.py)
+        self.sonar = SonarFeed(self, self.buf)
         self.mount = None
         self.pass_ = None
         self.dobs = make_obstacles(self, self.buf, lambda: self.pose, active=False)   # only during a goal
@@ -287,6 +291,9 @@ class GoalExecNode(Node):
         dp = self.dobs.points_base(self.pose)
         if len(dp):
             pts = dp if pts is None else np.vstack([pts, dp])
+        sp = self.sonar.points(pts)
+        if len(sp):
+            pts = sp if pts is None else np.vstack([pts, sp])
         # the controller's clock is the POSE's stamp: arrival times on this
         # loaded Jetson bunch up (0.6-441 ms apart for poses stamped 50 ms apart)
         st = m.header.stamp
@@ -298,7 +305,7 @@ class GoalExecNode(Node):
         t = Twist()
         t.linear.x, t.angular.z = float(vx), float(wz)
         self.cmd.publish(t)
-        self._report()
+        self._report(extra={'sonar_points': self.sonar.used} if self.sonar.used else None)
 
     def _pose_unsure(self):
         if time.time() - self.pts_t > SCAN_STALE_S:
