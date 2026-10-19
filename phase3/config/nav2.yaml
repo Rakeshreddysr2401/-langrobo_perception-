@@ -743,6 +743,12 @@ local_costmap:
       # least 1 cm short of where the planner stops accepting starts.
       # When MPPI itself is pinned inside 2 cm, reach's escape (goal_exec,
       # 1 cm) steps it off. reach_node.py ESCAPE_* reads this costmap.
+      # STAYS 0.02 (tried 0.01 on 2026-10-19, twin apt_s1, reverted the same day):
+      # at 0.01 MPPI, checking on 2.5 cm cells, drove the front-left corner 1.4 cm
+      # INTO the sofa and pushed there 190 s. A refusal is fair, a touch never is.
+      # The deadlock 0.02 leaves -- parked 1-2 cm along something the whole length
+      # of a side, every MPPI motion refused -- is reach's escape: its steering
+      # slide works on raw points at 1 cm (escape_moves.py STEERING SLIDE).
       footprint_padding: 0.02
       plugins: [nvblox_layer, lidar_layer, inflation_layer]
       nvblox_layer:

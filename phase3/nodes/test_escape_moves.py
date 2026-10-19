@@ -47,6 +47,37 @@ def test_alongside_a_long_shelf_with_wall_behind_no_short_move():
     assert E.best_move(gap_fn(pts), E.body_gap(pts), PIV) is None
 
 
+def table_along(deg, gap=0.012):
+    """The coffee table along the whole right side, at an angle (+ = converging ahead)."""
+    xs = np.linspace(-0.6, 0.9, 151)
+    return np.c_[xs, -(E.SIDE + gap) + math.tan(math.radians(deg)) * (xs - E.FRONT)]   # gap at the front corner
+
+
+def test_along_a_whole_side_no_short_move_but_a_steering_slide():
+    # apt_s1 2026-10-19: 1.2 cm along the coffee table, 3-5 deg off parallel, sofa 25 cm left
+    sofa = np.c_[np.linspace(-0.6, 0.9, 151), np.full(151, 0.44)]
+    for deg in (0.0, 3.0, 5.0):
+        pts = np.vstack([table_along(deg), sofa])
+        assert E.best_move(gap_fn(pts), E.body_gap(pts), PIV) is None, deg
+        assert E.slide_clear(pts), deg
+        # parallel: straight on; converging ahead (table nearer the FRONT, on the right): steer left
+        assert E.slide_steer(pts) == (0 if deg == 0 else +1), deg
+
+
+def test_slide_refused_with_something_ahead():
+    chair = np.c_[np.full(21, 0.45), np.linspace(-0.1, 0.1, 21)]
+    assert not E.slide_clear(np.vstack([table_along(3.0), chair]))
+    assert not E.slide_clear(table_along(12.0))       # converging too fast to steer off
+
+
+def test_slide_steer_rear_side_turns_toward_it():
+    # the nearest thing beside the REAR-left: turning left swings the rear right, off it
+    pts = np.c_[np.linspace(-0.17, -0.05, 13), np.full(13, E.SIDE + 0.008)]
+    assert E.slide_steer(pts) == +1
+    pts = np.c_[np.linspace(0.05, 0.17, 13), np.full(13, E.SIDE + 0.008)]   # front-left: away, right
+    assert E.slide_steer(pts) == -1
+
+
 def test_wall_ahead_backs_off():
     pts = np.c_[np.full(41, 0.192), np.linspace(-0.4, 0.4, 41)]      # a wall 1 cm in front
     m = E.best_move(gap_fn(pts), E.body_gap(pts), PIV)

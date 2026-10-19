@@ -25,6 +25,51 @@ TURNS = tuple(math.radians(d) * s for d in (10, 20, 30) for s in (1, -1))
 # forward a little, THEN turn: beside a shelf with a wall behind, no single move opens
 # space (every turn swings a rear corner back into the wall); a person rolls forward, then turns
 COMBOS = tuple((dx, a) for dx in (0.05, 0.10) for a in TURNS)
+# STEERING SLIDE, when nothing short opens space (2026-10-19, twin apt_s1): parked
+# 1-2 cm along the coffee table's WHOLE side, every turn swings a corner in, short
+# moves only slide, and nav2 will not move (its 2 cm hard margin already overlaps;
+# at 1 cm its 2.5 cm cells let it graze the sofa by 1.4 cm instead). A person walks
+# on along the table, keeping off it, until past its end. A straight slide is no good:
+# the rover is never exactly parallel, so the gap closes (measured: refused at 3-5 deg).
+# So: forward at a crawl, steering off the nearest point every tick (reach_node
+# slide_along), only when nothing is IN the body's way ahead -- a thing beside it
+# may converge by up to SLIDE_ROOM, which the steering takes up.
+SLIDE_L = 0.40          # m per slide (an escape may repeat it)
+SLIDE_ROOM = 0.04       # m: how far a side thing may converge into the path ahead
+SLIDE_OPEN = 0.03       # m: done when this much is open (nav2's 2 cm hard margin + 1 cm)
+
+
+def slide_clear(pts, L=SLIDE_L, room=SLIDE_ROOM):
+    """Is the body's way ahead clear for L (nothing within SIDE - room of the centre
+    line between the nose and L past it), and is there room to steer on BOTH sides
+    of it (a side thing at least `room` off the outline at the start)?"""
+    if pts is None or not len(pts):
+        return True
+    x, y = pts[:, 0], pts[:, 1]
+    ahead = (x > FRONT) & (x < FRONT + L) & (np.abs(y) < SIDE - room)
+    return not ahead.any()
+
+
+def slide_steer(pts, tie=0.003):
+    """-1, 0 or +1: which way to turn (+ = left) while crawling forward. On the side of
+    the nearest point, compare what is nearest the FRONT half (x >= 0, or ahead) with
+    what is nearest the REAR half: front closer -> turn away from that side; rear
+    closer -> turn toward it (turning swings the rear the other way); within `tie`
+    (parallel) -> 0, straight on: either turn would swing one end in."""
+    if pts is None or not len(pts):
+        return 0
+    x, y = pts[:, 0], pts[:, 1]
+    ox = np.maximum(np.maximum(-REAR - x, x - FRONT), 0.0)
+    d = np.hypot(ox, np.maximum(np.abs(y) - SIDE, 0.0))
+    side = 1.0 if y[int(np.argmin(d))] > 0 else -1.0
+    on = (y * side) > 0
+    front = d[on & (x >= 0)].min() if (on & (x >= 0)).any() else np.inf
+    rear = d[on & (x < 0)].min() if (on & (x < 0)).any() else np.inf
+    if abs(front - rear) < tie:
+        return 0
+    return int(-side if front < rear else side)
+
+
 SAMPLES = 6                                     # poses checked along each move
 OPENS = 0.01                                    # a move must open at least this much
 SWEEP_SLACK = 0.002                             # ... and never close the gap by more than this on the way

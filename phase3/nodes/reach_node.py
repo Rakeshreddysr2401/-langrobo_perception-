@@ -350,7 +350,7 @@ class Reach(GP.Pass):
                     self.nav_gh = None
                     return 'reached', f'waypoint within {done_within * 100:.0f} cm'
                 watch.append((time.time(),) + tuple(self.pose[:3]))
-                why = self.dithering(watch, g)
+                why = self.dithering(watch, g) or self.pinned(watch)
                 if why:
                     gh.cancel_goal_async()
                     self.spin_for(0.5)
@@ -370,6 +370,33 @@ class Reach(GP.Pass):
         if st == GoalStatus.STATUS_SUCCEEDED:
             return 'reached', ''
         return 'failed', self.nav_reason()
+
+    # ── pinned watch ──────────────────────────────────────────────────────────
+    # Twin apt_s1 2026-10-19 (test 10): MPPI parked the rover 1 cm against the
+    # sofa; nav2 then cleared, backed up and retried on its own for 120 s
+    # (NAV_TIMEOUT) -- every MPPI motion refused inside its 2 cm hard margin --
+    # before reach's escape got a turn, and the escape had it free in 5 s. So:
+    # still for PINNED_S with something inside nav2's hard margin -> cancel,
+    # "narrow: pinned", and the escape now.
+    PINNED_S = 10.0
+    PINNED_MOVE_M = 0.05
+    PINNED_TURN = math.radians(10)
+    PINNED_GAP = 0.02                      # = nav2.yaml local footprint_padding
+
+    def pinned(self, watch):
+        now = watch[-1][0]
+        w = [p for p in watch if p[0] >= now - self.PINNED_S]
+        if now - watch[0][0] < self.PINNED_S or len(w) < 2:
+            return ''
+        x0, y0, th0 = w[0][1:]
+        if max(math.hypot(x - x0, y - y0) for _, x, y, _ in w) > self.PINNED_MOVE_M or \
+                max(abs(wrap(th - th0)) for *_, th in w) > self.PINNED_TURN:
+            return ''
+        pts, cells = self.near_now(self.scans[-1:])
+        gap = self.gap_all(pts, cells)
+        if gap >= self.PINNED_GAP:
+            return ''
+        return f'narrow: pinned ({gap * 100:.1f} cm off something, no motion in {self.PINNED_S:.0f} s)'
 
     # ── dither watch ──────────────────────────────────────────────────────────
     # Twin, apt_s1 2026-10-19: the lattice routed through the 57 cm squeeze by
@@ -674,6 +701,38 @@ class Reach(GP.Pass):
             self.stop()
 
     ESCAPE_VX = 0.05                       # m/s, goal_exec's pass speed
+
+    SLIDE_WZ = 0.08                        # rad/s commanded while crawling (~1 m radius real: scrub)
+
+    def slide_along(self, g0):
+        """Crawl forward along what the side is against, steering off it every tick
+        (escape_moves.slide_steer), on fresh points. Done when SLIDE_OPEN is open or
+        after SLIDE_L; stops the moment the gap falls 8 mm under where it started."""
+        x0, y0, _ = self.pose
+        floor = max(0.003, g0 - 0.008)
+        t0 = time.time()
+        try:
+            while time.time() - t0 < EM.SLIDE_L / self.ESCAPE_VX + 3.0:
+                if self.stop_req:
+                    return 'cancelled', ''
+                moved = math.hypot(self.pose[0] - x0, self.pose[1] - y0)
+                pts, cells = self.near_now(self.scans[-1:])
+                g = self.gap_all(pts, cells)
+                if g >= EM.SLIDE_OPEN:
+                    return 'reached', f'{g * 100:.1f} cm open after {moved * 100:.0f} cm'
+                if moved >= EM.SLIDE_L - 0.005:
+                    return 'reached', f'{moved * 100:.0f} cm along, gap {g * 100:.1f} cm'
+                if g < floor:
+                    return 'failed', f'gap {g * 100:.1f} cm after {moved * 100:.0f} cm -- stopped'
+                both = [b for b in (pts, cells) if b is not None and len(b)]
+                cmd = Twist()
+                cmd.linear.x = self.ESCAPE_VX
+                cmd.angular.z = EM.slide_steer(np.vstack(both) if both else None) * self.SLIDE_WZ
+                self.cmd.publish(cmd)
+                self.spin_for(0.05)
+            return 'failed', 'timed out'
+        finally:
+            self.stop()
 
     def drive_straight(self, step, g0):
         """Exactly straight, closed on fresh points every tick. NOT goal_exec:
