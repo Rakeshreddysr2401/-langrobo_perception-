@@ -95,6 +95,14 @@ LEG_MAX = 3.2          # m: well inside the 4 m half-window
 # heading -- then the next leg re-planned from there anyway.
 LEG_DONE_M = 0.35
 LEG_MIN = 1.0
+# The tight route's search time. 3 s was the laptop's view: on the real robot
+# (2026-10-19, a 49 cm doorway past the foot of a bed, house route on) the way
+# through -- F65 R45 F40 R15 F135, 1238 poses -- took the Orin 2.9-5.6 s under
+# nav's load (offline on the same recorded points: found every time), so at 3 s
+# it gave up a fraction short and the goal failed "no path ... 3 times". A few
+# seconds of thinking in a doorway is cheaper than giving up; no way at all is
+# still answered when the search runs out of poses to try.
+TIGHT_BUDGET_S = 8.0
 TIGHT_SETUP_M = 0.10   # m: a tight-route drive this short only sets up the next move (run together)
 LEG_STEP = 0.4
 MAX_LEGS = 12
@@ -1073,10 +1081,10 @@ class Reach(GP.Pass):
             lidar = self.outside_body(np.vstack(self.scans)) if self.scans else np.zeros((0, 2))
             camera = self.outside_body(self.dobs.points_base(self.pose))
             every = np.vstack([lidar, camera]) if len(camera) else lidar
-            steps, info = TRT.plan(every, tb, ge, budget_s=3.0)
+            steps, info = TRT.plan(every, tb, ge, budget_s=TIGHT_BUDGET_S)
             mode = 'all'
             if steps is None:
-                steps, info = TRT.plan(lidar, tb, ge, budget_s=3.0)
+                steps, info = TRT.plan(lidar, tb, ge, budget_s=TIGHT_BUDGET_S)
                 mode = 'lidar'
             self.say(attempt=attempt, phase='tight', mode=mode if steps else 'none',
                      plan=TRT.describe(steps) if steps else '', ms=info.get('ms'),
