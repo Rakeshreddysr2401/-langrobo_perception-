@@ -469,3 +469,37 @@ real graded VO is 0.03-10 cm), so the twin is harder on the fusion than the robo
    this skid-steer slides 6-16 cm per turn -> grazes in turns near walls.
 3. Small low things: a 7 cm toy block driven through, the 3 cm slipper unseen.
 4. Speed: legs still 1.5-3 min.
+
+### The same evening on the REAL robot (owner at RViz)
+
+After a power cycle; SLAM resumed the 2026-10-18 house map (lock checked:
+78% of live LiDAR points within 10 cm of its walls, median 5 cm). Recorded:
+`logs/bags/20261019-174749_rviz_real` (+ `_rviz_real2`, `_rviz_real3`).
+
+| goal | before the evening's fixes | after |
+|---|---|---|
+| 1-3, same room, 1-2 m | reached: 0.7 cm / 0.8 cm / 9.5 cm (9.5: after a nav2 drive the finish is turn-only, by design) | -- |
+| > 3 m, other room (4 goals) | failed "no path ... 3 times" (straight-line legs into furniture; 98-343 s) | house route ON (19b2026) |
+| into the bedroom through a 49-60 cm door past the bed's foot | failed: the tight route needed 2.9-5.6 s on the Orin, had 3 s | TIGHT_BUDGET_S 8 (b01b871): **through** in 8 precise moves (~1 cm each) |
+| back out through that door (> 3.2 m) | failed in 41 s, no move: legs found no point nav2 can reach and only waited | legs failure -> tight route aimed along the house route (22c7423): **through** (L15 B25 F100 F100), then nav2 |
+| a goal 16 cm inside furniture | -- | refused honestly: "the goal is inside something ... no spot within 50 cm fits" |
+
+How the door was diagnosed (all from the recording): single LiDAR scans put
+the gap at 48-60 cm (the 27 cm of the first, merged picture was smearing);
+nav2's costmap was right (inscribed band = body + 4 cm pad leaves a 5 cm
+channel for the centre; its 16-heading lattice cannot use it at that angle);
+the tight route, replayed offline on the recorded points of that moment,
+found the way every time -- it only lacked time on the Orin.
+
+Also found:
+- **The Orin was saturated**: load 24 on 6 cores, 157 MB RAM free, 726 MB
+  swapped. `detections_3d.py` (follow layer) used 58% CPU and 1.1 GB while
+  publishing NOTHING (bring-up: "detections_3d publishing 0 FAIL"); stopped
+  for the session (it comes back with `./rover up`). The bag recording with
+  the 30 Hz depth cloud added 42%: record without `/depth_gate/passed`.
+- In the doorway the camera map held something ~32 cm ahead (two goal_exec
+  refusals, ~45 s of re-planning): the door leaf's edge or the threshold --
+  to look at in `_rviz_real3`.
+- After a nav2 drive the finish is turn-only (FINISH_NEAR 10 cm): up to
+  ~10 cm off. Proposed: a straight nudge along the heading after the turn
+  (twin first).

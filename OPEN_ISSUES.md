@@ -2,7 +2,7 @@
 
 How the rover plans and moves, why it is limited, and the fix order F1-F5: [NAV_GUIDE.md](NAV_GUIDE.md) (2026-10-11).
 
-## 2026-10-19 — twin: cross-room goals fixed, no furniture touched; real-robot test next
+## 2026-10-19 — cross-room goals and a 49 cm door: fixed in the twin, then on the real robot
 
 Seven fixes (reach crash, tight-route ping-pong, LiDAR blind 2 cm beside the body,
 driving under low furniture, house route vs nav2, pinned beside furniture, plan
@@ -13,8 +13,11 @@ numbers: [NAV_PLAN.md](NAV_PLAN.md) "Session 2026-10-19"; how it works now:
 
 | item | status |
 |---|---|
-| real-robot run of the same kind of goals (tight spots first, then rooms) | **next, owner present** |
-| `REACH_HOUSE_ROUTE=1` (legs along the house route) | twin-proven; OFF on the real robot until the run above |
+| real-robot run (owner at RViz, evening) | **done**: same room 3/3; through the 49 cm bedroom door and back out after 3 more fixes (NAV_PLAN.md "The same evening on the REAL robot") |
+| house route (legs along a route through the doors) | **ON by default** since 19b2026 (`REACH_HOUSE_ROUTE=0` turns it off) |
+| `detections_3d.py` (follow layer): 58% CPU + 1.1 GB RAM while publishing nothing; the Orin was at load 24, 157 MB free | **open** -- why it publishes nothing; do not run it until fixed |
+| camera map: something ~32 cm ahead in the bedroom doorway (2 refusals, ~45 s) | open: look at bag `20261019-183641_rviz_real3` |
+| nav2-driven goals end up to ~10 cm off (turn-only finish, by design) | open: straight nudge along the heading, twin first |
 | grazes in turns near walls (nav2 assumes no skid-steer slide) | open |
 | 7 cm toy block driven through; 3 cm slipper unseen | open (perception) |
 | legs 1.5-3 min | open (speed) |
