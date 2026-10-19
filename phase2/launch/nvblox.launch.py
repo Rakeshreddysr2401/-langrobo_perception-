@@ -96,7 +96,13 @@ def generate_launch_description():
                 # of it; at 3 cm its tip and edge are marked. Measured with the
                 # turn gate on (depth_gate.py) -- turn smear had made both worse.
                 'static_mapper.esdf_slice_min_height': 0.03,
-                'static_mapper.esdf_slice_max_height': 0.27,
+                # 0.31 from 0.27, 2026-10-19: the rover is 26.3 cm tall (LiDAR top),
+                # so 0.27 left 0.7 cm. A 28 cm tabletop read as free floor: twin apt_s1,
+                # the rover drove UNDER the coffee table's overhang (1.7 cm over the
+                # LiDAR) until its wheels jammed on the table's base. ~5 cm of margin:
+                # what hangs lower than this is kept out from under. Same band:
+                # phase3/nodes/depth_obstacles.py Z_MAX.
+                'static_mapper.esdf_slice_max_height': 0.31,
                 'static_mapper.esdf_slice_height': 0.16,
 
                 # How far out to trust depth into the map. Stereo error grows

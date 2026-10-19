@@ -22,7 +22,7 @@ WHY IT FORGETS
     MEM_S; nothing beyond RANGE is kept.
 
 FILTERS
-    band      z up to 0.27 m in base_link (objects over 27 cm are above the
+    band      z up to 0.31 m in base_link (the rover is 26.3 cm; over 31 cm is above the
               rover); the FLOOR of the band depends on range, because the
               floor's own noise does. Measured 2026-09-26 on free floor (no
               object within 8 cm): within 0.9 m no floor pixel above 2.0 cm
@@ -61,7 +61,7 @@ from turn_gate import TurnGate  # noqa: E402
 
 DEPTH = '/camera/camera0/depth/image_rect_raw'
 INFO = '/camera/camera0/depth/camera_info'
-Z_MAX = 0.27
+Z_MAX = 0.31     # rover top 0.263 + ~5 cm: a lower overhang is an obstacle (nvblox slice max, same reason)
 Z_FLOOR = ((1.0, 0.020), (1.6, 0.035), (9e9, 0.050))   # (range below, min height), m
 VOX = (0.01, 0.01, 0.02)        # m, x y z
 STRIDE = 3                      # px
