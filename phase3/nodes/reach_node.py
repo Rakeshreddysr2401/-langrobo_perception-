@@ -867,8 +867,9 @@ class Reach(GP.Pass):
     def house_route(self, g):
         """(route [(x, y) odom], length m) through the house map to g (odom), or (None, why).
         house_route.py has why: legs on the straight line ran into walls and furniture."""
-        # OFF unless REACH_HOUSE_ROUTE=1: not yet proven on the twin (apt_s1 2026-10-19: both
-        # cross-room goals still failed with it on). Off = the straight-line legs as before.
+        # OFF unless REACH_HOUSE_ROUTE=1: being proven on the twin (2026-10-19: with it on,
+        # bedroom -> living room reached, which the straight-line legs never did; nav2's
+        # obstacles now added so both plan on the same things). Off = straight-line legs.
         if os.environ.get('REACH_HOUSE_ROUTE', '0') != '1':
             return None, 'house routing off'
         m = self.house
@@ -884,8 +885,24 @@ class Reach(GP.Pass):
         to_map = lambda x, y: (tx + c * x - s_ * y, ty + s_ * x + c * y)
         to_odom = lambda x, y: (c * (x - tx) + s_ * (y - ty), -s_ * (x - tx) + c * (y - ty))
         data = np.array(m.data, dtype=np.int16).reshape(m.info.height, m.info.width)
-        pts, L = HR.route(data, m.info.resolution, m.info.origin.position.x, m.info.origin.position.y,
-                          to_map(*self.pose[:2]), to_map(*g[:2]))
+        ox, oy = m.info.origin.position.x, m.info.origin.position.y
+        # nav2's own obstacles (its global costmap: nvblox + LiDAR, odom) on top of
+        # the LiDAR house map, so the route and nav2 avoid the same things
+        # (house_route.with_obstacles has why)
+        gm, extra = self.gcm, None
+        if gm is not None and (gm.header.frame_id or 'odom') == 'odom':
+            ga = np.array(gm.data, dtype=np.int16).reshape(gm.info.height, gm.info.width)
+            r = gm.info.resolution
+            to_m = lambda jj, ii: np.stack([tx + c * (gm.info.origin.position.x + (ii + 0.5) * r)
+                                            - s_ * (gm.info.origin.position.y + (jj + 0.5) * r),
+                                            ty + s_ * (gm.info.origin.position.x + (ii + 0.5) * r)
+                                            + c * (gm.info.origin.position.y + (jj + 0.5) * r)], 1)
+            jj, ii = np.nonzero(ga >= 100)
+            data = HR.with_obstacles(data, m.info.resolution, ox, oy, to_m(jj, ii))
+            # and its PRICE, so the route prefers what nav2's planner prefers
+            jj, ii = np.nonzero((ga > 0) & (ga < 100))
+            extra = HR.nav2_costs(data.shape, m.info.resolution, ox, oy, to_m(jj, ii), ga[jj, ii])
+        pts, L = HR.route(data, m.info.resolution, ox, oy, to_map(*self.pose[:2]), to_map(*g[:2]), extra=extra)
         if pts is None:
             return None, L
         return [to_odom(*p) for p in pts], L

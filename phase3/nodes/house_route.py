@@ -29,11 +29,12 @@ BODY_R = 0.20          # m: blocked within this of an occupied cell (half the 38
 KEEP_OFF = 0.60        # m: closer than this to anything costs extra (prefer the middle)
 WALL_W = 3.0           # extra cost per cell at BODY_R, falling to 0 at KEEP_OFF
 UNKNOWN_W = 2.0        # extra cost per cell of unseen floor
+NAV2_W = 3.0           # extra cost per cell at nav2's top cost (= its planner's cost_penalty)
 OCC = 65               # occupancy >= this is a wall (nav2 map_saver's threshold)
 SNAP_M = 0.6           # a start/goal inside the grown walls moves to the nearest open cell within this
 
 
-def grid_costs(data, res):
+def grid_costs(data, res, extra=None):
     """OccupancyGrid data (H x W, -1/0..100) at res -> (blocked, step cost, cell) at CELL.
     Distances are measured on the FINE map (a 36 cm door must stay shut and a 75 cm
     one open -- a coarse grid rounds door edges by a cell), then a coarse cell takes
@@ -49,7 +50,13 @@ def grid_costs(data, res):
     unknown = (data[:h * k, :w * k] < 0).reshape(h, k, w, k).all(axis=(1, 3))
     blocked = dk < BODY_R
     near = np.clip((KEEP_OFF - dk) / (KEEP_OFF - BODY_R), 0.0, 1.0)
-    return blocked, 1.0 + WALL_W * near + UNKNOWN_W * unknown, k * res
+    c = 1.0 + WALL_W * near + UNKNOWN_W * unknown
+    if extra is not None:
+        # nav2's own price (its global costmap, 0..1): a coarse cell takes the
+        # cheapest point inside it, like the distance above -- a gap stays a gap
+        ek = np.asarray(extra, float)[:h * k, :w * k].reshape(h, k, w, k).min(axis=(1, 3))
+        c = c + NAV2_W * ek
+    return blocked, c, k * res
 
 
 def _snap(blocked, ij, cell):
@@ -100,10 +107,49 @@ def astar(blocked, c, s, g):
     return None
 
 
-def route(data, res, ox, oy, start, goal):
+def with_obstacles(data, res, ox, oy, pts):
+    """The house map with every cell holding one of pts ((N, 2), its frame) set
+    occupied -- a copy; points off the map are ignored.
+
+    WHY (twin apt_s1, 2026-10-19, recorded): the house map is the LiDAR's, and the
+    LiDAR scans at 25 cm -- over a ball, a bin, a bottle. The route ran straight
+    through that clutter while nav2, whose costmap has it (nvblox + LiDAR), would
+    not: reach set legs on a way nav2 refused, nav2 swung round the room to reach
+    them, and the goal timed out. reach passes nav2's own obstacle cells here, so
+    both plan on the same things."""
+    out = np.array(data, dtype=np.int16, copy=True)
+    P = np.asarray(pts, float).reshape(-1, 2)
+    if not len(P):
+        return out
+    i = np.floor((P[:, 1] - oy) / res).astype(int)
+    j = np.floor((P[:, 0] - ox) / res).astype(int)
+    ok = (i >= 0) & (i < out.shape[0]) & (j >= 0) & (j < out.shape[1])
+    out[i[ok], j[ok]] = 100
+    return out
+
+
+def nav2_costs(shape, res, ox, oy, pts, costs):
+    """nav2's costs (0..100 at pts, the house map's frame) as a 0..1 field on the
+    house map (the highest that lands in a cell); 0 where nav2 has nothing."""
+    out = np.zeros(shape, float)
+    P = np.asarray(pts, float).reshape(-1, 2)
+    if not len(P):
+        return out
+    i = np.floor((P[:, 1] - oy) / res).astype(int)
+    j = np.floor((P[:, 0] - ox) / res).astype(int)
+    ok = (i >= 0) & (i < shape[0]) & (j >= 0) & (j < shape[1])
+    np.maximum.at(out, (i[ok], j[ok]), np.clip(np.asarray(costs, float)[ok], 0, 100) / 100.0)
+    return out
+
+
+def route(data, res, ox, oy, start, goal, extra=None):
     """The house map (H x W int array, row 0 at oy) and two points in its frame ->
-    (route [(x, y), ...] start to goal in that frame, length m) or (None, why)."""
-    blocked, c, cell = grid_costs(np.asarray(data), res)
+    (route [(x, y), ...] start to goal in that frame, length m) or (None, why).
+    extra: nav2's cost per house-map cell (0..1, see nav2_costs), so the route
+    prefers what nav2's planner prefers (2026-10-19: with walls alone it took the
+    gap through the living room's clutter, nav2 went round the table instead, and
+    the legs pulled the rover back and forth)."""
+    blocked, c, cell = grid_costs(np.asarray(data), res, extra)
     to_ij = lambda p: (int((p[1] - oy) / cell), int((p[0] - ox) / cell))
     s, g = _snap(blocked, to_ij(start), cell), _snap(blocked, to_ij(goal), cell)
     if s is None:

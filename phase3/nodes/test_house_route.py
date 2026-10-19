@@ -27,6 +27,39 @@ def house(door_w=0.78, unknown_right=False):
     return g, -0.2, -0.2
 
 
+def test_clutter_the_lidar_missed_is_routed_round():
+    # a 1.2 m row of low things (only the camera sees them) across the straight way:
+    # with nav2's obstacle cells added the route goes round it, not through it
+    g, ox, oy = house()
+    row = np.array([(2.0, y) for y in np.arange(0.2, 1.4, 0.025)])
+    straight, _ = H.route(g, RES, ox, oy, (1.0, 0.8), (3.0, 0.8))
+    assert min(abs(p[1] - 0.8) for p in straight if abs(p[0] - 2.0) < 0.05) < 0.2
+    pts, L = H.route(H.with_obstacles(g, RES, ox, oy, row), RES, ox, oy, (1.0, 0.8), (3.0, 0.8))
+    assert pts is not None, L
+    at = [p for p in pts if abs(p[0] - 2.0) < 0.06]
+    assert at and all(p[1] > 1.4 + 0.2 for p in at), at
+    assert H.with_obstacles(g, RES, ox, oy, [(99.0, 99.0)]).sum() == g.sum()   # off the map: ignored
+
+
+def test_nav2_cost_steers_the_route_like_nav2():
+    # an open room; nav2 prices a 1 m patch on the straight way (clutter padding,
+    # nothing lethal) with a short way round: the route goes round, as nav2's
+    # planner would -- and a thin priced band (cheaper to cross than to go round)
+    # is still crossed, as nav2 would too
+    g, ox, oy = house()
+    patch = [(x, y) for x in np.arange(1.5, 2.5, 0.025) for y in np.arange(0.0, 1.4, 0.025)]
+    extra = H.nav2_costs(g.shape, RES, ox, oy, patch, np.full(len(patch), 90))
+    straight, L0 = H.route(g, RES, ox, oy, (1.0, 0.8), (3.0, 0.8))
+    pts, L = H.route(g, RES, ox, oy, (1.0, 0.8), (3.0, 0.8), extra=extra)
+    at = [p for p in pts if abs(p[0] - 2.0) < 0.06]
+    assert at and all(p[1] > 1.4 for p in at), at      # round the priced patch
+    assert L0 + 0.2 < L < L0 + 1.5
+    band = [(x, y) for x in np.arange(1.9, 2.1, 0.025) for y in np.arange(0.0, 3.9, 0.025)]
+    pts, _ = H.route(g, RES, ox, oy, (1.0, 0.8), (3.0, 0.8), extra=H.nav2_costs(g.shape, RES, ox, oy, band, np.full(len(band), 90)))
+    assert any(abs(p[0] - 2.0) < 0.06 and p[1] < 1.4 for p in pts)
+    assert H.nav2_costs(g.shape, RES, ox, oy, [], []).sum() == 0
+
+
 def test_through_the_door_not_the_wall():
     g, ox, oy = house()
     pts, L = H.route(g, RES, ox, oy, (2.0, 0.8), (6.0, 0.8))
