@@ -503,3 +503,42 @@ Also found:
 - After a nav2 drive the finish is turn-only (FINISH_NEAR 10 cm): up to
   ~10 cm off. Proposed: a straight nudge along the heading after the turn
   (twin first).
+
+### Later the same evening: front sonars, the chairs, tight-route speed
+
+**Chairs (owner's layout, measured from the robot):** the widest way between a
+splayed plastic chair and a towel hanging to 6 cm was 52 cm for the LiDAR but
+**42 cm** with the camera (the chair's feet, the towel's hem, a stool's legs
+are under the LiDAR's plane). The rover is 38 cm; the tight route plans with
+2 cm a side = 42: at the very edge, no plan in 8 s -- the robot was right.
+In the twin as `chairs44` / `chairs50` (and the door as `door49`).
+
+**Tight route speed** (b7191fe): it re-planned after every move (~10 s each,
+~30 cm per 13 s). Now it follows its plan while the rover is where the plan
+expected (4 cm / 4 deg); re-plans on a refusal or a miss. Tests pass; live on
+the robot; **not yet exercised by a real goal with a plan** -- prove on
+chairs50 / door49.
+
+**Two front sonars** (owner's hardware, 2026-10-19; HARDWARE.md 2b): HC-SR04
+type on their OWN ESP32 (MicroPython, `phase1/firmware/sonar/`), USB to the
+Pi 5, whose `sonar_node.py` publishes `/sonar/left`, `/sonar/right`
+(`sensor_msgs/Range`, frames `sonar_left` / `sonar_right` at
+(0.182, ±0.14, 0.065), fov 0.52 rad). Bench: 15 cm target read 14.4-15.5 / 15.0.
+A cone says HOW FAR, not WHERE, so they are used three ways, none of which
+can make the rover more timid near what it already knows:
+
+| use | rule | commit |
+|---|---|---|
+| nav2 collision monitor | `range` sources: echo -> an arc; `approach` caps speed so contact stays >= 1 s away, stops only at contact. `source_timeout 0.0`: a silent sonar is NOT a stop (the Pi node publishes +inf while its board is missing) | 7fde92e |
+| witness (goal_exec, reach) | an echo <= 60 cm that no LiDAR / camera point in its cone explains -> one obstacle point ahead of that sensor (a slipper, a toy) | 01c7f61 |
+| vouch (goal_exec, reach) | a LONE camera speck (<= 8 cm, no LiDAR within 10 cm), within 10 deg of a sonar's axis at 15-60 cm, whose last 3 echoes are all >= 10 cm beyond it (or none) is overruled -- the bedroom-door reflection that cost ~45 s (recorded fixture); a furniture edge / slipper patch never | 390c7dc |
+
+The camera map the rover decides on is FLAT (fused_obstacles: no heights), so
+silence cannot vouch a tabletop edge above the cone away -- the speck rule is
+what keeps the morning's "drove under the table" from coming back.
+
+Not yet: a drive test of the three (twin chairs / door + a hidden low object,
+then the robot); the sonar service installed at boot (`sudo` on the Pi 5);
+S1-left and straight-ahead mounting confirmed (`assumed` in params.yaml).
+The Pi 5 dropped off the network the same night (no ping): power is the
+first suspect -- it now feeds two ESP32s over USB.

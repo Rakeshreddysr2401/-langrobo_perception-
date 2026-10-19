@@ -18,6 +18,11 @@ numbers: [NAV_PLAN.md](NAV_PLAN.md) "Session 2026-10-19"; how it works now:
 | `detections_3d.py` (follow layer): 58% CPU + 1.1 GB RAM while publishing nothing; the Orin was at load 24, 157 MB free | **open** -- why it publishes nothing; do not run it until fixed |
 | camera map: something ~32 cm ahead in the bedroom doorway (2 refusals, ~45 s) | open: look at bag `20261019-183641_rviz_real3` |
 | nav2-driven goals end up to ~10 cm off (turn-only finish, by design) | open: straight nudge along the heading, twin first |
+| front sonars (owner's HC-SR04s on their own ESP32 -> Pi 5 -> `/sonar/*`) in the collision monitor, as a witness and to vouch camera specks away | **built, live**, not drive-tested (NAV_PLAN.md "Later the same evening"); twin chairs / door + a hidden low object, then the robot |
+| sonar node at boot | **owner**: `sudo cp ~/ros2_ws/src/langrobo_ros/systemd/langrobo-sonar.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable langrobo-sonar` (Pi 5) |
+| sonar mounting: S1 (TRIG GPIO5) = left, faces flush, straight, level | `assumed` in params.yaml until the owner confirms |
+| tight route follows its plan (b7191fe) | live, tests pass; no real goal with a plan has exercised it yet |
+| **Pi 5 off the network** (no ping) the night of 2026-10-19 | open: power first (it feeds two ESP32s over USB) -- `vcgencmd get_throttled`, `dmesg` after it is back |
 | grazes in turns near walls (nav2 assumes no skid-steer slide) | open |
 | 7 cm toy block driven through; 3 cm slipper unseen | open (perception) |
 | legs 1.5-3 min | open (speed) |
