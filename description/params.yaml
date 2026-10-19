@@ -143,7 +143,7 @@ sonar:
   yaw_out:    {value: 0.0,   status: assumed, source: "both point straight ahead (+ = turned outward) -- to measure", date: 2026-10-19}
   pitch_up:   {value: 0.0,   status: assumed, source: "level (+ = tilted up) -- to measure", date: 2026-10-19}
   left_is_s1: {value: true,  status: assumed, source: "S1 (TRIG GPIO5 / ECHO GPIO19) is the LEFT one, seen from behind -- to confirm", date: 2026-10-19}
-  fov:        {value: 0.26,  status: datasheet, source: "HC-SR04: ~15 deg half-angle cone (field of view ~30 deg)"}
+  fov:        {value: 0.52,  status: datasheet, source: "HC-SR04: ~15 deg half-angle, i.e. a ~30 deg cone; sensor_msgs/Range field_of_view is the FULL angle (0.26 until 2026-10-19 was the half by mistake)"}
   min_range:  {value: 0.02,  status: datasheet, source: "HC-SR04: 2 cm"}
   max_range:  {value: 4.0,   status: datasheet, source: "HC-SR04: 4 m (bench: a wall at 1.9 m read steadily)"}
   case:       {value: [0.02, 0.045, 0.02], status: datasheet, source: "HC-SR04 board with its two transducers, depth x width x height"}
