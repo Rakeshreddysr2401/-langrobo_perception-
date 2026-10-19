@@ -171,6 +171,18 @@ def save_once(w, ref, strikes):
     return True, '' if target == 'last' else 'to suspect.* (gate)', strikes
 
 
+def save_now(wait=5.0):
+    """One save, for ./rover stop (the container and slam_toolbox go next). No save history
+    here, so ONE conflicting scan is enough to send it to suspect.* -- a doubt costs
+    nothing (last.* is kept), a wrong room overwriting a good one costs the room. -> (ok, why)"""
+    w = Watch()
+    end = time.time() + wait
+    while (w.scan is None or w.map is None) and time.time() < end:
+        w.spin(0.2)
+    ok, why, _ = save_once(w, load_ref(), CONFLICT_SAVES - 1)
+    return ok, why
+
+
 def main():
     period = float(sys.argv[1]) if len(sys.argv) > 1 else 120.0
     w = Watch()

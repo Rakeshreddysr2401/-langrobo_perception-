@@ -1570,7 +1570,7 @@ logs)
 stop)
   # save the room first: the container (and slam_toolbox's memory) goes with it
   if running && docker exec "$NAME" pgrep -f '[a]sync_slam_toolbox_node' >/dev/null 2>&1; then
-    timeout 40 docker exec "$NAME" bash -lc "$ENVSET python3 -c \"import sys; sys.path.insert(0,'$SRC2/tools'); import map_autosave as m; print('  room saved' if m.save_once()[0] else '  room NOT saved (previous maps/last kept)')\"" || echo "  room NOT saved (timed out; previous maps/last kept)"
+    timeout 40 docker exec "$NAME" bash -lc "$ENVSET python3 -c \"import sys; sys.path.insert(0,'$SRC2/tools'); import map_autosave as m; ok, why = m.save_now(); print('  room saved ' + why if ok else '  room NOT saved (previous maps/last kept)')\"" || echo "  room NOT saved (timed out; previous maps/last kept)"
   fi
   docker rm -f "$NAME" >/dev/null 2>&1 && echo "  container removed" || echo "  nothing running"
   ;;
