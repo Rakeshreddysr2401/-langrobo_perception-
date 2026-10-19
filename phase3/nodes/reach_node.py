@@ -95,6 +95,7 @@ LEG_MAX = 3.2          # m: well inside the 4 m half-window
 # heading -- then the next leg re-planned from there anyway.
 LEG_DONE_M = 0.35
 LEG_MIN = 1.0
+TIGHT_SETUP_M = 0.10   # m: a tight-route drive this short only sets up the next move (run together)
 LEG_STEP = 0.4
 MAX_LEGS = 12
 MARGIN = 0.01          # = goal_exec MARGIN and nav2 footprint_padding (1 cm hard since 2026-09-27 evening, NAV_PLAN.md N1; 0.02, 0.03 before)
@@ -1008,20 +1009,29 @@ class Reach(GP.Pass):
             self.show_tight(steps, mode, tgt, ge)
             if not steps:
                 return 'none' if not moves else 'failed'
-            kind, v = steps[0]
             # the camera map just switched on may not have arrived yet: then
             # ALL was the LiDAR alone, and is driven like a LiDAR plan
             if mode == 'all' and self.dobs.age() > 3.0:
                 mode = 'lidar'
-            if mode == 'lidar' and kind == 'drive':
-                v = math.copysign(min(abs(v), TIGHT_LIDAR_LEG), v)
-            if kind == 'turn':
-                r, why = self.run_goal_exec_turn(wrap(self.pose[2] + v))
-            else:
-                p = self.pose
-                r, why = self.run_goal_exec((p[0] + v * math.cos(p[2]), p[1] + v * math.sin(p[2]), p[2]))
-            moves += 1
-            self.say(attempt=attempt, phase='tight', move=TRT.describe([(kind, v)]), outcome=r, why=why)
+            # A short set-up drive is driven TOGETHER with the move it sets up.
+            # Alone, the replan after it undid it: "B5 L30 F85" -> B5, then
+            # "F5 L30 F85" -> F5, then B5 again, three rounds (twin apt_s1
+            # 2026-10-19, ~15 s): a 5 cm shift is inside the planner's tie
+            # noise. goal_exec still checks each move on fresh points.
+            n_run = 2 if (len(steps) > 1 and steps[0][0] == 'drive'
+                          and abs(steps[0][1]) <= TIGHT_SETUP_M) else 1
+            for kind, v in steps[:n_run]:
+                if mode == 'lidar' and kind == 'drive':
+                    v = math.copysign(min(abs(v), TIGHT_LIDAR_LEG), v)
+                if kind == 'turn':
+                    r, why = self.run_goal_exec_turn(wrap(self.pose[2] + v))
+                else:
+                    p = self.pose
+                    r, why = self.run_goal_exec((p[0] + v * math.cos(p[2]), p[1] + v * math.sin(p[2]), p[2]))
+                moves += 1
+                self.say(attempt=attempt, phase='tight', move=TRT.describe([(kind, v)]), outcome=r, why=why)
+                if r != 'reached' or self.stop_req:
+                    break
             if r == 'cancelled' or self.stop_req:
                 return 'cancelled'
             if r != 'reached':
