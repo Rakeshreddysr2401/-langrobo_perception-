@@ -62,7 +62,9 @@ SCAN_STALE_S = 0.5       # = goal_exec_node
 PAUSE_S = 5.0            # = goal_exec_node
 PEOPLE_STALE_S = 1.0     # no /vision/people this recent: the camera or YOLO is gone -> stop
 NO_PEOPLE_S = 4.0        # ...and give up after this long
-START_WAIT_S = 3.0       # after a start, wait this long for a people message to pick from
+START_WAIT_S = 3.0       # from the first people message after a start: keep trying to pick someone this long
+DETECT_WAKE_S = 5.0      # detections_3d sleeps until someone subscribes: its first answer takes 0.2-0.4 s,
+                         # 1.7-3.9 s on its first wake after a start (GPU warm-up; twin, 2026-10-20)
 MAX_S = 600.0            # a follow ends by itself after 10 min
 
 
@@ -178,9 +180,10 @@ class FollowNode(Node):
         self.people_t = time.time()
         people = d.get('people', [])
         if self.pending:
+            first = self.pending.setdefault('first_people', time.time())
             if not self.f.start(t, people, self.pending['id'], find=self.pending['find']):
-                if time.time() - self.pending['since'] < START_WAIT_S:
-                    return                     # YOLO may need a frame or two to wake up
+                if time.time() - first < START_WAIT_S:
+                    return                     # YOLO may need a frame or two to settle
                 self._end(self.f.result, self.f.why)   # _end clears pending
                 return
             self.pending = None
@@ -204,9 +207,14 @@ class FollowNode(Node):
     def _odom(self, m):
         p = m.pose.pose
         self.pose = (p.position.x, p.position.y, yaw_of(p.orientation))
-        if self.pending and time.time() - self.pending['since'] > START_WAIT_S + 1.0:
-            self._end('no people', 'no /vision/people -- is ./rover detect running?')
-            return
+        if self.pending:
+            first = self.pending.get('first_people')
+            if first is None and time.time() - self.pending['since'] > DETECT_WAKE_S + 1.0:
+                self._end('no people', 'no /vision/people -- is ./rover detect running?')
+                return
+            if first is not None and time.time() - first > START_WAIT_S + 1.0:
+                self._end('no people', '/vision/people stopped while starting')
+                return
         if self.f.state not in ('following', 'finding'):
             return
         if time.time() - self.started > MAX_S:
