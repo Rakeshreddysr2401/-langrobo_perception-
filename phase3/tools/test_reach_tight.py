@@ -86,6 +86,10 @@ class FakeReach:
         def points(known):
             return np.zeros((0, 2))
 
+        @staticmethod
+        def vouch(camera, lidar):
+            return np.zeros(len(camera), bool)
+
     show_tight = RN.Reach.show_tight
     _mk = RN.Reach._mk
 

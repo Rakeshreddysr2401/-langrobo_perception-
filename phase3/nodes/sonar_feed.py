@@ -12,14 +12,21 @@ not used: nothing here can stop the rover by being absent. sonar_witness.py
 has the rule (only echoes the map cannot explain become points).
 """
 import math
+import os
 import time
+from collections import deque
+
+import numpy as np
 
 from rclpy.time import Time
 from sensor_msgs.msg import Range
 
-from sonar_witness import witness_points
+from sonar_witness import vouched_specks, witness_points
 
 MAX_AGE_S = 0.3
+VOUCH_WINDOW_S = 0.5           # the readings a vouch may use
+# SONAR_CLEAR=off: never overrule a camera speck (sonar_witness.vouched_specks)
+CLEAR = os.environ.get('SONAR_CLEAR', 'on') != 'off'
 TOPICS = ('/sonar/left', '/sonar/right')
 
 
@@ -31,14 +38,18 @@ class SonarFeed:
     def __init__(self, node, buf):
         self.node, self.buf = node, buf
         self.last = {}                 # frame -> (time, range, fov)
+        self.hist = {}                 # frame -> recent (time, range)
         self.mount = {}                # frame -> (x, y, yaw) in base_link
         self.warned = set()
         self.used = 0                  # how many points the last call added (for status lines)
+        self.cleared = 0               # how many camera points the last vouch overruled
         for t in TOPICS:
             node.create_subscription(Range, t, self._range, 10)
 
     def _range(self, m):
-        self.last[m.header.frame_id] = (time.time(), float(m.range), float(m.field_of_view))
+        now = time.time()
+        self.last[m.header.frame_id] = (now, float(m.range), float(m.field_of_view))
+        self.hist.setdefault(m.header.frame_id, deque(maxlen=8)).append((now, float(m.range)))
 
     def _mount(self, frame):
         if frame not in self.mount:
@@ -64,3 +75,20 @@ class SonarFeed:
         p = witness_points(readings, known, fov)
         self.used = len(p)
         return p
+
+    def vouch(self, camera, lidar):
+        """Bool mask over camera (N x 2, base_link): the lone specks the sonars vouch
+        are not there (sonar_witness.vouched_specks). All False when switched off,
+        without fresh readings, or without the frames."""
+        self.cleared = 0
+        if not CLEAR or camera is None or not len(camera):
+            return np.zeros(0 if camera is None else len(camera), bool)
+        now, sensors = time.time(), []
+        for frame, h in self.hist.items():
+            recent = [r for t, r in h if now - t <= VOUCH_WINDOW_S]
+            m = self._mount(frame)
+            if m is not None and recent:
+                sensors.append((m, recent))
+        mask = vouched_specks(camera, lidar, sensors)
+        self.cleared = int(mask.sum())
+        return mask

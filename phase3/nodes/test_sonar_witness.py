@@ -40,3 +40,58 @@ def test_a_point_outside_the_cone_does_not_explain():
     # something known 15 cm ahead but 25 cm to the side of the sensor axis: not what it heard
     side = np.array([[0.182 + 0.15, 0.14 + 0.25]])
     assert W.witness_points([(0.15, LEFT)], side, FOV).shape == (1, 2)
+
+
+# ── the sonar vouching a camera speck away ───────────────────────────────────
+FIXTURE = Path(__file__).resolve().parent / 'fixtures' / 'door_speck_20261019.npz'
+
+
+def _real_door():
+    d = np.load(FIXTURE)
+    return d['camera'].astype(float), d['lidar'].astype(float)
+
+
+def _corridor(p, length=0.92):
+    return (p[:, 0] > 0.182) & (p[:, 0] < 0.182 + length) & (np.abs(p[:, 1]) < 0.20)
+
+
+def test_real_door_reflection_is_overruled_and_nothing_else_near():
+    # the recorded moment: ONE cell in the 90 cm drive; the right sonar hears nothing
+    cam, lid = _real_door()
+    assert _corridor(cam).sum() == 4                       # one cell = its four corners
+    drop = W.vouched_specks(cam, lid, [(RIGHT, [math.inf] * 3), (LEFT, [1.8, 1.8, 1.8])])
+    assert not _corridor(cam[~drop]).any()                 # the drive is clear now
+    assert drop.sum() <= 8                                 # the speck only, nothing of the door frames
+    near = np.hypot(cam[:, 0], cam[:, 1]) < 1.0
+    assert (drop & near).sum() == drop.sum()
+
+
+def test_real_door_kept_when_the_sonar_hears_something_there():
+    cam, lid = _real_door()
+    assert not W.vouched_specks(cam, lid, [(RIGHT, [0.36, 0.37, 0.36])]).any()
+
+
+def test_needs_enough_readings():
+    cam, lid = _real_door()
+    assert not W.vouched_specks(cam, lid, [(RIGHT, [math.inf, math.inf])]).any()
+
+
+def _cells(x0, x1, y0, y1, step=0.025):
+    xs, ys = np.arange(x0, x1 + 1e-9, step), np.arange(y0, y1 + 1e-9, step)
+    return np.array([(x, y) for x in xs for y in ys])
+
+
+def test_tabletop_edge_is_never_overruled():
+    # a camera-only LINE of cells 30 cm ahead (an overhang the cone is under): silence proves nothing
+    edge = _cells(0.48, 0.50, -0.6, 0.6)
+    assert not W.vouched_specks(edge, None, [(LEFT, [math.inf] * 3), (RIGHT, [math.inf] * 3)]).any()
+
+
+def test_slipper_patch_is_never_overruled():
+    slipper = _cells(0.40, 0.50, -0.27, -0.01)              # 10 x 26 cm
+    assert not W.vouched_specks(slipper, None, [(RIGHT, [math.inf] * 3)]).any()
+
+
+def test_speck_off_the_sonar_axis_is_kept():
+    speck = _cells(0.50, 0.52, 0.0, 0.02)                   # straight ahead of the centre, 20+ deg off both axes
+    assert not W.vouched_specks(speck, None, [(LEFT, [math.inf] * 3), (RIGHT, [math.inf] * 3)]).any()

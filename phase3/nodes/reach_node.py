@@ -618,7 +618,10 @@ class Reach(GP.Pass):
 
     def near_now(self, scans):
         """Obstacle points + costmap cells around the rover, base_link, body excluded."""
-        pts = np.vstack(scans + [self.dobs.points_base(self.pose)]) if scans else None
+        cam = self.dobs.points_base(self.pose)
+        if scans and len(cam):     # lone camera specks the sonars vouch away (sonar_witness.py)
+            cam = cam[~self.sonar.vouch(cam, np.vstack(scans))]
+        pts = np.vstack(scans + [cam]) if scans else None
         sp = self.sonar.points(pts)
         if len(sp):
             pts = sp if pts is None else np.vstack([pts, sp])
@@ -1102,6 +1105,8 @@ class Reach(GP.Pass):
                 tb = (c * dx + s * dy, -s * dx + c * dy)
                 lidar = self.outside_body(np.vstack(self.scans)) if self.scans else np.zeros((0, 2))
                 camera = self.outside_body(self.dobs.points_base(self.pose))
+                if len(camera):
+                    camera = camera[~self.sonar.vouch(camera, lidar)]
                 every = np.vstack([lidar, camera]) if len(camera) else lidar
                 # what the sonars hear close ahead that neither has: in both plans
                 sp = self.outside_body(self.sonar.points(every))

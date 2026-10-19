@@ -289,6 +289,8 @@ class GoalExecNode(Node):
                 self.ex.best_t += waited
         pts = self.pts
         dp = self.dobs.points_base(self.pose)
+        if len(dp):     # a lone camera speck the sonars vouch is not there: dropped (sonar_witness.py)
+            dp = dp[~self.sonar.vouch(dp, self.pts)]
         if len(dp):
             pts = dp if pts is None else np.vstack([pts, dp])
         sp = self.sonar.points(pts)
@@ -305,7 +307,8 @@ class GoalExecNode(Node):
         t = Twist()
         t.linear.x, t.angular.z = float(vx), float(wz)
         self.cmd.publish(t)
-        self._report(extra={'sonar_points': self.sonar.used} if self.sonar.used else None)
+        sx = {k: v for k, v in (('sonar_points', self.sonar.used), ('sonar_cleared', self.sonar.cleared)) if v}
+        self._report(extra=sx or None)
 
     def _pose_unsure(self):
         if time.time() - self.pts_t > SCAN_STALE_S:
