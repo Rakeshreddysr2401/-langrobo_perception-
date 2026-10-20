@@ -106,6 +106,14 @@ class FakeReach:
         RN.GoalExec = lambda P_prior=None: G.GoalExec(P_prior=PIVOT)
         RN.TIGHT_SETTLE_S = 0.0
         RN.TIGHT_FOLLOW_SETTLE_S = 0.0
+        # the Orin's search: this laptop is ~8x faster, so within the robot's
+        # TIGHT_BUDGET_S it finds plans the Orin never reaches (a 13-move detour
+        # round the speck, 28154 poses). ~6000 poses is what the Orin searches
+        # in its budget under load (2026-10-20 reach log: 3523 poses in 5.6 s).
+        # A test-only cap: the robot keeps MAX_EXPAND -- capping it there made
+        # the twin's door49 and chairs44 time out (2026-10-20).
+        import tight_route as _TRT
+        _TRT.MAX_EXPAND = 6000
 
     @property
     def scans(self):
