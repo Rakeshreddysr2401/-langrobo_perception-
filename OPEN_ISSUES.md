@@ -9,15 +9,15 @@ worked on in the twin. Details and numbers: [NAV_PLAN.md](NAV_PLAN.md) "Session 
 
 | item | status |
 |---|---|
-| LiDAR-only plans driven into camera obstacles, refused plans repeated (T1, T2) | fixed on branch `nav-20261020-evidence` (86e5682 + 47a44dd + f70c47e); unit-tested; **twin runs in progress** |
+| LiDAR-only plans driven into camera obstacles, refused plans repeated (T1, T2) | fixed (86e5682 + 47a44dd + f70c47e); unit-tested; the last correction unmeasured in the twin |
 | way_back wandering (T3) | fixed (50218cd); twin dead_end back-out 49 -> 40 s |
 | a gap too narrow: minutes before giving up | fixed (eb3cf72): "too tight: N cm" in 3.3 s in the twin (was 269 s) |
-| nav2 tries gaps it cannot plan (T5) | branch `nav-fix5-tight-leads`, unmeasured |
+| nav2 tries gaps it cannot plan (T5) | fixed (tight route leads at 42-52 cm), **unmeasured** |
 | fixed tight-search size (730ba75) | **reverted** (e432bf7): twin timeouts |
 | chairs44 (1 cm a side): results swing run to run for every version | open: camera flicker; D555 temporal filter to try |
 | dithering at gap mouths before the tight route (29 s) | open: nav2 rotation shim to try |
 | Jetson WiFi went silent ~1 min after a twin bring-up (3x; RTL8822CE, no crash, no power dip) | open: gone after leftover twin processes on the laptop were cleared (kino_sim 9ca4e58), not proven; read-only logger `~/netwatch/wifilog.sh` |
-| merge into `rover-v1.1.16-review` | **owner decides** after the twin results; then the real robot |
+| merge into `rover-v1.1.16-review` | **merged** (owner, 2026-10-20 ~22:15), fix 5 and f70c47e unmeasured in the twin; what to undo if one misbehaves: NAV_PLAN.md "Merged into rover-v1.1.16-review" |
 
 ## 2026-10-19 — cross-room goals and a 49 cm door: fixed in the twin, then on the real robot
 

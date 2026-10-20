@@ -574,8 +574,8 @@ then `docker exec rover top`).
 Owner: "when we have a goal it needs to reach there, however complex it is" -- better
 moves and decisions in tight places, twin first. Started from the real robot's reach log
 of the afternoon (kino_sim `docs/handoff/reach_real_20261020.jsonl`, findings T1-T9 in
-kino_sim `docs/NAV_NEXT.md`). Branch **`nav-20261020-evidence`** (not merged); fix 5 on
-**`nav-fix5-tight-leads`** (on top of it, unmeasured). Twin worlds added (kino_sim):
+kino_sim `docs/NAV_NEXT.md`). Built on branches `nav-20261020-evidence` and
+`nav-fix5-tight-leads`; merged into `rover-v1.1.16-review` the same night (below). Twin worlds added (kino_sim):
 `stool_gap`, `gap36`, `dead_end`, `corridor_s` (60 cm).
 
 ### What was wrong, the evidence, and the fix
@@ -620,4 +620,23 @@ f70c47e) from these runs.
    (stool_gap: 29 s of turning back and forth before the tight route).
 3. The D555 temporal depth filter (flicker 1 cm a side decides chairs44).
 4. Real robot with the owner, after the twin results.
+
+### Merged into `rover-v1.1.16-review` (owner, 2026-10-20 ~22:15)
+
+Owner: "commit all the codes into remote; if any issues on the real rover I will take care
+and adjust." Merged as they stand -- fix 5 (tight route first, 42-52 cm) and the last
+evidence correction (f70c47e) are **unmeasured in the twin**; the comparison runs were
+stopped for the merge. If one misbehaves on the real robot, undo just that one
+(`cd ~/rover && git revert --no-edit <commit>`, then `./rover nav` -- reach and
+goal_exec are re-read at the layer's start):
+
+| what you see on the real robot | likely fix | undo |
+|---|---|---|
+| goes for the tight route where nav2 used to manage a 45-55 cm gap; or turns/creeps more at doorways | fix 5 (tight route leads) | `git revert 5340e74` |
+| refuses a gap that fits with "too tight: the widest way is N cm" | widest way (eb3cf72) -- by design it reads 5 cm generous and uses the LiDAR only, so this should not happen; a LiDAR return off a person or a reflection could | `git revert eb3cf72` (later commits build on it: check the merge) |
+| looks around ("a look from another angle") a lot before tight moves; or drives a part of a plan, then stops | camera evidence (86e5682, 47a44dd, f70c47e) | `git revert f70c47e 47a44dd 86e5682` |
+| "the way back drives X m to get Y m nearer" where the old long way back would have worked | way back (50218cd) | `git revert 50218cd` |
+
+Logs that tell which one acted: the reach status lines (`/reach/status`, logs/reach_*.jsonl):
+`phase: widest`, `check: ...`, `mode: look`, `way_back ... route_m`.
 
