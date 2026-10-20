@@ -57,7 +57,14 @@ REVERSE_X = 3.0
 GOAL_TOL = 0.12               # m
 SEARCH_R = 2.6                # m from the start: beyond, nothing has been looked at
 BUDGET_S = 3.0                # s of search, then give up (None)
-MAX_EXPAND = 40000
+# Search size, the SAME on every computer. It was 40000, so the time budget
+# decided instead -- and the laptop (~8x the Orin) found plans the robot never
+# does: a 13-move detour round a 7 cm floor speck (B20 L45 B5 L90 ...) where the
+# Orin times out and takes the LiDAR's plan, so twin unit tests did not show the
+# robot's behaviour (test_reach_tight failed on the laptop, 2026-10-20). The
+# largest plan the real robot found that day: 3523 poses (5.6 s on the Orin).
+# A dead end now also answers sooner ("wall": 965 ms, not the whole budget).
+MAX_EXPAND = 6000
 KEY_XY, KEY_TH = 0.04, math.radians(15)
 H_WEIGHT = 1.3              # >1: greedier toward the target -- any fitting way, found fast
 CROP = 1.45                   # m: points beyond this from a pose cannot touch any move (1 m drive + body + margin)
