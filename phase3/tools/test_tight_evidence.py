@@ -129,6 +129,48 @@ def test_evidence_rules():
             assert ok == (not TRT.move_hits(ge, q, kind, v).any()), (kind, v, q)
 
 
+class Glitch(Room):
+    """Twin chairs44 2026-10-20: a camera point 0.3 m ahead appears just as
+    goal_exec checks the straight drive, refuses it, and is gone a moment later
+    (no stool, no speck here: an open opening)."""
+    def __init__(self):
+        super().__init__(phantom=True)
+        self.dobs = T.Cams(np.zeros((0, 2)))
+        self.glitched = False
+
+    def run_goal_exec(self, g):
+        if not self.glitched:
+            self.glitched = True
+            c, s = math.cos(self.pose[2]), math.sin(self.pose[2])
+            p = self.pose[:2] + (G.FRONT + 0.30) * np.array([c, s])
+            self.dobs.pts = np.array([p])
+            out = super().run_goal_exec(g)
+            # a refusal: the planner's reaction is measured from here; the
+            # point is still in the map at the refusal, gone right after
+            self._pending_clear = True
+            return out
+        if getattr(self, '_pending_clear', False):
+            self.dobs.pts = np.zeros((0, 2))
+            self._pending_clear = False
+        return super().run_goal_exec(g)
+
+    def spin_for(self, s):
+        if getattr(self, '_pending_clear', False):
+            self.dobs.pts = np.zeros((0, 2))
+            self._pending_clear = False
+
+
+def test_a_passing_glitch_is_not_a_wall():
+    r = Glitch()
+    out = r.tight_round(1, GOAL, time.time() + 120)
+    refused = [d for d in r.log if d.get('outcome') == 'failed']
+    plans = [d['plan'] for d in r.log if d.get('plan')]
+    print(f'  glitch: {out} in {r.moves} moves, {len(refused)} refused; plans {plans}')
+    assert out == 'reached', (out, r.log[-4:])
+    assert len(refused) <= 1, refused
+    assert len(r.tight_ev.confirmed) == 0, r.tight_ev.confirmed      # never believed: seen from one pose only
+
+
 if __name__ == '__main__':
     fails = 0
     for name, fn in list(globals().items()):

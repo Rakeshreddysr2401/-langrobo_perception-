@@ -1240,11 +1240,16 @@ class Reach(GP.Pass):
             if r != 'reached' or expect is None:
                 queue, expect = [], None
             if r != 'reached':
-                # refused on points it saw at that moment: believe the camera's
-                # (no plan through them again -- the twice-refused plans of 2026-10-20)
+                # refused on camera points: SUSPECTS, like any other -- seen again
+                # from another pose they are believed, from here a LiDAR plan
+                # through them gets a look first (no blind repeat, T2). Believing
+                # them at once (first version) made a passing glitch a wall for
+                # the whole goal: twin chairs44 2026-10-20, a point 0.31 m ahead
+                # gone a moment later -- the old code re-planned F135 and went
+                # through in 30 s; this failed at 99 s.
                 cam = self.outside_body(self.dobs.points_base(self.pose))
                 if len(cam) and kind in ('drive', 'turn'):
-                    ev.confirm(cam[TRT.move_hits(ge, cam, kind, v)], self.pose)
+                    ev.check(cam[TRT.move_hits(ge, cam, kind, v)], self.pose)
                 refused += 1
                 if refused >= TIGHT_REFUSALS:
                     return 'failed'
