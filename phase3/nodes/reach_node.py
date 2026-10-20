@@ -182,6 +182,13 @@ TIGHT_PLANS = 8
 # 3.8 m driven, then "no way from here"). Only within the LiDAR's sure range.
 NEED_W = 2 * SIDE + 2 * PASS_MARGIN
 WIDEST_MAX_M = 4.0
+# THE RIGHT TOOL FIRST (T5). nav2's planner keeps 4 cm a side (global
+# footprint_padding) on 2.5 cm cells: it plans through a gap only from ~51 cm
+# (46 + a cell of rounding each side), and below that it tries, swerves and
+# fails. Twin door49 2026-10-20 (a 49 cm way): nav2 drove ~5.5 m in 67 s before
+# "no path", then the tight route went through in 30 s. When the widest way
+# (widest.py reads +5 cm generous) is under NAV2_W, the tight route leads.
+NAV2_W = 2 * (SIDE + 0.04) + 2 * 0.025 + 2 * WD.RES
 PIVOT_FILE = Path(os.environ.get('ROVER_STATE_DIR', '/logs')) / 'goal_exec_pivot.json'
 
 
@@ -1071,6 +1078,11 @@ class Reach(GP.Pass):
         return (math.hypot(self.pose[0] - expect[0], self.pose[1] - expect[1]) <= self.TIGHT_FOLLOW_M
                 and abs(math.degrees(wrap(self.pose[2] - expect[2]))) <= self.TIGHT_FOLLOW_DEG)
 
+    def tight_should_lead(self, g):
+        """True when the widest way to g fits the rover but not nav2's planner."""
+        w = self.widest_way(g)
+        return w is not None and NEED_W <= w < NAV2_W
+
     def widest_way(self, g):
         """The widest way to g (odom) on the recent LiDAR scans (widest.py), in
         m; None when nothing is in the way, the goal is beyond WIDEST_MAX_M, or
@@ -1313,6 +1325,7 @@ class Reach(GP.Pass):
         way_backs, way_note = 0, ''
         tight_rounds = 0
         widest_done = False
+        tight_led = False
         for attempt in range(1, MAX_ATTEMPTS + 1):
             self.dobs.set_active(False)             # driving: nav2 / goal_exec need none
             if self.stop_req or time.time() - t0 > MAX_S:
@@ -1337,6 +1350,10 @@ class Reach(GP.Pass):
                 # only wait and ask nav2 again -- 3 x, 41 s, not one move.
                 if legs_failed.startswith('no reachable point'):
                     why = 'no path: ' + legs_failed
+            elif (d > EXACT_RANGE or go_nav2) and not tight_led and self.tight_should_lead(g):
+                # the way is narrower than nav2 plans through: the tight route first
+                tight_led = True
+                r, why = 'failed', f'no path: the widest way is under nav2\'s {NAV2_W * 100:.0f} cm -- tight route first'
             elif (d > EXACT_RANGE or go_nav2) and self.planner_says_no(g):
                 # Ask the planner first (~1-2 s). Without it a goal with no
                 # route cost a whole nav2 run -- its behaviour tree replans
