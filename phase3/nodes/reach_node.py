@@ -167,6 +167,13 @@ TIGHT_FOLLOW_SETTLE_S = 0.3   # s between moves of one plan (goal_exec re-reads 
 # many moves goal_exec refused on the camera's points.
 TIGHT_LIDAR_LEG = 0.5
 TIGHT_REFUSALS = 2
+# A LiDAR plan the camera map blocks is not driven into a refusal any more
+# (tight_route.Evidence): the clear part is driven, or a small look turn
+# gives a second viewpoint, and what is still there is believed. At most this
+# many look turns and plans per round (each plan without a move confirms
+# points, so the plans run out; this is the backstop).
+TIGHT_LOOKS = 2
+TIGHT_PLANS = 8
 PIVOT_FILE = Path(os.environ.get('ROVER_STATE_DIR', '/logs')) / 'goal_exec_pivot.json'
 
 
@@ -1099,6 +1106,11 @@ class Reach(GP.Pass):
         # next move is driven straight away. A refusal or a miss re-plans from
         # where it really is. goal_exec still checks every move on fresh points.
         tgt, queue, qmode, expect = None, [], 'all', None
+        # what the camera showed in LiDAR plans' way, for the whole goal
+        ev = getattr(self, 'tight_ev', None)
+        if ev is None:
+            ev = self.tight_ev = TRT.Evidence()
+        looks, plans = 0, 0
         while moves < TIGHT_MOVES:
             self.spin_for(TIGHT_FOLLOW_SETTLE_S if queue else TIGHT_SETTLE_S)
             if self.stop_req:
@@ -1131,16 +1143,44 @@ class Reach(GP.Pass):
                 sp = self.outside_body(self.sonar.points(every))
                 if len(sp):
                     every, lidar = np.vstack([every, sp]), np.vstack([lidar, sp])
+                conf = ev.base(self.pose)           # camera points already proven real
+                if len(conf):
+                    every, lidar = np.vstack([every, conf]), np.vstack([lidar, conf])
+                plans += 1
                 steps, info = TRT.plan(every, tb, ge, budget_s=TIGHT_BUDGET_S)
                 mode = 'all'
+                check = ''
                 if steps is None:
                     steps, info = TRT.plan(lidar, tb, ge, budget_s=TIGHT_BUDGET_S)
                     mode = 'lidar'
+                    k, hits = TRT.first_blocked(steps, camera, ge) if steps else (None, None)
+                    if k is not None and k > 0:
+                        # drive the part the camera allows: a new viewpoint on the rest
+                        ev.check(hits, self.pose)
+                        check = f'camera blocks move {k + 1}: driving {TRT.describe(steps[:k])}, then a look'
+                        steps = steps[:k]
+                    elif k == 0:
+                        sure, unsure = ev.check(hits, self.pose)
+                        a = ev.look_turn(hits, every, ge) if (unsure and looks < TIGHT_LOOKS) else None
+                        if a is not None:
+                            looks += 1
+                            steps, mode = [('turn', a)], 'look'
+                            check = f'{unsure} camera points in the way, unverified: a look from another angle'
+                        else:
+                            ev.confirm(hits, self.pose)
+                            self.say(attempt=attempt, phase='tight', mode='lidar', plan=TRT.describe(steps),
+                                     ms=info.get('ms'), expanded=info.get('expanded'),
+                                     check=f'camera confirms {len(hits)} points in move 1: not driven, plan again',
+                                     target=[round(tgt[0], 2), round(tgt[1], 2)])
+                            if plans >= TIGHT_PLANS:
+                                return 'none' if not moves else 'failed'
+                            queue, expect = [], None
+                            continue
                 self.say(attempt=attempt, phase='tight', mode=mode if steps else 'none',
                          plan=TRT.describe(steps) if steps else '', ms=info.get('ms'),
                          expanded=info.get('expanded'), why=info.get('why', ''),
-                         target=[round(tgt[0], 2), round(tgt[1], 2)])
-                self.show_tight(steps, mode, tgt, ge)
+                         target=[round(tgt[0], 2), round(tgt[1], 2)], **({'check': check} if check else {}))
+                self.show_tight(steps, 'lidar' if mode == 'look' else mode, tgt, ge)
                 if not steps:
                     return 'none' if not moves else 'failed'
                 # the camera map just switched on may not have arrived yet: then
@@ -1176,6 +1216,11 @@ class Reach(GP.Pass):
             if r != 'reached' or expect is None:
                 queue, expect = [], None
             if r != 'reached':
+                # refused on points it saw at that moment: believe the camera's
+                # (no plan through them again -- the twice-refused plans of 2026-10-20)
+                cam = self.outside_body(self.dobs.points_base(self.pose))
+                if len(cam) and kind in ('drive', 'turn'):
+                    ev.confirm(cam[TRT.move_hits(ge, cam, kind, v)], self.pose)
                 refused += 1
                 if refused >= TIGHT_REFUSALS:
                     return 'failed'
@@ -1216,6 +1261,7 @@ class Reach(GP.Pass):
             self.say(result='failed', why=f'no transform {m.header.frame_id} -> odom')
             return
         self.approach_best = float('inf')
+        self.tight_ev = None                    # the camera evidence is per goal
         g, moved, gap = self.fit(g)
         g_asked = g if moved == 0 else self.goal_odom(m) or g
         snapped = [g_asked]                     # [the goal as asked]; snap_note measures from it

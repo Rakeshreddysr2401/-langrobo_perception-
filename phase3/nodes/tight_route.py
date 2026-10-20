@@ -250,3 +250,145 @@ def describe(steps):
         else:
             words.append(f"{'L' if v > 0 else 'R'}{abs(math.degrees(v)):.0f}")
     return ' '.join(words)
+
+
+# ── what the camera says, checked before it is believed ─────────────────────
+# Real robot 2026-10-20 (reach log 14:53-16:11): when the plan on ALL points
+# failed, a plan on the LiDAR alone was driven -- and goal_exec, which checks
+# every move on ALL points, refused its first move 7 times in 15 ("obstacle
+# 0.20 m into the 0.35 m leg": a chair's splayed foot, a table edge, under or
+# over the LiDAR's plane). Twice the very same plan was made again from the
+# same spot and refused again ("F40 L30 F135 L30 F20", 16:06:48 and :57),
+# then the goal went on to wander (way_back, 24-32 hops).
+# The LiDAR plan exists for one reason: the camera map holds glossy-floor
+# specks that go away when seen from another angle (the door gap, 2026-10-10).
+# So a camera point in a LiDAR plan's way is a SUSPECT, and the rover finds
+# out which it is instead of driving into a refusal:
+#   - the moves before the first blocked one are driven (clear on every
+#     point): that is a new viewpoint;
+#   - a suspect still there when seen from another pose (>= VIEW_M moved or
+#     VIEW_DEG turned, measured by the odometry) is CONFIRMED: real, kept for
+#     the whole goal and planned around on every point set;
+#   - one the camera cannot see from here (beside, behind, too near for its
+#     view of the floor) is confirmed at once: goal_exec refuses on it anyway;
+#   - a refused move confirms the camera points it was refused on.
+# A confirmed point never vanishes from the plan, so no refused plan repeats.
+CAM_HALF_FOV = math.radians(40)    # the D555 IR is 90 deg; 5 deg kept off its edges
+CAM_NEAR, CAM_FAR = 0.35, 3.0      # m from base_link: nearer, the floor is under its view
+VIEW_M, VIEW_DEG = 0.05, 10.0
+SAME_POINT_M = 0.04
+
+
+def to_base(w, pose):
+    """odom points -> base_link at pose (x, y, th)."""
+    w = np.asarray(w, float).reshape(-1, 2)
+    c, s = math.cos(pose[2]), math.sin(pose[2])
+    q = w - (pose[0], pose[1])
+    return np.stack([c * q[:, 0] + s * q[:, 1], -s * q[:, 0] + c * q[:, 1]], 1)
+
+
+def to_odom(b, pose):
+    """base_link points at pose -> odom."""
+    b = np.asarray(b, float).reshape(-1, 2)
+    c, s = math.cos(pose[2]), math.sin(pose[2])
+    return np.stack([pose[0] + c * b[:, 0] - s * b[:, 1], pose[1] + s * b[:, 0] + c * b[:, 1]], 1)
+
+
+def in_view(b):
+    """base_link points the camera sees from here (mask)."""
+    b = np.asarray(b, float).reshape(-1, 2)
+    r = np.hypot(b[:, 0], b[:, 1])
+    return (np.abs(np.arctan2(b[:, 1], b[:, 0])) < CAM_HALF_FOV) & (r > CAM_NEAR) & (r < CAM_FAR)
+
+
+def move_hits(ge, p, kind, v, m=MARGIN):
+    """Mask of the points p (base_link before the move) goal_exec would refuse
+    the move on: its own drive_clear / turn_clear tests, at its own margin."""
+    p = np.asarray(p, float).reshape(-1, 2)
+    if not len(p):
+        return np.zeros(0, bool)
+    if kind == 'drive':
+        sgn = 1.0 if v >= 0 else -1.0
+        x = p[:, 0] * sgn
+        edge = FRONT if v >= 0 else REAR
+        return (x > edge) & (x < edge + abs(v) + m) & (np.abs(p[:, 1]) < SIDE + m)
+    k = 1 if v > 0 else -1
+    P = ge.P[k]
+    mm = m + (ge.UNLEARNED_EXTRA if ge.P_n[k] < 2 else 0.0)
+    hit = np.zeros(len(p), bool)
+    for s in np.linspace(0.0, v, max(2, int(abs(math.degrees(v)) / 3) + 1)):
+        q = (p - (np.eye(2) - R(s)) @ P) @ R(s)
+        hit |= (q[:, 0] < FRONT + mm) & (q[:, 0] > -REAR - mm) & (np.abs(q[:, 1]) < SIDE + mm)
+    return hit
+
+
+def first_blocked(steps, pts, ge):
+    """The first move of a plan (from the rover, base_link) goal_exec would
+    refuse on pts: (index, those points in base_link), or (None, empty)."""
+    pts = np.asarray(pts, float).reshape(-1, 2)
+    if not len(pts) or not steps:
+        return None, pts[:0]
+    for i, (st, (kind, v)) in enumerate(zip(poses_of(steps, (0.0, 0.0, 0.0), ge), steps)):
+        hit = move_hits(ge, to_base(pts, st), kind, v)
+        if hit.any():
+            return i, pts[hit]
+    return None, pts[:0]
+
+
+class Evidence:
+    """Camera points met in a LiDAR plan's way, for one goal, in odom:
+    suspects (with the pose each was seen from) and confirmed points."""
+
+    def __init__(self):
+        self.confirmed = np.zeros((0, 2))
+        self.sus = np.zeros((0, 2))
+        self.sus_pose = np.zeros((0, 3))
+
+    def base(self, pose):
+        """The confirmed points in base_link at pose."""
+        return to_base(self.confirmed, pose) if len(self.confirmed) else self.confirmed
+
+    def confirm(self, b, pose):
+        """Believe these base_link points (seen at pose) from now on."""
+        b = np.asarray(b, float).reshape(-1, 2)
+        if len(b):
+            w = np.unique(np.round(to_odom(b, pose) / 0.01), axis=0) * 0.01
+            self.confirmed = np.unique(np.round(np.vstack([self.confirmed, w]) / 0.01), axis=0) * 0.01
+        return len(b)
+
+    def check(self, b, pose):
+        """Blockers b (base_link at pose): confirm what is out of the camera's
+        view or was a suspect seen from another pose; keep the rest as
+        suspects seen from here. Returns (confirmed now, still unverified)."""
+        b = np.asarray(b, float).reshape(-1, 2)
+        if not len(b):
+            return 0, 0
+        w = to_odom(b, pose)
+        sure = ~in_view(b)
+        if len(self.sus):
+            d = np.hypot(w[:, None, 0] - self.sus[None, :, 0], w[:, None, 1] - self.sus[None, :, 1])
+            moved = np.hypot(self.sus_pose[:, 0] - pose[0], self.sus_pose[:, 1] - pose[1])
+            turned = np.degrees(np.abs((self.sus_pose[:, 2] - pose[2] + math.pi) % (2 * math.pi) - math.pi))
+            other_view = (moved >= VIEW_M) | (turned >= VIEW_DEG)
+            sure |= ((d < SAME_POINT_M) & other_view[None, :]).any(1)
+            known_here = ((d < SAME_POINT_M) & ~other_view[None, :]).any(1)
+        else:
+            known_here = np.zeros(len(b), bool)
+        self.confirm(b[sure], pose)
+        new = ~sure & ~known_here
+        if new.any():
+            self.sus = np.vstack([self.sus, w[new]])
+            self.sus_pose = np.vstack([self.sus_pose, np.tile(np.asarray(pose[:3], float), (int(new.sum()), 1))])
+        return int(sure.sum()), int((~sure).sum())
+
+    def look_turn(self, b, pts, ge):
+        """A small turn that keeps the blockers b in view and is clear on pts
+        (both base_link): a second viewpoint without driving. None if none."""
+        b = np.asarray(b, float).reshape(-1, 2)
+        bearing = math.atan2(float(np.mean(b[:, 1])), float(np.mean(b[:, 0])))
+        cands = sorted((math.radians(a) for a in (15, -15, 30, -30)),
+                       key=lambda a: abs(bearing - a))
+        for a in cands:
+            if abs(bearing - a) < CAM_HALF_FOV and not move_hits(ge, pts, 'turn', a).any():
+                return a
+        return None
