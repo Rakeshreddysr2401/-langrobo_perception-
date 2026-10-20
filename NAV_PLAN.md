@@ -567,3 +567,57 @@ Memory: once woken, the GPU context stays (1.46 GB). The detect gate's 8 s "what
 can see" sample wakes it at every bring-up, so follow-me's first answer is fast;
 the Jetson keeps ~2.3 GB available. Next: confirm on the real robot (`./rover up`,
 then `docker exec rover top`).
+
+
+## Session 2026-10-20 (evening, twin) — tight places: check the camera, say "too tight", no wandering
+
+Owner: "when we have a goal it needs to reach there, however complex it is" -- better
+moves and decisions in tight places, twin first. Started from the real robot's reach log
+of the afternoon (kino_sim `docs/handoff/reach_real_20261020.jsonl`, findings T1-T9 in
+kino_sim `docs/NAV_NEXT.md`). Branch **`nav-20261020-evidence`** (not merged); fix 5 on
+**`nav-fix5-tight-leads`** (on top of it, unmeasured). Twin worlds added (kino_sim):
+`stool_gap`, `gap36`, `dead_end`, `corridor_s` (60 cm).
+
+### What was wrong, the evidence, and the fix
+
+| # | what was wrong (real robot 2026-10-20) | fix (commit) | status |
+|---|---|---|---|
+| T1 T2 | when no plan fitted ALL points, the LiDAR-only plan was driven and goal_exec refused its first move **7 of 15** times on camera points (chair feet, a stool seat); the **same** refused plan was made again ("F40 L30 F135 L30 F20" twice) | the LiDAR plan is checked against the camera's points with goal_exec's own tests BEFORE a move (`tight_route.Evidence`): the clear part is driven, or a small look turn gives a second viewpoint; a camera point still there from another pose (5 cm / 10 deg by odometry) is believed for the goal; one the camera cannot see blocks plans only until the next move; a refusal makes the points the camera sees suspects (86e5682, 47a44dd, f70c47e) | unit tests (`test_tight_evidence`: refused 2 -> 0, repeated plan 1 -> 0; door speck test 2 -> 0 refusals); **twin: being measured** |
+| T3 | way_back of **24 / 32 hops** for ~2 m nearer: it replayed the trail in time order | the shortest way over the trail (points < 30 cm apart joined; the rover is 38 cm wide); none that drives > 2.5 x its gain + 1.5 m (50218cd) | test: 12.2 m -> 3 m; twin dead_end back-out 49 s / 4.1 m -> **40 s / 2.7 m** |
+| 7 | a goal through a gap too narrow took minutes ("no way from here" after recoveries) | `widest.py`: the max-min (bottleneck) path to the goal on the LiDAR's points; under 42 cm (body + a pass's 2 cm a side) even read generously -> **"too tight: the widest way is N cm, the rover needs 42"** at once (eb3cf72) | twin gap36 (36 cm): **269 s, 3.8 m -> 3.3 s, 0 m**; 42-60 cm gaps never refused |
+| T5 | nav2 tries gaps it cannot plan (needs ~51 cm): door49 nav2 drove ~5.5 m in 67 s, then "no path" | the widest way 42-52 cm -> the tight route leads (branch `nav-fix5-tight-leads`) | **unmeasured** |
+| -- | (laptop vs Orin) the tight search was bounded by time, so the laptop found plans the Orin never does | MAX_EXPAND 40000 -> 6000 (730ba75) | **REVERTED** (e432bf7): twin door49 and chairs44 timed out ("no fit found in the time"). The Orin's search is now emulated only in the unit tests |
+
+### Measured in the twin (old = d7ee4e7; one run each unless noted)
+
+| world | old | fixes (47a44dd, before f70c47e) |
+|---|---|---|
+| gap36 (36 cm, cannot fit) | failed 269 s, 3.8 m | **failed in 3.3 s, 0 m, with the number** |
+| dead_end (in, then back out) | 23 s / 49 s (4.1 m) | 23 s / **40 s (2.7 m)** |
+| stool_gap | 56 s / 70 s | 58 s / 64 s |
+| door49 (49 cm) | 111 s (8.1 m) / 59 s | 119 s / 72 s |
+| chairs44 (44 cm, 1 cm a side) | run 1: 30 s / 60 s; run 2: **failed 258 s** / 16 s | 182 s / timeout; 144 s / 130 s |
+| corridor_s (60 cm S) | 106 s / failed | failed / 129 s; failed / failed |
+
+No touches anywhere (judged on the true outline). chairs44 and corridor_s swing between
+runs for every version (1 cm a side is the camera's noise): they need several runs per
+version -- in progress. Two rules of the first evidence version made chairs44 slower
+(a passing camera glitch believed for the whole goal) and were corrected (47a44dd,
+f70c47e) from these runs.
+
+### Learned
+
+- A twin world must be possible: a 36 x 38 cm body cannot take a right-angle bend in a
+  corridor under (36 + 38) / sqrt 2 = 52.3 cm, nor turn in place under ~56 cm.
+- A limit taken from one day's log is a sample, not a bound (the 6000-pose cap).
+- Believe the camera only when two views agree; never make a passing point a wall.
+
+### Open, in order
+
+1. Twin: the corrected evidence (f70c47e) vs the old code, several runs on chairs44 /
+   corridor_s / door49; then fix 5 alone.
+2. Nav2's rotation shim in front of MPPI (installed, unused): the dithering at gap mouths
+   (stool_gap: 29 s of turning back and forth before the tight route).
+3. The D555 temporal depth filter (flicker 1 cm a side decides chairs44).
+4. Real robot with the owner, after the twin results.
+
