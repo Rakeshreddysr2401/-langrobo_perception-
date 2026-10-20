@@ -85,6 +85,32 @@ def test_way_back_note_blames_ghosts_only_for_no_path():
     assert 'could not drive back' in T.way_back_note('out of time for this goal')
 
 
+def test_the_shortest_way_not_the_whole_history():
+    """Real robot 2026-10-20: 24- and 32-hop way backs for ~2 m nearer. The
+    rover went out along y=0, round a 3 x 2 m loop twice (the second lap 15 cm
+    beside the first, as real driving is), and back near where the loop began;
+    the goal is behind the start. The way back must cut across, not replay
+    both laps (the old code: 12 hops, 12.2 m)."""
+    tr = T.Trail()
+    loop = [(1.0, 0.0), (4.0, 0.0), (4.0, 2.0), (1.0, 2.0), (1.0, 0.0)]
+    lap2 = [(x, y + 0.15) for x, y in loop]
+    drive(tr, [(-1.0, 0.0)] + loop + lap2 + [(2.0, 0.15)])
+    hops = tr.way_back((2.0, 0.15, 0.0), (-2.0, 0.0))
+    assert hops, tr.last
+    L = tr.last['route_m']
+    assert L < 3.5, (L, len(hops))
+    assert len(hops) <= 4, hops
+
+
+def test_a_way_back_that_wanders_is_not_taken():
+    """A long detour that gains little: say so, do not drive it."""
+    tr = T.Trail()
+    drive(tr, [(0.0, 0.0), (0.0, 3.0), (3.0, 3.0), (3.0, 0.6), (1.2, 0.6)])
+    hops = tr.way_back((1.2, 0.6, 0.0), (-0.6, 0.0))
+    assert not hops, hops
+    assert 'drives' in tr.last.get('why', ''), tr.last
+
+
 if __name__ == '__main__':
     fails = 0
     for name, fn in sorted(globals().items()):

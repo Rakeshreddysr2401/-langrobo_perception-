@@ -891,12 +891,14 @@ class Reach(GP.Pass):
         the blocked hop's failure."""
         hops = self.trail.way_back(self.pose, g)
         if not hops:
-            self.say(attempt=attempt, phase='way_back', outcome='none', why='no trail leads nearer the goal')
+            self.say(attempt=attempt, phase='way_back', outcome='none',
+                     why=self.trail.last.get('why', 'no trail leads nearer the goal'))
             return 'none', ''
         end = hops[-1]
         self.say(attempt=attempt, phase='way_back', hops=len(hops),
                  to=[round(end[0], 2), round(end[1], 2)],
-                 gain_m=round(self.dist(g) - math.hypot(g[0] - end[0], g[1] - end[1]), 2))
+                 gain_m=round(self.dist(g) - math.hypot(g[0] - end[0], g[1] - end[1]), 2),
+                 route_m=self.trail.last.get('route_m'))
         for k, h in enumerate(hops, 1):
             for look in (True, False):
                 if self.stop_req:

@@ -27,11 +27,23 @@ JUMP_M = 0.5          # a sample this far from the last trail point was not
 HOP_M = 1.0           # m between way-back waypoints
 MIN_AHEAD_M = 0.6     # a target this close to the rover is no way back
 MIN_GAIN_M = 0.5      # the trail must lead at least this much nearer the goal
+# THE SHORTEST WAY along the trail, not the whole history (real robot
+# 2026-10-20: way_back of 24 hops for 2.36 m nearer, and 32 hops for 1.96 m --
+# it replayed every loop the rover had driven, "random points" to the owner).
+# Trail points closer than LINK_M are joined: the rover is 38 cm wide, so
+# nothing can stand between two places its centre has been that close (each
+# hop is still planned and checked by nav2). And a way back that drives more
+# than ROUTE_RATIO x what it gains + ROUTE_SLACK_M is not taken: reach says
+# so instead of wandering.
+LINK_M = 0.30
+ROUTE_RATIO = 2.5
+ROUTE_SLACK_M = 1.5
 
 
 class Trail:
     def __init__(self):
         self.pts = []                      # [(x, y)], oldest first
+        self.last = {}                     # the last way_back's route / gain / why not
 
     def add(self, x, y):
         """Feed pose samples while reach drives (10+ Hz, so consecutive
@@ -45,11 +57,51 @@ class Trail:
         self.pts.append((x, y))
         del self.pts[:-MAX_POINTS]
 
+    def _shortest(self, i0, i1):
+        """Trail points from index i0 to i1: Dijkstra over the trail, each point
+        joined to the next and to every point within LINK_M (where the rover's
+        paths crossed or ran side by side)."""
+        import heapq
+        P = self.pts
+        cell = {}
+        for i, (x, y) in enumerate(P):
+            cell.setdefault((int(x // LINK_M), int(y // LINK_M)), []).append(i)
+
+        def near(i):
+            cx, cy = int(P[i][0] // LINK_M), int(P[i][1] // LINK_M)
+            for gx in (cx - 1, cx, cx + 1):
+                for gy in (cy - 1, cy, cy + 1):
+                    for j in cell.get((gx, gy), ()):
+                        if j != i and _d(P[i], P[j]) <= LINK_M:
+                            yield j
+
+        dist, prev = {i0: 0.0}, {}
+        pq = [(0.0, i0)]
+        while pq:
+            d, i = heapq.heappop(pq)
+            if i == i1:
+                break
+            if d > dist.get(i, float('inf')):
+                continue
+            nbrs = set(near(i))
+            nbrs.update(j for j in (i - 1, i + 1) if 0 <= j < len(P))
+            for j in nbrs:
+                nd = d + _d(P[i], P[j])
+                if nd < dist.get(j, float('inf')):
+                    dist[j], prev[j] = nd, i
+                    heapq.heappush(pq, (nd, j))
+        path, i = [i1], i1
+        while i != i0:
+            i = prev[i]
+            path.append(i)
+        return [P[i] for i in reversed(path)]
+
     def way_back(self, pose, goal):
         """Waypoints from near the rover, along the trail, to the trail point
         nearest the goal -- or [] when the trail leads nowhere nearer.
 
         pose, goal: (x, y, ...). Waypoints are (x, y, heading along the trail)."""
+        self.last = {}
         if len(self.pts) < 2:
             return []
         px, py = pose[0], pose[1]
@@ -61,8 +113,13 @@ class Trail:
             return []
         if _d((px, py), goal) - _d(self.pts[best], goal) < MIN_GAIN_M:
             return []
-        step = 1 if best > here else -1
-        path = [self.pts[i] for i in range(here, best + step, step)]
+        path = self._shortest(here, best)
+        L = sum(_d(a, b) for a, b in zip(path, path[1:]))
+        gain = _d((px, py), goal) - _d(self.pts[best], goal)
+        self.last = dict(route_m=round(L, 2), gain_m=round(gain, 2))
+        if L > ROUTE_RATIO * gain + ROUTE_SLACK_M:
+            self.last['why'] = f'the way back drives {L:.1f} m to get {gain:.1f} m nearer'
+            return []
         hops, run = [], 0.0
         for a, b in zip(path, path[1:]):
             run += _d(a, b)
