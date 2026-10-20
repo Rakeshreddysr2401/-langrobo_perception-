@@ -64,6 +64,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'tools'))
 import gap_pass as GP  # noqa: E402
 import tight_route as TRT  # noqa: E402
+import widest as WD  # noqa: E402
 import trail as TR  # noqa: E402
 import escape_moves as EM  # noqa: E402
 import house_route as HR  # noqa: E402
@@ -174,6 +175,13 @@ TIGHT_REFUSALS = 2
 # points, so the plans run out; this is the backstop).
 TIGHT_LOOKS = 2
 TIGHT_PLANS = 8
+# THE HONEST "TOO TIGHT" (widest.py). On the first "no path" of a goal: the
+# widest way to it on the LiDAR's points. Narrower than the body + a pass's
+# 2 cm a side even on the most generous reading -> the goal ends at once, with
+# the number, instead of minutes of recoveries (twin gap36 2026-10-20: 269 s,
+# 3.8 m driven, then "no way from here"). Only within the LiDAR's sure range.
+NEED_W = 2 * SIDE + 2 * PASS_MARGIN
+WIDEST_MAX_M = 4.0
 PIVOT_FILE = Path(os.environ.get('ROVER_STATE_DIR', '/logs')) / 'goal_exec_pivot.json'
 
 
@@ -1063,6 +1071,20 @@ class Reach(GP.Pass):
         return (math.hypot(self.pose[0] - expect[0], self.pose[1] - expect[1]) <= self.TIGHT_FOLLOW_M
                 and abs(math.degrees(wrap(self.pose[2] - expect[2]))) <= self.TIGHT_FOLLOW_DEG)
 
+    def widest_way(self, g):
+        """The widest way to g (odom) on the recent LiDAR scans (widest.py), in
+        m; None when nothing is in the way, the goal is beyond WIDEST_MAX_M, or
+        there are no scans. Logged either way."""
+        if not self.scans or self.dist(g) > WIDEST_MAX_M:
+            return None
+        c, s = math.cos(self.pose[2]), math.sin(self.pose[2])
+        dx, dy = g[0] - self.pose[0], g[1] - self.pose[1]
+        tb = (c * dx + s * dy, -s * dx + c * dy)
+        w, info = WD.widest(np.vstack(self.scans[-3:]), tb)
+        self.say(phase='widest', width_cm=None if w is None else round(w * 100, 1),
+                 need_cm=round(NEED_W * 100), ms=info.get('ms'))
+        return w
+
     def tight_target(self, g):
         """(x, y) odom: the goal if within reach, else the farthest point
         toward it that fits -- along the HOUSE ROUTE when there is one (through
@@ -1279,6 +1301,7 @@ class Reach(GP.Pass):
         prev_fail, same = None, 1   # last failed attempt (why, (x, y)); how many alike in a row
         way_backs, way_note = 0, ''
         tight_rounds = 0
+        widest_done = False
         for attempt in range(1, MAX_ATTEMPTS + 1):
             self.dobs.set_active(False)             # driving: nav2 / goal_exec need none
             if self.stop_req or time.time() - t0 > MAX_S:
@@ -1416,6 +1439,16 @@ class Reach(GP.Pass):
             self.dobs.set_active(True)              # recovering: fresh depth first
             self.clear_costmaps()                   # (spins 0.5 s)
             self.spin_for(1.0)
+            # stopped and settled: the scans are not smeared by motion
+            if 'no path' in why and not widest_done:
+                widest_done = True
+                w = self.widest_way(g)
+                if w is not None and w < NEED_W:
+                    self.stop()
+                    self.say(result='failed', attempt=attempt, secs=round(time.time() - t0), tried=tried,
+                             why=f'too tight: the widest way to the goal is {w * 100:.0f} cm (LiDAR), '
+                                 f'the rover needs {NEED_W * 100:.0f}')
+                    return
             # parked against something (MPPI may go to the 1 cm line; the
             # planner will not start from it): step off first. Then retry at
             # once -- unless nav2 could not fit or found no route: then retrying
