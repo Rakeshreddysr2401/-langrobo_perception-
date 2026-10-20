@@ -1134,6 +1134,7 @@ class Reach(GP.Pass):
         ev = getattr(self, 'tight_ev', None)
         if ev is None:
             ev = self.tight_ev = TRT.Evidence()
+        ev.moved()                               # a new round re-reads what it could not see
         looks, plans = 0, 0
         while moves < TIGHT_MOVES:
             self.spin_for(TIGHT_FOLLOW_SETTLE_S if queue else TIGHT_SETTLE_S)
@@ -1191,10 +1192,10 @@ class Reach(GP.Pass):
                             steps, mode = [('turn', a)], 'look'
                             check = f'{unsure} camera points in the way, unverified: a look from another angle'
                         else:
-                            ev.confirm(hits, self.pose)
+                            ev.veto(hits, self.pose)       # not driven into; re-read after the next move
                             self.say(attempt=attempt, phase='tight', mode='lidar', plan=TRT.describe(steps),
                                      ms=info.get('ms'), expanded=info.get('expanded'),
-                                     check=f'camera confirms {len(hits)} points in move 1: not driven, plan again',
+                                     check=f'camera has {len(hits)} points in move 1: not driven, plan again',
                                      target=[round(tgt[0], 2), round(tgt[1], 2)])
                             if plans >= TIGHT_PLANS:
                                 return 'none' if not moves else 'failed'
@@ -1229,6 +1230,8 @@ class Reach(GP.Pass):
                     p = self.pose
                     r, why = self.run_goal_exec((p[0] + v * math.cos(p[2]), p[1] + v * math.sin(p[2]), p[2]))
                 moves += 1
+                if r == 'reached':
+                    ev.moved()
                 self.say(attempt=attempt, phase='tight', move=TRT.describe([(kind, v)]), outcome=r, why=why)
                 done = queue.pop(0) if queue else None
                 # a LiDAR plan's drive cut short ends off the plan: plan again
@@ -1247,9 +1250,12 @@ class Reach(GP.Pass):
                 # the whole goal: twin chairs44 2026-10-20, a point 0.31 m ahead
                 # gone a moment later -- the old code re-planned F135 and went
                 # through in 30 s; this failed at 99 s.
+                # Only what the camera can see now: one it cannot is re-read from
+                # the map before the next move (first_blocked), never held here.
                 cam = self.outside_body(self.dobs.points_base(self.pose))
                 if len(cam) and kind in ('drive', 'turn'):
-                    ev.check(cam[TRT.move_hits(ge, cam, kind, v)], self.pose)
+                    hit = cam[TRT.move_hits(ge, cam, kind, v)]
+                    ev.check(hit[TRT.in_view(hit)], self.pose)
                 refused += 1
                 if refused >= TIGHT_REFUSALS:
                     return 'failed'

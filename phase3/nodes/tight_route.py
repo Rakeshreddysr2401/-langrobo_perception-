@@ -263,9 +263,12 @@ def describe(steps):
 #     VIEW_DEG turned, measured by the odometry) is CONFIRMED: real, kept for
 #     the whole goal and planned around on every point set;
 #   - one the camera cannot see from here (beside, behind, too near for its
-#     view of the floor) is confirmed at once: goal_exec refuses on it anyway;
-#   - a refused move confirms the camera points it was refused on.
-# A confirmed point never vanishes from the plan, so no refused plan repeats.
+#     view of the floor) blocks plans UNTIL THE NEXT MOVE (goal_exec refuses on
+#     it anyway), then it is re-read from the fresh map -- never believed for
+#     the goal: twin chairs44 2026-10-20, a passing glitch by the bumper became
+#     a wall for the whole goal that way, and the goal took 144-182 s, not 30;
+#   - a refused move makes the camera points it was refused on suspects.
+# A confirmed point stays in the plan, so no refused plan repeats.
 CAM_HALF_FOV = math.radians(40)    # the D555 IR is 90 deg; 5 deg kept off its edges
 CAM_NEAR, CAM_FAR = 0.35, 3.0      # m from base_link: nearer, the floor is under its view
 VIEW_M, VIEW_DEG = 0.05, 10.0
@@ -334,12 +337,24 @@ class Evidence:
 
     def __init__(self):
         self.confirmed = np.zeros((0, 2))
+        self.unseen = np.zeros((0, 2))         # blockers out of view: until the next move
         self.sus = np.zeros((0, 2))
         self.sus_pose = np.zeros((0, 3))
 
     def base(self, pose):
-        """The confirmed points in base_link at pose."""
-        return to_base(self.confirmed, pose) if len(self.confirmed) else self.confirmed
+        """The points plans must avoid (confirmed + this spot's unseen), base_link at pose."""
+        w = np.vstack([self.confirmed, self.unseen])
+        return to_base(w, pose) if len(w) else w
+
+    def veto(self, b, pose):
+        """Avoid these base_link points until the rover next moves."""
+        b = np.asarray(b, float).reshape(-1, 2)
+        if len(b):
+            self.unseen = np.vstack([self.unseen, to_odom(b, pose)])
+
+    def moved(self):
+        """The rover moved: what it could not see is re-read from the fresh map."""
+        self.unseen = np.zeros((0, 2))
 
     def confirm(self, b, pose):
         """Believe these base_link points (seen at pose) from now on."""
@@ -367,7 +382,9 @@ class Evidence:
             known_here = ((d < SAME_POINT_M) & ~other_view[None, :]).any(1)
         else:
             known_here = np.zeros(len(b), bool)
-        self.confirm(b[sure], pose)
+        out = ~in_view(b) & sure
+        self.confirm(b[sure & ~out], pose)       # seen from two poses: real
+        self.veto(b[out], pose)                  # cannot see it from here: avoid it, for now
         new = ~sure & ~known_here
         if new.any():
             self.sus = np.vstack([self.sus, w[new]])

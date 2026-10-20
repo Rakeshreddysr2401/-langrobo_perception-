@@ -108,13 +108,16 @@ def test_evidence_rules():
     p0 = (0.0, 0.0, 0.0)
     ahead = np.array([[0.8, 0.0]])
     beside = np.array([[0.0, 0.25]])
-    assert ev.check(beside, p0) == (1, 0)                      # out of view: believed at once
+    assert ev.check(beside, p0) == (1, 0)                      # out of view: avoided now ...
+    assert len(ev.unseen) == 1 and len(ev.confirmed) == 0      # ... but not believed for the goal
+    ev.moved()
+    assert len(ev.unseen) == 0                                 # re-read after a move
     assert ev.check(ahead, p0) == (0, 1)                       # in view: a suspect
     assert ev.check(ahead, p0) == (0, 1) and len(ev.sus) == 1  # same viewpoint: still a suspect, not doubled
     p1 = (0.0, 0.0, math.radians(15))
     b1 = TRT.to_base(TRT.to_odom(ahead, p0), p1)
     assert ev.check(b1, p1) == (1, 0)                          # seen again from 15 deg: real
-    assert len(ev.confirmed) == 2
+    assert len(ev.confirmed) == 1
     # first_blocked: a drive into a point, the turn before it fine
     k, hits = TRT.first_blocked([('turn', math.radians(15)), ('drive', 1.0)], np.array([[0.7, 0.18]]), ge)
     assert k == 1 and len(hits) == 1, (k, hits)
@@ -130,9 +133,12 @@ def test_evidence_rules():
 
 
 class Glitch(Room):
-    """Twin chairs44 2026-10-20: a camera point 0.3 m ahead appears just as
+    """Twin chairs44 2026-10-20: a camera point ahead appears just as
     goal_exec checks the straight drive, refuses it, and is gone a moment later
-    (no stool, no speck here: an open opening)."""
+    (no stool, no speck here: an open opening). AHEAD: m beyond the front edge;
+    0.12 puts it where the camera cannot see the floor (< CAM_NEAR from base)."""
+    AHEAD = 0.30
+
     def __init__(self):
         super().__init__(phantom=True)
         self.dobs = T.Cams(np.zeros((0, 2)))
@@ -142,7 +148,7 @@ class Glitch(Room):
         if not self.glitched:
             self.glitched = True
             c, s = math.cos(self.pose[2]), math.sin(self.pose[2])
-            p = self.pose[:2] + (G.FRONT + 0.30) * np.array([c, s])
+            p = self.pose[:2] + (G.FRONT + self.AHEAD) * np.array([c, s])
             self.dobs.pts = np.array([p])
             out = super().run_goal_exec(g)
             # a refusal: the planner's reaction is measured from here; the
@@ -158,6 +164,23 @@ class Glitch(Room):
         if getattr(self, '_pending_clear', False):
             self.dobs.pts = np.zeros((0, 2))
             self._pending_clear = False
+
+
+class NearGlitch(Glitch):
+    AHEAD = 0.12
+
+
+def test_a_passing_glitch_by_the_bumper_is_not_a_wall():
+    """The same glitch where the camera cannot see (12 cm off the bumper): the
+    first version believed such points at once and for the whole goal --
+    chairs44 then failed its re-plans (8 s 'no fit' each, 144-182 s goals)."""
+    r = NearGlitch()
+    out = r.tight_round(1, GOAL, time.time() + 120)
+    refused = [d for d in r.log if d.get('outcome') == 'failed']
+    plans = [d['plan'] for d in r.log if d.get('plan')]
+    print(f'  glitch by the bumper: {out} in {r.moves} moves, {len(refused)} refused; plans {plans}')
+    assert out == 'reached', (out, r.log[-4:])
+    assert len(r.tight_ev.confirmed) == 0, r.tight_ev.confirmed
 
 
 def test_a_passing_glitch_is_not_a_wall():
