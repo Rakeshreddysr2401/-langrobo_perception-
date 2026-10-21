@@ -2,7 +2,7 @@
 
 How the rover plans and moves, why it is limited, and the fix order F1-F5: [NAV_GUIDE.md](NAV_GUIDE.md) (2026-10-11).
 
-## 2026-10-21 — YOLO on TensorRT + lock-and-track (CLOSED_LOOP_PLAN.md stages 1-3, branch `detector-trt`)
+## 2026-10-21 — YOLO on TensorRT + lock-and-track (CLOSED_LOOP_PLAN.md stages 1-4, branch `detector-trt`)
 
 First step of the closed-loop "go near X" plan ([CLOSED_LOOP_PLAN.md](CLOSED_LOOP_PLAN.md)).
 Measured on the Jetson with no camera: 300 frames of the 2026-10-18 house survey, and
@@ -20,6 +20,8 @@ choice: `phase4/nodes/yolo_backend.py` docstring.
 | on the live robot (D555 + pose): CPU / nav rates before vs after with the whole stack | **next**, at the next bring-up |
 | **stage 2: lock-and-track** (`target_lock.py`, `target_track_node.py`, `./rover track`; pixel_to_goal's reply + `object.z`, `camera`) | built; 13 synthetic cases + the node over ROS: ALL PASS (CLOSED_LOOP_PLAN.md "Stage 2 as built"); real camera next (stage 3/4) |
 | **stage 3: the tracker on real recorded drives** | done: pose prediction 2.4-4.5 px, no colour time offset; tracker 100 % on all 5 reliable objects, 0 jumps among identical chairs; a frame-edge fix came out of it (CLOSED_LOOP_PLAN.md "Stage 3 results") |
+| **stage 4: closed loop on the twin** | done: a 25 cm wrong first point -> one-shot misses by 21-24 cm, closed loop 1-1.4 cm; three tracker bugs fixed on the way (CLOSED_LOOP_PLAN.md "Stage 4 results"); `./rover approach <label>` for the real robot |
+| Mac mini LLM unreachable (2026-10-21) | `singireddys-mac-mini.local` does not resolve, :8080 dead at .3/.7 -> every brain turn "my brain server is offline". **Owner: wake the Mac, check llama.cpp**; then rerun `./sim agents apt_s1` (also checks Pi 5 dev-1.6.12) |
 | the .pt path's hidden 0.25 floor: `person_low_conf` 0.2 never took effect (weak people 0.20-0.25 never reached the tracker); kept as is on both paths | open question for follow-me tuning |
 
 ## 2026-10-20 — tight places: camera check, honest "too tight", no wandering (twin, branch)

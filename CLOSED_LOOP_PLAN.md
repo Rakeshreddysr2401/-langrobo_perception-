@@ -1,7 +1,9 @@
 # Closed-loop approach: "go near X" that keeps seeing X (plan, 2026-10-21)
 
-Status (2026-10-21): stages 1-3 BUILT and tested off the robot (branch
-`detector-trt`; live check at the next bring-up); stages 4-6 not started. See
+Status (2026-10-21): stages 1-4 BUILT and tested (1-3 off the robot, 4 on the
+twin; branch `detector-trt`). Stage 5 (the Pi 5 brain uses it) not started;
+`./rover approach <label>` runs the closed loop on the real robot without the
+brain. Stage 6 (floor test) next, with the owner. See
 INTELLIGENCE_PLAN.md B3-B5 for the older steps this extends.
 
 ## The idea
@@ -46,7 +48,7 @@ footprint, not its centre. Follow me = the same loop with "person" (follow_node)
 | 1 | yolov8n on TensorRT; detections_3d uses the engine; measure CPU before/after. **Done 2026-10-21** (OPEN_ISSUES.md): 16 % vs 36 % of a core at 5 Hz, 0.6 vs 1.4 GB, same detections; 15 Hz now costs less than 5 Hz did. yoloe-11s-seg: later (needs mask output in yolo_backend.py) | Jetson only (GPU load a few minutes: mind power) |
 | 2 | Lock-and-track node + offline unit tests. **Done 2026-10-21**: see "Stage 2 as built" below | Jetson only |
 | 3 | Tracker + pose prediction on recorded drives. **Done 2026-10-21**: see "Stage 3 results" below | Jetson only |
-| 4 | Full test in the twin: dot, bottle, table, target moved mid-drive | laptop twin (Isaac Sim 6.2) |
+| 4 | Full test in the twin. **Done 2026-10-21**: see "Stage 4 results" below | laptop twin (Isaac Sim 6.2) |
 | 5 | Pi 5: fast routing + the new tool | Pi 5 + twin |
 | 6 | Floor test | everything, owner present, motion only with the owner's OK |
 
@@ -119,3 +121,42 @@ blind, but the goal itself is not confirmed by sight. The tracker is for THINGS.
 "Go to the kitchen table" = place first (map), then look, lock, closed loop.
 To add (later stage): an **arrival check for places** -- one photo ("is this the
 kitchen?") or a lock on a known landmark there (the fridge) to correct the final pose.
+
+## Stage 4 results: closed loop on the twin (2026-10-21)
+
+`phase4/tools/closed_loop_approach.py` plays the brain (find -> pixel_to_goal ->
+/target/lock -> /reach, goal re-sent on the refined point), judged on
+/sim/truth/pose. World `clutter`, teal bottle 0.9 m ahead, 2 runs per cell:
+
+| first estimate | one-shot (today's brain) | closed loop |
+|---|---|---|
+| good (VLM box +-40 px in y) | ~1 cm, ~1 deg | ~1 cm, ~1 deg |
+| 25 cm off sideways | misses by **24 cm**, faces 29 deg off | **1.3-1.4 cm**, 1.5-1.7 deg |
+| 25 cm too far | stops **21 cm** short | **1.1-1.2 cm** short |
+
+pixel_to_goal's box grounding already absorbs the VLM's y error in a clean
+scene; the closed loop is what fixes a WRONG first point (background depth,
+clutter in the box, a moved thing).
+
+Fixed because of the twin (each a real bug the offline tests could not show):
+- the tracker paired colour with the latest depth; they share a stamp but arrive
+  in either order, so half the frames ran without depth -> a range error was never
+  corrected. Now paired by stamp; `/target/state` says `with_depth`.
+- the look was scaled from the first guess's range -> stopped matching when that was
+  wrong. Now from the current best point.
+- `final_correction_due()`: one exact move after arrival if the refined point is
+  >= 5 cm off the goal's (a backstop; not needed in these runs).
+- the test driver's own races (TF / discovery at start) -- fixed in the tool.
+
+Regression on the twin with this branch (no navigation code changed:
+`git diff rover-v1.1.16-review..detector-trt` touches no phase1-3 / nav file):
+`./sim scenario clutter` PASS; `./sim scenario apt_s1` all 8 goals reached, with
+the KNOWN open items: the 3 cm slipper driven into (below every sensor,
+OPEN_ISSUES) and two grazes in turns (sofa -0.4 cm, shoe rack -1.1 cm; the
+6-16 cm turn slide, NAV_PLAN open item 2).
+The Pi 5 brain suite (`./sim agents apt_s1`) could not run: the Mac mini's LLM
+server was unreachable (`singireddys-mac-mini.local` does not resolve).
+
+On the real robot (stage 6): `./rover approach bottle` (closed) and
+`./rover approach bottle --mode oneshot`, a real bottle 1-2 m away; it prints
+what the robot measured.

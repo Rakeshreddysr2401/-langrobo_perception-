@@ -201,6 +201,11 @@ the photo on /vision/pixel_snapshot, or it is > 24 photos old), `no_camera_info`
 (camera down), a box too small. Tests, no robot: `python3
 phase4/tools/test_target_lock.py`; the node over ROS: `phase4/tools/sim_target_track.py`.
 
+**Closed loop without the brain** (DRIVES; owner present): `./rover approach bottle`
+-- YOLO finds the nearest bottle, the tracker keeps refining it, /reach drives and
+the goal follows. `--mode oneshot` is today's behaviour, for comparison. It prints
+a JSON line (also appended to `logs/approach.jsonl`).
+
 ### The wheels
 
 ```bash
