@@ -113,7 +113,9 @@ class Brain(Node):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--label", default="", help="find it with YOLO (a COCO label)")
-    ap.add_argument("--truth", nargs=3, type=float, required=True, help="the object's TRUE centre x y z (world = odom)")
+    ap.add_argument("--truth", nargs=3, type=float, default=None,
+                    help="the object's TRUE centre x y z (twin: world = odom). Without it (the real "
+                         "robot): --label finds it, and the result is what the robot measured")
     ap.add_argument("--radius", type=float, default=0.033, help="the object's radius (m), for the judge")
     ap.add_argument("--size", nargs=2, type=float, default=(0.07, 0.25), help="VLM stand-in box size w h (m)")
     ap.add_argument("--vlm-dy", type=float, default=0.0, help="VLM stand-in: shift the box this many px down")
@@ -126,9 +128,12 @@ def main():
     ap.add_argument("--timeout", type=float, default=150.0)
     ap.add_argument("--out", default="")
     a = ap.parse_args()
+    if a.truth is None and not a.label:
+        sys.exit("without --truth (the real robot) the thing is found by YOLO: give --label")
     rclpy.init()
     n = Brain()
-    truth = np.array(a.truth)
+    real = a.truth is None
+    truth = np.zeros(3) if real else np.array(a.truth)
     out = {"mode": a.mode, "label": a.label or "vlm-standin", "truth": a.truth, "vlm_dy": a.vlm_dy, "vlm_dx": a.vlm_dx}
 
     def done(**kw):
@@ -143,7 +148,7 @@ def main():
 
     if not n.wait_subscribers():
         done(error="pixel_to_goal / target_track / reach are not all listening")
-    if not n.spin_for(15, until=lambda: n.jpeg is not None and n.info is not None and n.truth is not None):
+    if not n.spin_for(15, until=lambda: n.jpeg is not None and n.info is not None and (real or n.truth is not None)):
         done(error="no JPEG / camera_info / truth pose (is the twin and TWIN=1 ./rover up running?)")
     # world (the truth) -> odom (what the rover believes): equal on a fresh twin, but odom
     # drifts and runs are chained (the rover drives back to its start between runs)
@@ -152,7 +157,13 @@ def main():
         rx, ry, ryaw = n.robot()
     except Exception as e:  # noqa: BLE001
         done(error=f"no odom -> base_link: {e}")
-    tp = n.truth
+    if real:                                   # no truth: odom is the only frame
+        from geometry_msgs.msg import Pose
+        tp = Pose()
+        tp.position.x, tp.position.y = rx, ry
+        tp.orientation.z, tp.orientation.w = math.sin(ryaw / 2), math.cos(ryaw / 2)
+    else:
+        tp = n.truth
     tyaw = math.atan2(2 * (tp.orientation.w * tp.orientation.z), 1 - 2 * tp.orientation.z ** 2)
     dyaw = ryaw - tyaw
     c, s_ = math.cos(dyaw), math.sin(dyaw)
@@ -224,7 +235,8 @@ def main():
         gx, gy, gyaw = tl.standoff_goal(obj[:2], (rx, ry), a.standoff)
         r["goal"] = {"x": gx, "y": gy, "yaw": gyaw}
         out["guess_off"] = list(a.guess_off)
-    out["first_guess_err_m"] = round(float(np.linalg.norm(obj[:2] - truth_odom[:2])), 3)
+    if not real:
+        out["first_guess_err_m"] = round(float(np.linalg.norm(obj[:2] - truth_odom[:2])), 3)
 
     # 3. LOCK
     if a.mode == "closed":
@@ -274,22 +286,30 @@ def main():
                     my_stamp = n.goal(gx, gy, gyaw)
                     sent_obj, sent_t = p[:2].copy(), time.time()
                     updates += 1
-                    print(f"  goal update {updates}: object -> ({p[0]:.2f}, {p[1]:.2f}), "
-                          f"{np.linalg.norm(p[:2] - truth_odom[:2]) * 100:.0f} cm from the truth", flush=True)
+                    print(f"  goal update {updates}: object -> ({p[0]:.2f}, {p[1]:.2f})"
+                          + ("" if real else f", {np.linalg.norm(p[:2] - truth_odom[:2]) * 100:.0f} cm from the truth"), flush=True)
     else:
         out["reach"] = "timeout"
     n.spin_for(1.0)
 
+    st = {}
+    for s in n.states:
+        st[s.get("state")] = st.get(s.get("state"), 0) + 1
+    final_obj = next((s["object"] for s in reversed(n.states) if s.get("state") == "tracking"), None)
+    if real:                                   # what the robot measured: the tracker's point vs its own pose
+        rx, ry, ryaw = n.robot()
+        ref = np.array(final_obj[:2]) if final_obj is not None else obj[:2]
+        dx, dy = ref[0] - rx, ref[1] - ry
+        lat = -dx * math.sin(ryaw) + dy * math.cos(ryaw)
+        done(time_s=round(time.time() - t0, 1), goal_updates=updates, measured=True,
+             dist_to_object_m=round(math.hypot(dx, dy), 3), lateral_cm=round(lat * 100, 1),
+             first_vs_tracked_cm=round(float(np.linalg.norm(ref - obj[:2])) * 100, 1), tracker_states=st)
     # 5. JUDGE on the truth
     tp = n.truth
     yaw = math.atan2(2 * (tp.orientation.w * tp.orientation.z), 1 - 2 * tp.orientation.z ** 2)
     dx, dy = truth[0] - tp.position.x, truth[1] - tp.position.y
     dist = math.hypot(dx, dy)
     lateral = -dx * math.sin(yaw) + dy * math.cos(yaw)      # + = object to the rover's left
-    st = {}
-    for s in n.states:
-        st[s.get("state")] = st.get(s.get("state"), 0) + 1
-    final_obj = next((s["object"] for s in reversed(n.states) if s.get("state") == "tracking"), None)
     done(time_s=round(time.time() - t0, 1), goal_updates=updates,
          dist_to_centre_m=round(dist, 3), dist_err_cm=round((dist - a.standoff - a.radius) * 100, 1),
          lateral_miss_cm=round(lateral * 100, 1), facing_err_deg=round(math.degrees(math.atan2(lateral, dist)), 1),

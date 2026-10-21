@@ -28,6 +28,7 @@
 #   ./rover detect     YOLO + depth -> odom objects / people (TensorRT engine if built, else .pt)
 #   ./rover engine     build the YOLO TensorRT engine for this JetPack's TensorRT (~8 min, GPU)
 #   ./rover track      keep seeing ONE locked thing every frame (/target/lock -> /target/state); sees only, never drives
+#   ./rover approach L DRIVES: closed-loop "go near <L>" (YOLO finds it, the tracker refines it, /reach drives)
 #   ./rover rviz       view it on the Jetson's own screen (costs GPU)
 #   ./rover view       RViz on the laptop (--restart to re-read the config) — finds it on DHCP, checks it renders
 #   ./rover up         everything above, in order, + ESP32 + Pi 5 + Studio + view.
@@ -1218,6 +1219,23 @@ detect)
   echo "  Used by: follow me (/vision/people) and the target hunt (/vision/target)."
   echo "  It sleeps (no camera, no YOLO) while nothing subscribes; this sample woke it once."
   echo "  Log: ./rover logs detections_3d"
+  ;;
+
+approach)
+  need_container
+  # DRIVES. Closed-loop "go near <label>" without the brain (CLOSED_LOOP_PLAN.md):
+  # YOLO finds it in the newest photo, pixel_to_goal places it, target_track keeps
+  # seeing it, /reach drives and the goal follows the refined point.
+  #   ./rover approach bottle [--mode oneshot]     (TWIN=1: add --truth X Y Z to be judged)
+  shift
+  refuse_if_manual
+  [ -n "${1:-}" ] || die "which thing? ./rover approach bottle"
+  label=$1; shift
+  docker exec "$NAME" pgrep -f '[t]arget_track_node.py' >/dev/null 2>&1 || die "target_track not running — ./rover track"
+  echo "  THIS DRIVES THE ROVER toward the nearest '$label' YOLO sees. Ctrl-C, then ./rover stop if needed."
+  extra=""; [ $# -gt 0 ] && extra=$(printf '%q ' "$@")     # printf of nothing would pass an empty ''
+  docker exec "$NAME" bash -lc "$ENVSET LD_LIBRARY_PATH=/hosttrt/lib:\$LD_LIBRARY_PATH PYTHONPATH=/hosttrt/py:\$PYTHONPATH \
+    python3 -u $SRC4/tools/closed_loop_approach.py --label $(printf '%q' "$label") $extra --out /logs/approach.jsonl"
   ;;
 
 engine)
