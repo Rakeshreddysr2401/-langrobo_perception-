@@ -1,6 +1,24 @@
-# Open issues — where things stand (newest first; last updated 2026-10-20)
+# Open issues — where things stand (newest first; last updated 2026-10-21)
 
 How the rover plans and moves, why it is limited, and the fix order F1-F5: [NAV_GUIDE.md](NAV_GUIDE.md) (2026-10-11).
+
+## 2026-10-21 — YOLO on TensorRT (B4 part 1; CLOSED_LOOP_PLAN.md stage 1, branch `detector-trt`)
+
+First step of the closed-loop "go near X" plan ([CLOSED_LOOP_PLAN.md](CLOSED_LOOP_PLAN.md)).
+Measured on the Jetson with no camera: 300 frames of the 2026-10-18 house survey, and
+the REAL node fed those frames (target hunt; no depth/TF needed). Numbers and the
+choice: `phase4/nodes/yolo_backend.py` docstring.
+
+| item | status |
+|---|---|
+| detections_3d already ran YOLO on the GPU (PyTorch), not the CPU; its cost is PyTorch's per-layer overhead: 35 ms + 33 ms CPU a frame, 1.4 GB | measured |
+| orin-nav:1.2's TensorRT 10.13 refuses this Orin ("Target GPU SM 87 is not supported"); JetPack 7.2's host 10.16 works. So `isaac_ros_tensor_rt` / `isaac_ros_yolov8` in the image cannot run on this board either | found; worked around (below) |
+| choice of four: PyTorch fp16/448 (no gain), Ultralytics+engine (12 ms, still 1.4 GB), **own TensorRT runner (12 ms, 0.6 GB)** = default, .pt as automatic fallback. 448x256 input rejected: 5 of 18 of the .pt's objects | decided |
+| same detections: 287/291 of the .pt's boxes, every difference at the 0.25 floor (FP16) | `phase4/tools/test_yolo_backend.py`: ALL PASS |
+| real node, target hunt: CPU 36.4 -> 16.1 % of a core at 5 Hz, 69 -> 34 % at 15 Hz; RSS 1389 -> 608 MB; same answers | measured |
+| `./rover engine` (build, ~8 min, GPU) and `./rover detect` (picks the engine; host TensorRT mounted at /hosttrt for this process only; falls back to the .pt and says why) | done, launcher path tested in a side container |
+| on the live robot (D555 + pose): CPU / nav rates before vs after with the whole stack | **next**, at the next bring-up |
+| the .pt path's hidden 0.25 floor: `person_low_conf` 0.2 never took effect (weak people 0.20-0.25 never reached the tracker); kept as is on both paths | open question for follow-me tuning |
 
 ## 2026-10-20 — tight places: camera check, honest "too tight", no wandering (twin, branch)
 
@@ -432,7 +450,7 @@ errors, queue) and `objects_remembered`; `fleet.sh check` prints them.
 
 | step | what | INTELLIGENCE_PLAN.md |
 |---|---|---|
-| B4 | fast eyes: a detector on the GPU (TensorRT), feeding object memory | §4 |
+| B4 | fast eyes: a detector on the GPU (TensorRT), feeding object memory. **TensorRT part built 2026-10-21** (branch `detector-trt`, live check next); the closed loop on top: CLOSED_LOOP_PLAN.md | §4 |
 | B5 | smart search: overlapping exact turns, one VLM call lists everything | §4 |
 | B6 | learning loop: episode log, weekly detector fine-tune on the owner's own objects | §1.4, §4 |
 

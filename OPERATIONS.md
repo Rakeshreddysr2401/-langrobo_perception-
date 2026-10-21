@@ -172,6 +172,24 @@ ping -c2 192.168.11.55                  # answers even when completely dead
 emitter read-back, which `./rover camera` does for you and refuses to continue
 without.
 
+### The detector (YOLO)
+
+`./rover detect` prints which backend it loaded: `YOLO backend: tensorrt …` is
+the fast one (~16 % of a core and 0.6 GB at 5 Hz); `pytorch …` works the same
+but costs ~2x the CPU and +0.8 GB. Why it fell back is the next line, and in
+`./rover logs detections_3d`:
+
+| it says | fix |
+|---|---|
+| `no TensorRT engine for TensorRT X` | `./rover engine` once (~8 min, loads the GPU: not while driving), then `./rover detect` |
+| `built with TensorRT A, the host now has B` | a JetPack update changed TensorRT: `./rover engine` again |
+| `the host's is not mounted at /hosttrt` | the container predates the change: `./rover stop`, `./rover up` |
+
+The engine must be built by the HOST's TensorRT: the image's (10.13) refuses
+this Orin (SM 87). Details: `phase4/nodes/yolo_backend.py`. Check it any time
+(no robot needed, in the container):
+`LD_LIBRARY_PATH=/hosttrt/lib:$LD_LIBRARY_PATH PYTHONPATH=/hosttrt/py:$PYTHONPATH python3 /opt/rover4/tools/test_yolo_backend.py`
+
 ### The wheels
 
 ```bash
