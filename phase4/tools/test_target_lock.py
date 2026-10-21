@@ -314,6 +314,8 @@ def main():
     check(tl.goal_update_due((2, 0), (2.2, 0), (0, 0), 5.0), "20 cm shift: re-send")
     check(not tl.goal_update_due((2, 0), (2.2, 0), (0, 0), 1.0), "not within 2 s of the last")
     check(not tl.goal_update_due((2, 0), (2.2, 0), (1.6, 0), 5.0), "not in the last metre")
+    check(tl.final_correction_due((2, 0), (2.08, 0)) and not tl.final_correction_due((2, 0), (2.03, 0)),
+          "final correction after arrival: 8 cm yes, 3 cm no")
     gx, gy, gyaw = tl.standoff_goal((2.0, 0.0), (0.0, 0.0), 0.45)
     check(abs(gx - 1.55) < 1e-9 and abs(gy) < 1e-9 and abs(gyaw) < 1e-9, "standoff 0.45 m short, facing it")
 

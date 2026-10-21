@@ -136,6 +136,13 @@ def goal_update_due(sent_obj_xy, obj_xy, robot_xy, since_sent_s,
     return math.hypot(obj_xy[0] - sent_obj_xy[0], obj_xy[1] - sent_obj_xy[1]) >= min_shift_m
 
 
+def final_correction_due(sent_obj_xy, obj_xy, min_shift_m=0.05):
+    """After /reach arrives on a goal made from `sent_obj_xy`: one exact corrective
+    move if the refined point is this far off -- the last metre is driven on the
+    refined point, which goal_update_due() deliberately leaves alone."""
+    return math.hypot(obj_xy[0] - sent_obj_xy[0], obj_xy[1] - sent_obj_xy[1]) >= min_shift_m
+
+
 # ── the lock ─────────────────────────────────────────────────────────────────
 
 def _visible(u, v, tw, th, w, h):
@@ -183,10 +190,11 @@ class Target:
         shrink = min(1.0, TEMPLATE_MAX_PX / max(crop.shape))
         self.t0 = cv2.resize(crop, None, fx=shrink, fy=shrink, interpolation=cv2.INTER_AREA) if shrink < 1 else crop.copy()
         self.t_adapt = self.t0.astype(np.float32)
-        _, _, z = project(K, R, t, self.p)
-        # what the template's pixel size means: at range z_lock it is t0 * (1/shrink) px
-        self.z_lock = max(z, 0.05)
-        self.elev_lock = _elevation(t, self.p)
+        # The look's pixel size belongs to the thing's TRUE range in the lock photo. That
+        # range comes from the current best point (seen from the lock camera), re-derived
+        # every frame: a first guess 25 cm too far scaled the look 1.35x too small, and it
+        # stopped matching as the rover neared (twin, 2026-10-21).
+        self.cam_lock = (R.copy(), t.copy())
         self.px_per_t = 1.0 / shrink
         self.sigma = SIGMA0_M
         self.last_seen = now
@@ -206,12 +214,13 @@ class Target:
         self.last_t = now
         h, w = img.shape[:2]
         u, v, z = project(K, R, t, self.p)
-        scale = self.z_lock / z if z and z > 0 else 0
+        z_lock = max(project(K, *self.cam_lock, self.p)[2] or 0.05, 0.05)
+        scale = z_lock / z if z and z > 0 else 0
         th, tw = (np.array(self.t0.shape[:2]) * self.px_per_t * scale) if scale else (0, 0)
         if self.floor and scale:
             # a flat thing on the floor grows TALLER faster than wider as the
             # camera nears it (foreshortening): height also goes with sin(elevation)
-            th *= _elevation(t, self.p) / max(self.elev_lock, 1e-3)
+            th *= _elevation(t, self.p) / _elevation(self.cam_lock[1], self.p)
 
         if z is None or z <= 0 or u is None:
             return self._unseen("out_of_view", dt, now, grow=0.5)

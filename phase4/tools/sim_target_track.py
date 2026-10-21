@@ -83,8 +83,13 @@ class Sim(Node):
         d.height, d.width, d.encoding, d.step = W.H, W.W, "16UC1", W.W * 2
         d.data = (depth * 1000).astype(np.uint16).tobytes()
         self.pi.publish(ci)
-        self.pd.publish(d)
-        self.pc.publish(m)
+        # colour and depth share a stamp but arrive in EITHER order on the robot:
+        # alternate, so a node pairing "colour + latest depth" fails here too
+        self.k = getattr(self, "k", 0) + 1
+        if self.k % 2:
+            self.pd.publish(d); self.pc.publish(m)
+        else:
+            self.pc.publish(m); self.spin_for(0.01); self.pd.publish(d)
         if jpeg:
             j = CompressedImage()
             j.header, j.format = ci.header, "jpeg"
@@ -143,6 +148,8 @@ def main():
     tracked = [s for s in n.states if s.get("state") == "tracking"]
     check(len(n.states) >= 50, f"a state for (nearly) every frame: {len(n.states)} of 60")
     check(len(tracked) >= 0.9 * len(n.states), f"tracking {len(tracked)}/{len(n.states)}")
+    wd = sum(1 for s in n.states if s.get("with_depth"))
+    check(wd >= 0.9 * len(n.states), f"depth paired on {wd}/{len(n.states)} frames (colour first or depth first)")
     if n.states:
         e = float(np.linalg.norm(np.array(n.states[-1]["object"]) - truth))
         check(e < 0.03, f"25 cm first guess -> {e * 100:.1f} cm from the truth "

@@ -54,7 +54,9 @@ from target_lock import Target
 LOCK_RING_S = 2.5        # image_bridge JPEGs kept (5 Hz -> ~13 frames, ~30 KB each)
 SNAPSHOTS = 24           # announced photos kept (= pixel_to_goal's SNAPSHOTS)
 SNAP_MAX_DT_S = 0.10     # the kept JPEG must be this close to the announced stamp
-DEPTH_MAX_DT_S = 0.06    # aligned depth paired with a colour frame within this
+DEPTH_MAX_DT_S = 0.02    # aligned depth pairs with the colour frame of the same stamp (they match exactly)
+DEPTH_RING = 6           # depth frames kept for pairing (~0.4 s at 15 Hz)
+PAIR_WAIT_S = 0.15       # a colour frame waits this long for its depth, then runs without it
 TF_RETRY_S = 0.15        # a frame whose TF is not in yet is skipped after this
 
 
@@ -96,8 +98,10 @@ class TargetTrackNode(Node):
         self._info = None                     # latest colour CameraInfo
         self._target = None                   # target_lock.Target while locked
         self._lock_id = ""
-        self._depth = None
+        self._depths = deque(maxlen=DEPTH_RING)   # recent aligned depth frames
+        self._pending = None                       # (colour msg, arrival) waiting for its depth
         self._last_t = 0.0
+        self._paired = self._unpaired = 0
         self._last_state = None
         self._subs = []
         self._tf_listener = None
@@ -201,7 +205,9 @@ class TargetTrackNode(Node):
 
     def _on_cancel(self, msg):
         if self._target is not None and msg.data in ("", self._lock_id):
-            self.get_logger().info(f"lock {self._lock_id}: cancelled")
+            self.get_logger().info(f"lock {self._lock_id}: cancelled (frames with depth "
+                                   f"{self._paired}, without {self._unpaired})")
+            self._paired = self._unpaired = 0
             self._target = None
             self._sleep()
             self._say(state="idle")
@@ -223,7 +229,8 @@ class TargetTrackNode(Node):
             self._tf_listener.unregister()
             self._tf_listener = None
             self._tf_buffer = Buffer()      # never place with a pose from before the sleep
-        self._depth = None
+        self._depths.clear()
+        self._pending = None
 
     def _cam_pose(self, stamp_ns, frame, fresh_listener=False):
         if fresh_listener and self._tf_listener is None:
@@ -239,16 +246,44 @@ class TargetTrackNode(Node):
                     return None
                 time.sleep(0.01)
 
+    # Colour and aligned depth carry the SAME stamp but arrive as two messages in
+    # either order. Pairing a colour frame with "the latest depth" used the previous
+    # depth (66 ms older) whenever colour came first, failed the time check, and the
+    # tracker ran on bearing alone -- a 25 cm range error was never corrected (twin,
+    # 2026-10-21). So: keep a few depths, pair by stamp, and let a colour frame wait
+    # briefly for its own depth.
+    def _depth_for(self, ns):
+        best = min(self._depths, key=lambda m: abs(_ns(m.header.stamp) - ns), default=None)
+        return best if best is not None and abs(_ns(best.header.stamp) - ns) <= DEPTH_MAX_DT_S * 1e9 else None
+
     def _on_depth(self, msg):
-        self._depth = msg
+        self._depths.append(msg)
+        if self._pending is not None:
+            colour, _ = self._pending
+            if abs(_ns(colour.header.stamp) - _ns(msg.header.stamp)) <= DEPTH_MAX_DT_S * 1e9:
+                self._pending = None
+                self._process(colour, msg)
 
     def _on_color(self, msg):
         if self._target is None or self._info is None:
             return
         now = time.monotonic()
+        if self._pending is not None and now - self._pending[1] > PAIR_WAIT_S:
+            colour, self._pending = self._pending[0], None     # its depth never came: go without
+            self._process(colour, None)
         if now - self._last_t < 1.0 / self._max_hz:
             return
         self._last_t = now
+        d = self._depth_for(_ns(msg.header.stamp))
+        if d is None:
+            self._pending = (msg, now)          # wait for its depth (_on_depth runs it)
+            return
+        self._process(msg, d)
+
+    def _process(self, msg, depth_msg):
+        if self._target is None:
+            return
+        now = time.monotonic()
         ns = _ns(msg.header.stamp)
         cam = self._cam_pose(ns, msg.header.frame_id or self._info.header.frame_id)
         if cam is None:
@@ -256,18 +291,20 @@ class TargetTrackNode(Node):
         img = _decode(msg)
         if img is None:
             return
-        depth = None
-        if self._depth is not None and abs(_ns(self._depth.header.stamp) - ns) <= DEPTH_MAX_DT_S * 1e9:
-            depth = _decode(self._depth)
-            if depth is not None and depth.shape[:2] != img.shape[:2]:
-                depth = None        # not aligned to colour: never sample it at colour pixels
+        depth = _decode(depth_msg) if depth_msg is not None else None
+        if depth is not None and depth.shape[:2] != img.shape[:2]:
+            depth = None            # not aligned to colour: never sample it at colour pixels
+        if depth is None:
+            self._unpaired += 1
+        else:
+            self._paired += 1
         K = np.array(self._info.k, float).reshape(3, 3)
         st = self._target.update(img, depth, cam, K, now)
         if st["state"] != self._last_state:
             self.get_logger().info(f"lock {self._lock_id}: {st['state']} "
                                    f"(object {st['object']}, sigma {st['sigma_m']} m, from lock {st['from_lock_m']} m)")
             self._last_state = st["state"]
-        self._say(stamp=ns / 1e9, **st)
+        self._say(stamp=ns / 1e9, with_depth=depth is not None, **st)
 
 
 def _spin(node):
