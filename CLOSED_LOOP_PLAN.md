@@ -1,7 +1,7 @@
 # Closed-loop approach: "go near X" that keeps seeing X (plan, 2026-10-21)
 
-Status (2026-10-21): stages 1 and 2 BUILT and tested off the robot (branch
-`detector-trt`; live check at the next bring-up); stages 3-6 not started. See
+Status (2026-10-21): stages 1-3 BUILT and tested off the robot (branch
+`detector-trt`; live check at the next bring-up); stages 4-6 not started. See
 INTELLIGENCE_PLAN.md B3-B5 for the older steps this extends.
 
 ## The idea
@@ -45,7 +45,7 @@ footprint, not its centre. Follow me = the same loop with "person" (follow_node)
 |---|---|---|
 | 1 | yolov8n on TensorRT; detections_3d uses the engine; measure CPU before/after. **Done 2026-10-21** (OPEN_ISSUES.md): 16 % vs 36 % of a core at 5 Hz, 0.6 vs 1.4 GB, same detections; 15 Hz now costs less than 5 Hz did. yoloe-11s-seg: later (needs mask output in yolo_backend.py) | Jetson only (GPU load a few minutes: mind power) |
 | 2 | Lock-and-track node + offline unit tests. **Done 2026-10-21**: see "Stage 2 as built" below | Jetson only |
-| 3 | Tracker + pose prediction on recorded drives (logs/bags/2026-10-19_*: colour, odom, TF; NO depth images) | Jetson only |
+| 3 | Tracker + pose prediction on recorded drives. **Done 2026-10-21**: see "Stage 3 results" below | Jetson only |
 | 4 | Full test in the twin: dot, bottle, table, target moved mid-drive | laptop twin (Isaac Sim 6.2) |
 | 5 | Pi 5: fast routing + the new tool | Pi 5 + twin |
 | 6 | Floor test | everything, owner present, motion only with the owner's OK |
@@ -73,9 +73,49 @@ Design decisions:
   approach policy wired to /reach, the Pi 5 tool.
 
 Known limits (synthetic world; stage 3/4 will measure the real camera):
-- matching needs the whole look on screen (95 %): an object cut by the frame edge is
-  "out_of_view" until it is fully back;
+- ~~matching needs the whole look on screen~~ fixed in stage 3: at least half of it
+  on screen is matched (direction only);
 - a look-alike could take the lock after a LONG occlusion (the search widens while
   unseen) -- the VLM check after "lost" is the guard;
 - floor positions far away are coarse (~3 cm per pixel at 1.5 m with the camera
   30 cm up); they sharpen as the rover nears.
+
+## Stage 3 results: the tracker on real recorded drives (2026-10-21)
+
+Two drives (2026-10-18 house survey, 2026-10-19 RViz goals; 16,927 colour frames
+at ~4 Hz, the fused pose, the full TF, no depth). Truth without depth: static
+objects YOLO saw from many places, triangulated; only those whose views agree
+within 6 px count (5 of 16 -- the rest were sets of identical dining chairs that
+merge into one "object"). Rerun: `phase4/tools/bag_frames.py` then
+`phase4/tools/replay_target_lock.py` (docstrings).
+
+| what | result |
+|---|---|
+| A. pose prediction (truth projected through the recorded pose vs where YOLO saw it) | median 2.4 px / 4.5 px (p90 6-12), the same driving and turning |
+| A. camera vs pose time offset | best at +0 ms (survey) and flat over 0..+60 ms (real): no colour offset to correct (LOCALIZATION_GAPS G8 updated; depth still open) |
+| B. tracker locked on the object, no depth (bearing only) | **tracking 100 % of the frames YOLO saw it, on all 5 objects**; 2.5-7.7 px; "off the object" 0-11 % = a few px outside YOLO's own jittery box |
+| B. locked 25 cm off sideways, no depth | 4 of 5 still 100 %; error 25 cm -> 5-12 cm (the rest is range, which depth fixes live) |
+| B2. sets of identical chairs / fridges (10, no truth) | **0 jumps between look-alikes** in 60 s each |
+
+Changed by what the real frames showed:
+- **A big thing cut by the frame edge was "out_of_view"** (a chair at the side,
+  low camera): now its visible part (>= 50 %) is matched, and only the direction
+  is corrected from it (a part's depth is not the whole thing's). Synthetic
+  case `edge` added: 7/7 frames tracked while cut, 0.8 cm.
+
+Learned, not yet handled:
+- **A lock taken while something covers the thing** (a door edge in the box) stores
+  the wrong look and never matches again (chair@910). The lock should come from a
+  clear view: stage 4/5 should lock on the clearest of the search's photos, and a
+  lock that never once tracks in its first ~2 s should be retaken.
+- The 25 cm-off lock on one chair tracked only 14 %: without depth a wrong range also
+  mis-scales the look. Live, pixel_to_goal's range comes from depth; recheck in stage 4.
+
+## Places vs things (owner's question, 2026-10-21)
+
+"Go to the kitchen" has nothing to look at: the goal is a saved map spot, driven
+by /reach on the map pose (LiDAR + VO, ~1 cm), with obstacles seen live -- not
+blind, but the goal itself is not confirmed by sight. The tracker is for THINGS.
+"Go to the kitchen table" = place first (map), then look, lock, closed loop.
+To add (later stage): an **arrival check for places** -- one photo ("is this the
+kitchen?") or a lock on a known landmark there (the fridge) to correct the final pose.

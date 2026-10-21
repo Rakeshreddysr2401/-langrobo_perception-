@@ -2,7 +2,7 @@
 
 How the rover plans and moves, why it is limited, and the fix order F1-F5: [NAV_GUIDE.md](NAV_GUIDE.md) (2026-10-11).
 
-## 2026-10-21 — YOLO on TensorRT + lock-and-track (CLOSED_LOOP_PLAN.md stages 1-2, branch `detector-trt`)
+## 2026-10-21 — YOLO on TensorRT + lock-and-track (CLOSED_LOOP_PLAN.md stages 1-3, branch `detector-trt`)
 
 First step of the closed-loop "go near X" plan ([CLOSED_LOOP_PLAN.md](CLOSED_LOOP_PLAN.md)).
 Measured on the Jetson with no camera: 300 frames of the 2026-10-18 house survey, and
@@ -19,6 +19,7 @@ choice: `phase4/nodes/yolo_backend.py` docstring.
 | `./rover engine` (build, ~8 min, GPU) and `./rover detect` (picks the engine; host TensorRT mounted at /hosttrt for this process only; falls back to the .pt and says why) | done, launcher path tested in a side container |
 | on the live robot (D555 + pose): CPU / nav rates before vs after with the whole stack | **next**, at the next bring-up |
 | **stage 2: lock-and-track** (`target_lock.py`, `target_track_node.py`, `./rover track`; pixel_to_goal's reply + `object.z`, `camera`) | built; 13 synthetic cases + the node over ROS: ALL PASS (CLOSED_LOOP_PLAN.md "Stage 2 as built"); real camera next (stage 3/4) |
+| **stage 3: the tracker on real recorded drives** | done: pose prediction 2.4-4.5 px, no colour time offset; tracker 100 % on all 5 reliable objects, 0 jumps among identical chairs; a frame-edge fix came out of it (CLOSED_LOOP_PLAN.md "Stage 3 results") |
 | the .pt path's hidden 0.25 floor: `person_low_conf` 0.2 never took effect (weak people 0.20-0.25 never reached the tracker); kept as is on both paths | open question for follow-me tuning |
 
 ## 2026-10-20 — tight places: camera check, honest "too tight", no wandering (twin, branch)
