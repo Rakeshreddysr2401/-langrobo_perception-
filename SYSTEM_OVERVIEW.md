@@ -81,7 +81,8 @@ topics. The full contract is in the Pi 5's INTEGRATION_GAPS.md §7:
 |---|---|---|
 | `/camera/color/image_raw/compressed` | Jetson → Pi 5 | the photo `look()` takes. Its stamp is the key for everything below |
 | `/vision/pixel_snapshot` | Pi 5 → Jetson | "hold this photo's depth + pose" (24 held) |
-| `/vision/pixel_query` → `/vision/pixel_result` | Pi 5 ↔ Jetson | the VLM's pixel/box on that photo → object x,y + a standoff goal |
+| `/vision/pixel_query` → `/vision/pixel_result` | Pi 5 ↔ Jetson | the VLM's pixel/box on that photo → object x,y,z + a standoff goal (+ the photo's camera pose) |
+| `/target/lock` → `/target/state` | Pi 5 ↔ Jetson | **built, not yet used by the brain** (CLOSED_LOOP_PLAN.md stage 5): lock that photo's box, then the object's point is refined every frame while driving |
 | `/reach/goal`, `/goal_exec/turn`, `/goal_exec/goal` (+ `/status`, `/cancel`) | Pi 5 → Jetson | go there: nav2 + exact finish, or one exact move |
 | `/cmd_vel` | Jetson or teleop → ESP32 | the wheels (via the Pi 5's micro-ROS agent) |
 | `/teleop/mode` (MANUAL cancels reach + goal_exec) | Pi 5 → all | the human override |

@@ -190,6 +190,17 @@ this Orin (SM 87). Details: `phase4/nodes/yolo_backend.py`. Check it any time
 (no robot needed, in the container):
 `LD_LIBRARY_PATH=/hosttrt/lib:$LD_LIBRARY_PATH PYTHONPATH=/hosttrt/py:$PYTHONPATH python3 /opt/rover4/tools/test_yolo_backend.py`
 
+### The target tracker (closed loop)
+
+`./rover track` (started by `./rover up`) sleeps until a `/target/lock`.
+`ros2 topic echo /target/state` while locked: `tracking` = seen this frame;
+`coasting` / `occluded` = not seen, point held; `out_of_view` / `too_close` =
+cannot be seen from here, point held; `lost` = in view but unseen 3 s (ask the
+VLM). A lock `refused` names why: `photo_not_kept` (the Pi 5 did not announce
+the photo on /vision/pixel_snapshot, or it is > 24 photos old), `no_camera_info`
+(camera down), a box too small. Tests, no robot: `python3
+phase4/tools/test_target_lock.py`; the node over ROS: `phase4/tools/sim_target_track.py`.
+
 ### The wheels
 
 ```bash

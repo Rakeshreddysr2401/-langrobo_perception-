@@ -147,7 +147,8 @@ occurrence is a glance rather than an investigation.
 | `/reach/goal`, `/reach/cancel` → `/reach/status` | `PoseStamped` / `Empty` → JSON | in / out | `reach_node`: nav2 + exact finish + retries. RViz's 2D Goal Pose and the Pi 5 brain use it |
 | `/goal_exec/goal`, `/turn`, `/pass`, `/cancel` → `/goal_exec/status` | `PoseStamped` / JSON | in / out | `goal_exec_node`: one exact move; status keyed by the goal's stamp |
 | `/cmd_vel_turn` → `/cmd_vel` | `Twist` | 20 Hz | `turn_shaper`: nav2's turn rates made real on a scrubbing chassis |
-| `/vision/pixel_snapshot`, `/vision/pixel_query` → `/vision/pixel_result` | `PointStamped` → JSON | in / out | `pixel_to_goal`: the photo-grounded contract (Pi 5 INTEGRATION_GAPS.md §7) |
+| `/vision/pixel_snapshot`, `/vision/pixel_query` → `/vision/pixel_result` | `PointStamped` → JSON | in / out | `pixel_to_goal`: the photo-grounded contract (Pi 5 INTEGRATION_GAPS.md §7). The result also carries `object.z` and `camera` (the photo's camera pose, for a lock) since 2026-10-21 |
+| `/target/lock`, `/target/cancel` → `/target/state` | JSON / String → JSON | in / out, ~15 Hz while locked | `target_track_node`: keep seeing ONE locked thing (CLOSED_LOOP_PLAN.md). Lock = photo stamp + box + `pixel_to_goal`'s `object` and `camera` for it; state = tracking / coasting / occluded / out_of_view / too_close / lost + the refined odom point. Sees only, never drives |
 | `/rover_view/wall_margin` | `OccupancyGrid` | 1 Hz | `wall_margin_view`: the costmap drawn for RViz only |
 
 **The durabilities are opposite and both matter.** nvblox publishes VOLATILE;
