@@ -25,6 +25,8 @@
 #   ./rover map        nvblox — build the room as it drives (Phase 2)
 #   ./rover nav        nav2 — click a goal, it plans and drives there (Phase 3)
 #   ./rover vlm        VLM pixel -> Nav2 goal bridge, for the Pi 5 brain (Phase 4)
+#   ./rover detect     YOLO + depth -> odom objects / people (TensorRT engine if built, else .pt)
+#   ./rover engine     build the YOLO TensorRT engine for this JetPack's TensorRT (~8 min, GPU)
 #   ./rover rviz       view it on the Jetson's own screen (costs GPU)
 #   ./rover view       RViz on the laptop (--restart to re-read the config) — finds it on DHCP, checks it renders
 #   ./rover up         everything above, in order, + ESP32 + Pi 5 + Studio + view.
@@ -374,6 +376,20 @@ start_container(){
   local nvcuvid=()
   local nvcuvid_host=/opt/nvidia/l4t-gpu-libs/openrm/libnvcuvid.so
   [ -f "$nvcuvid_host" ] && nvcuvid=(-v "$nvcuvid_host":/usr/lib/aarch64-linux-gnu/nvidia/libnvcuvid.so.1:ro)
+  # The image's TensorRT (10.13) refuses this Orin (SM 87); JetPack 7.2's own
+  # does not. Mount the host's runtime (3 libraries + Python bindings) at
+  # /hosttrt, OUT of the image's library path: only the YOLO detector is pointed
+  # at it (./rover detect), every Isaac node keeps the image's (2026-10-21,
+  # phase4/nodes/yolo_backend.py).
+  local hosttrt=()
+  local hl=/usr/lib/aarch64-linux-gnu hp=/usr/lib/python3.12/dist-packages/tensorrt lib real
+  if [ -d "$hp" ]; then
+    hosttrt=(-v "$hp":/hosttrt/py/tensorrt:ro)
+    for lib in libnvinfer.so.10 libnvinfer_plugin.so.10 libnvonnxparser.so.10; do
+      real=$(readlink -f "$hl/$lib" 2>/dev/null) && [ -f "$real" ] \
+        && hosttrt+=(-v "$real":/hosttrt/lib/$lib:ro)
+    done
+  fi
   # Isaac ROS 4.6's nvblox ships GPU code for sm_75 only (4.4's, in 1.1, had
   # sm_87 -- this Orin). The driver JIT-compiles its 280 MB library from PTX on
   # first use: minutes at 100 % CPU, and that load knocked the D555's IR and
@@ -387,7 +403,7 @@ start_container(){
   docker run -d --name "$NAME" --entrypoint /bin/bash \
     --runtime=nvidia --network=host --privileged \
     -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all -e NVIDIA_DISABLE_REQUIRE=1 \
-    -e ROS_DOMAIN_ID=$DOMAIN "${twin_mount[@]}" "${nvcuvid[@]}" \
+    -e ROS_DOMAIN_ID=$DOMAIN "${twin_mount[@]}" "${nvcuvid[@]}" "${hosttrt[@]}" \
     -v "$cuda_cache":/root/.nv/ComputeCache -e CUDA_CACHE_MAXSIZE=4294967296 \
     -v "$HOSTSRC":$SRC:ro \
     -v "$REPO/phase2":$SRC2:ro \
@@ -1158,9 +1174,25 @@ detect)
   echo "[detect] YOLOv8n + D555 depth -> odom-frame objects, for the Pi 5 brain"
   echo "         look_feed_rate=0: image_bridge (the vlm layer) owns the JPEG"
   echo "         topic, and two publishers on it would look like a flapping camera."
-  dexec "exec python3 $SRC4/nodes/detections_3d.py > /tmp/detections_3d.log 2>&1"
+  # TensorRT engine when one exists for THIS host's TensorRT (about half the CPU,
+  # 0.8 GB less RAM); the node falls back to the .pt itself if it will not load.
+  trt_tag=$(python3 -c 'import tensorrt; print(".".join(tensorrt.__version__.split(".")[:3]))' 2>/dev/null || true)
+  engine="models/yolov8n_640x384_trt${trt_tag:-none}.engine"
+  model_args=""
+  if [ -n "$trt_tag" ] && [ -f "$REPO/$engine" ]; then
+    model_args="--ros-args -p model:=/$engine -p fallback_model:=/models/yolov8n.pt"
+    docker exec "$NAME" test -f /hosttrt/lib/libnvinfer.so.10 \
+      || echo "  ! this container has no /hosttrt (started by an older ./rover): YOLO falls back to the .pt until ./rover up"
+  else
+    echo "  ! no TensorRT engine for TensorRT ${trt_tag:-?} -- YOLO runs on PyTorch (~2x the CPU, +0.8 GB)."
+    echo "    Build it once: ./rover engine  (~8 min)"
+  fi
+  dexec "LD_LIBRARY_PATH=/hosttrt/lib:\$LD_LIBRARY_PATH PYTHONPATH=/hosttrt/py:\$PYTHONPATH \
+         exec python3 $SRC4/nodes/detections_3d.py $model_args > /tmp/detections_3d.log 2>&1"
   echo "  loading YOLO onto the GPU (~15 s)..."
   sleep 16
+  rexec "grep -m1 'YOLO backend' /tmp/detections_3d.log | sed 's/^.*YOLO backend/      YOLO backend/'" || true
+  rexec "grep -m1 'not usable' /tmp/detections_3d.log | sed 's/^.*TensorRT/  ! TensorRT/'" || true
   echo
   echo "  GATE detect:"
   # NOT a rate gate: the node publishes only when it actually sees something,
@@ -1182,6 +1214,14 @@ detect)
   echo "  Used by: follow me (/vision/people) and the target hunt (/vision/target)."
   echo "  It sleeps (no camera, no YOLO) while nothing subscribes; this sample woke it once."
   echo "  Log: ./rover logs detections_3d"
+  ;;
+
+engine)
+  # Moves nothing; loads the GPU for a few minutes -- not while driving.
+  # Run it again after a JetPack update (the engine names the TensorRT it needs).
+  shift
+  "$REPO/phase4/tools/build_engine.sh" "$@"
+  echo "  restart the detector to use it: ./rover detect"
   ;;
 
 # ── rviz ────────────────────────────────────────────────────────────────────

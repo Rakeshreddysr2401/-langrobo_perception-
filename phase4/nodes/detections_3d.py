@@ -75,9 +75,11 @@ Design notes:
   - Depth is NOT the aligned_depth stream: a color pixel is mapped into the
     depth image through both cameras' intrinsics (angle equality). The few-mm
     color↔depth baseline is negligible at approach ranges (>0.3 m).
-  - Runs in the `rover` container (orin-nav:1.1), which already carries
-    torch 2.12.0+cu130 and ultralytics 8.4.80 with CUDA available. The model is
-    mounted read-only at /models — see `./rover detect`.
+  - YOLO runs through yolo_backend.py: a TensorRT engine (the host's TensorRT,
+    no torch: ~12 ms, ~0.6 GB) when ./rover detect finds one for this JetPack,
+    else the .pt on PyTorch (torch 2.12 + ultralytics 8.4.80 in orin-nav:1.2:
+    ~35 ms, ~1.4 GB). Models are mounted read-only at /models; `./rover engine`
+    builds the engine.
 """
 
 import json
@@ -93,14 +95,11 @@ from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo, CompressedImage, Image
 from std_msgs.msg import String
 
-import torch
-torch.backends.cudnn.enabled = False  # cuDNN version mismatch on Jetson (same as target_node)
-from ultralytics import YOLO
-
 from tf2_ros import Buffer, TransformListener
 
 from person_tracker import PersonTracker
 from person_look import look_of
+from yolo_backend import load_detector
 
 WAKE_CHECK_S = 0.25     # demand is polled this often (subscriber counts: cheap)
 SLEEP_AFTER_S = 10.0    # asleep this long after the last demand (follow restarts, a re-asked hunt)
@@ -132,7 +131,8 @@ class Detections3DNode(Node):
     def __init__(self):
         super().__init__("detections_3d")
 
-        self.declare_parameter("model", "/models/yolov8n.pt")
+        self.declare_parameter("model", "/models/yolov8n.pt")          # .engine = TensorRT (./rover detect picks it)
+        self.declare_parameter("fallback_model", "/models/yolov8n.pt")  # used if the .engine will not load
         # 0.35, was 0.45 (2026-08-10). Measured on this rig: a plastic bottle at
         # 1.4 m comes back as 'vase' 0.40 / 'bottle' 0.15 from yolov8n, so a 0.45
         # gate published NOTHING for an object filling a good part of the frame
@@ -186,9 +186,12 @@ class Detections3DNode(Node):
         self._people = PersonTracker()
         self._base_tf = None      # base_frame <- depth optical; static, looked up once
 
-        self.get_logger().info(f"Loading YOLO {p('model')} on {p('device')}...")
-        self._model = YOLO(p("model"))
-        self._device = p("device")
+        # A .engine runs on TensorRT with no torch; a .engine that will not load
+        # (TensorRT changed with JetPack) falls back to fallback_model. See yolo_backend.py.
+        self.get_logger().info(f"Loading YOLO {p('model')}...")
+        self._detector = load_detector(p("model"), fallback=p("fallback_model"),
+                                       device=p("device"), log=self.get_logger())
+        self.get_logger().info(f"YOLO backend: {self._detector.backend}")
 
         self._color = self._depth = None
         self._color_info = self._depth_info = None
@@ -428,16 +431,13 @@ class Detections3DNode(Node):
         # YOLO once per tick; everything downstream shares the boxes.
         boxes = []
         persons = []      # (conf, xyxy) down to person_low_conf, for the tracker
-        for r in self._model(img, device=self._device, verbose=False):
-            for b in r.boxes:
-                conf = float(b.conf[0])
-                label = self._model.names[int(b.cls[0])].lower()
-                xyxy = tuple(map(int, b.xyxy[0]))
-                if label == "person" and conf >= self._person_low_conf:
-                    persons.append((conf, xyxy))
-                if conf < self._conf_min:
-                    continue
-                boxes.append((label, conf, xyxy))
+        for label, conf, box in self._detector.detect(img):
+            xyxy = tuple(map(int, box))
+            if label == "person" and conf >= self._person_low_conf:
+                persons.append((conf, xyxy))
+            if conf < self._conf_min:
+                continue
+            boxes.append((label, conf, xyxy))
 
         # Path 1 — target finder (no TF needed; the no-map fallback).
         if self._target:
