@@ -22,7 +22,8 @@ been publishing into the void since it was written):
          {"id": ..., "ok": true,
           "goal": {"x": <odom metres>, "y": <odom metres>, "yaw": <radians>},
           "depth_m": ...,
-          "object": {"x": <odom metres>, "y": <odom metres>},
+          "object": {"x": <odom metres>, "y": <odom metres>, "z": <odom metres>},
+          "camera": {"frame": ..., "t": [x, y, z], "q": [x, y, z, w]},
           "relative": {"forward_m": ..., "left_m": ..., "bearing_deg": ...}}
 
          "goal" is NOT where the object is: it is _STANDOFF_M (0.45 m) SHORT
@@ -30,6 +31,11 @@ been publishing into the void since it was written):
          inside it. Anything answering "where is the chair" must read
          "object"/"relative" — using "goal" understates every distance by the
          standoff and was the reason those two fields were added (2026-09-10).
+
+         "camera" (2026-10-21) is the colour camera's odom pose the object was
+         placed with -- the PHOTO's when at_capture. A lock on that photo
+         (target_track_node, /target/lock) needs it: the photo can be 40 s old
+         by then, past the TF buffer, and this node already has it.
 
          "object" is the object itself in odom. "relative" is the same point in
          base_link terms for a human answer: +forward_m ahead, +left_m to the
@@ -730,7 +736,7 @@ class PixelToGoal(Node):
             z_cam = depth_m   # optical-frame convention: Z forward, X right, Y down
             rot_x, rot_y, rot_z = _rotate_by_quat(
                 x_cam, y_cam, z_cam, cam_to_odom.transform.rotation)
-            ox, oy = t.x + rot_x, t.y + rot_y
+            ox, oy, oz = t.x + rot_x, t.y + rot_y, t.z + rot_z
             n_pts = 0
             extra_log = f'window ±{half}px' + (' (box: nothing above the floor)' if box else '')
         # Big flat things: the LiDAR's nearest surface across the middle of the
@@ -787,7 +793,15 @@ class PixelToGoal(Node):
         self._reply(req_id, True, **extra,
                    goal={"x": round(gx, 3), "y": round(gy, 3), "yaw": round(yaw, 4)},
                    depth_m=round(depth_m, 2),
-                   object={"x": round(ox, 3), "y": round(oy, 3)},
+                   object={"x": round(ox, 3), "y": round(oy, 3), "z": round(oz, 3)},
+                   # the camera pose the object was placed with (the photo's, when
+                   # at_capture): target_track_node locks on that photo with it
+                   camera={"frame": info.header.frame_id,
+                           "t": [round(t.x, 4), round(t.y, 4), round(t.z, 4)],
+                           "q": [round(q, 6) for q in (cam_to_odom.transform.rotation.x,
+                                                       cam_to_odom.transform.rotation.y,
+                                                       cam_to_odom.transform.rotation.z,
+                                                       cam_to_odom.transform.rotation.w)]},
                    relative={"forward_m": round(forward, 2),
                              "left_m": round(left, 2),
                              "bearing_deg": round(math.degrees(math.atan2(left, forward)), 1)})

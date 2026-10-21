@@ -27,6 +27,7 @@
 #   ./rover vlm        VLM pixel -> Nav2 goal bridge, for the Pi 5 brain (Phase 4)
 #   ./rover detect     YOLO + depth -> odom objects / people (TensorRT engine if built, else .pt)
 #   ./rover engine     build the YOLO TensorRT engine for this JetPack's TensorRT (~8 min, GPU)
+#   ./rover track      keep seeing ONE locked thing every frame (/target/lock -> /target/state); sees only, never drives
 #   ./rover rviz       view it on the Jetson's own screen (costs GPU)
 #   ./rover view       RViz on the laptop (--restart to re-read the config) — finds it on DHCP, checks it renders
 #   ./rover up         everything above, in order, + ESP32 + Pi 5 + Studio + view.
@@ -1015,6 +1016,9 @@ up)
   # runs it too (2026-10-20): skipping it there hid its 58 % idle overload.
   echo
   "$0" follow || echo "  ! follow did not come up -- the rest of the robot is fine; retry: ./rover follow"
+  # The closed-loop target tracker (CLOSED_LOOP_PLAN.md). Asleep until a lock:
+  # ~1 % of a core (it only keeps image_bridge's JPEG bytes). Not fatal.
+  "$0" track || echo "  ! track did not come up -- the rest of the robot is fine; retry: ./rover track"
 
   echo
   echo "[wheels] ESP32 link — first check"
@@ -1222,6 +1226,23 @@ engine)
   shift
   "$REPO/phase4/tools/build_engine.sh" "$@"
   echo "  restart the detector to use it: ./rover detect"
+  ;;
+
+track)
+  need_container
+  # phase4/nodes/target_track_node.py: lock once (a photo's box + pixel_to_goal's
+  # reply for it), then the point is refined from every colour frame. It only
+  # SEES: /target/state says where the thing is and whether it is in view; what
+  # to drive is the caller's. Colour, depth and TF are subscribed only while locked.
+  kill_match '[t]arget_track_node[.]py'
+  echo "[track] target_track: /target/lock -> /target/state (asleep until locked)"
+  dexec "exec python3 $SRC4/nodes/target_track_node.py > /tmp/track.log 2>&1"
+  sleep 3
+  echo
+  echo "  GATE track:"
+  rexec "n=\$(ros2 topic info /target/lock 2>/dev/null | awk '/Subscription count/{print \$3}'); \
+         printf '      %-26s %5s        (want >= 1)   %s\n' 'track listening' \"\${n:-0}\" \"\$([ \"\${n:-0}\" -ge 1 ] && echo OK || echo FAIL)\""
+  echo "  State: ros2 topic echo /target/state     Log: ./rover logs track"
   ;;
 
 # ── rviz ────────────────────────────────────────────────────────────────────
