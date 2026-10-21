@@ -21,6 +21,8 @@ Cases (each is a claim in target_lock.py / CLOSED_LOOP_PLAN.md):
   gone           the object is removed: "lost" after LOST_S, point not dragged anywhere
   too_close      at 30 cm: "too_close", point held
   pose_noise     1 cm / 0.5 deg pose noise each frame: still within 3 cm
+  edge           the rover turns so the object slides out at the frame edge: still tracked
+                 while half of it shows (the visible part is matched), then out_of_view
   camera_real    auto-exposure swings (x0.6-1.4) and motion blur in turns: still tracking
   goal_policy    goal_update_due / standoff_goal rules
 """
@@ -279,6 +281,24 @@ def main():
     ss = run(lambda k: W_, tgt, [(0.05 * k, 0, 0) for k in range(30)], rng, noise_pose=0.01)
     worst = max(err(s, truth) for s in ss[5:])
     check(worst < 0.03, f"within 3 cm under 1 cm / 0.5 deg pose noise ({worst * 100:.1f} cm worst)")
+
+    case("edge")
+    o = obj_face(2.5, 0.2, w=0.5)                             # a wide thing (a chair, a table end)
+    W_ = scene(obj=None, extra=[o])
+    tgt, truth = lock(W_, o, (0.8, 0, 0))
+    yaws = [math.radians(-a) for a in range(0, 61)]             # turn right, 1 deg a frame: it slides out on the left
+    ss = run(lambda k: W_, tgt, [(0.8, 0, y) for y in yaws], rng)
+    cut = []
+    for s_, y in zip(ss, yaws):
+        R, t = cam_pose(0.8, 0, y)
+        x0, _, x1, _ = box_of(o, (R, t))
+        if x0 < 0 < x1 and -x0 < 0.5 * (x1 - x0):              # partly off screen, at least half on
+            cut.append(s_)
+    tr = [s_ for s_ in cut if s_["state"] == "tracking"]
+    check(len(cut) >= 2 and len(tr) == len(cut), f"tracked {len(tr)}/{len(cut)} frames while cut by the frame edge")
+    check(all(err(s_, truth) < 0.03 for s_ in tr), f"accurate there ({max([err(s_, truth) for s_ in tr] or [0]) * 100:.1f} cm worst)")
+    check(ss[-1]["state"] == "out_of_view", f"then out_of_view ({ss[-1]['state']})")
+    o, W_ = obj_face(2.5, 0.2), scene()
 
     case("camera_real")
     tgt, truth = lock(W_, o, (0, 0, 0))

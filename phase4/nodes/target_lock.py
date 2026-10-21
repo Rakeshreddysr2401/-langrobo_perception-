@@ -15,7 +15,8 @@ is, not by its name, so "that dot" works the same as "the bottle".
 HOW, each frame (no detector, no VLM: ~1 ms of OpenCV on a small window)
   1. PREDICT  the stored odom point through the camera pose of THIS frame
               (fusion2's pose is good to ~1 cm, so the prediction is tight).
-  2. MATCH    the lock-time look (a grey template, rescaled for the new range)
+  2. MATCH    the lock-time look (a grey template, rescaled for the new range;
+              only its on-screen part when the thing is cut by the frame edge)
               in a window around the prediction, sized by how sure the point
               is (`sigma`, metres, shown in pixels at this range). Scores are
               weighed by distance from the prediction, and a second peak
@@ -57,7 +58,7 @@ AMBIG_MARGIN = 0.06    # a second peak within this of the best, elsewhere = ambi
 DIST_PENALTY = 0.15    # score lost at the edge of the search window (prefers the prediction)
 TEMPLATE_MIN_PX = 8    # smaller than this on screen: too far to match
 TEMPLATE_MAX_PX = 96   # the stored look is shrunk to this (cost, and blur tolerance)
-MIN_VISIBLE = 0.95     # matching needs the whole look on screen; less = out of view
+MIN_VISIBLE = 0.5      # at least this share of the predicted box on screen to match its visible part
 MIN_BOX_PX = 14        # a smaller lock box is widened to this, centred: context to match on
 SEARCH_MIN_PX = 24
 SEARCH_MAX_PX = 180
@@ -218,19 +219,29 @@ class Target:
             return self._unseen("too_close", dt, now, grow=0.0)
         if _visible(u, v, tw, th, w, h) < MIN_VISIBLE:
             return self._unseen("out_of_view", dt, now, grow=0.5)
+        # The part of the look that is on screen (a big thing near a low camera is
+        # often cut by the frame edge: a chair at the side, 2026-10-21 survey replay)
+        cx0, cy0 = max(0.0, -(u - tw / 2)), max(0.0, -(v - th / 2))
+        cx1, cy1 = tw - max(0.0, (u + tw / 2) - w), th - max(0.0, (v + th / 2) - h)
+        if min(cx1 - cx0, cy1 - cy0) < TEMPLATE_MIN_PX:
+            return self._unseen("out_of_view", dt, now, grow=0.5)
         if min(tw, th) < TEMPLATE_MIN_PX:
             return self._unseen("coasting", dt, now)
 
         g = _grey(img)
         f = K[0, 0]
         pad = int(np.clip(f * self.sigma / z + max(tw, th) / 2, SEARCH_MIN_PX, SEARCH_MAX_PX))
-        found = self._match(g, u, v, tw, th, pad)
+        crop = (cx0, cy0, cx1, cy1)
+        # the visible part's centre, where it is predicted on screen
+        vu, vv = u - tw / 2 + (cx0 + cx1) / 2, v - th / 2 + (cy0 + cy1) / 2
+        found = self._match(g, vu, vv, tw, th, pad, crop)
         if found is None:
-            occluded = self._occluded(depth, u, v, z, tw, th)
+            occluded = self._occluded(depth, vu, vv, z, cx1 - cx0, cy1 - cy0)
             return self._unseen("occluded" if occluded else "coasting", dt, now)
-        uc, vc, score = found
+        mu, mv, score = found                       # the visible part's matched centre
+        uc, vc = mu - (cx0 + cx1) / 2 + tw / 2, mv - (cy0 + cy1) / 2 + th / 2   # the whole thing's
 
-        meas, src = self._measure(depth, cam, K, uc, vc, tw, th, z)
+        meas, src = self._measure(depth, cam, K, uc, vc, tw, th, z, at=(mu, mv), part=(cx1 - cx0, cy1 - cy0))
         if meas is None:
             return self._unseen("coasting", dt, now)
 
@@ -248,12 +259,16 @@ class Target:
         b = cv2.resize(self.t_adapt.astype(np.uint8), size, interpolation=cv2.INTER_LINEAR)
         return a, b
 
-    def _match(self, g, u, v, tw, th, pad):
+    def _match(self, g, u, v, tw, th, pad, crop):
+        """Find the template's visible part `crop` (x0, y0, x1, y1 in the scaled template)
+        near (u, v), where that part's centre is predicted. -> (u, v, score) of its centre."""
         h, w = g.shape
         x0, y0 = int(max(0, u - pad)), int(max(0, v - pad))
         x1, y1 = int(min(w, u + pad + 1)), int(min(h, v + pad + 1))
         win = g[y0:y1, x0:x1]
         a, b = self._templates(tw, th)
+        k0, j0, k1, j1 = (int(round(c)) for c in crop)
+        a, b = a[j0:max(j1, j0 + 1), k0:max(k1, k0 + 1)], b[j0:max(j1, j0 + 1), k0:max(k1, k0 + 1)]
         if win.shape[0] < a.shape[0] + 2 or win.shape[1] < a.shape[1] + 2:
             return None
         res = np.maximum(cv2.matchTemplate(win, a, cv2.TM_CCOEFF_NORMED),
@@ -293,14 +308,21 @@ class Target:
         p = p[np.isfinite(p)]
         return p[(p > MIN_DEPTH_M) & (p < MAX_DEPTH_M)]
 
-    def _measure(self, depth, cam, K, uc, vc, tw, th, z_pred):
+    def _measure(self, depth, cam, K, uc, vc, tw, th, z_pred, at=None, part=None):
+        """The 3D point of the thing centred at (uc, vc) -- which may be off screen when
+        only part of it is visible: depth is then read at the visible part `at`."""
         R, t = cam
         if self.floor:
             o, d = ray(K, R, t, uc, vc)
             hit = floor_hit(o, d, z0=self.p_lock[2])
             if hit is not None:
                 return hit, "floor"
-        vals = self._depth_patch(depth, uc, vc, tw, th)
+        du, dv = at if at is not None else (uc, vc)
+        pw, ph = part if part is not None else (tw, th)
+        partial = part is not None and (pw < 0.95 * tw or ph < 0.95 * th)
+        # Partly on screen: the visible part's depth is not the whole thing's (a wide
+        # thing seen at an angle), so only its DIRECTION is corrected (bearing below)
+        vals = None if partial else self._depth_patch(depth, du, dv, pw, ph)
         if vals is not None and vals.size >= 5:
             near = vals[np.abs(vals - z_pred) < max(0.25, 0.2 * z_pred)]
             # a thin thing's box is mostly background: prefer depths near the prediction
@@ -315,6 +337,7 @@ class Target:
         return vals is not None and vals.size >= 5 and float(np.median(vals)) < z - OCCLUDER_M
 
     def _seen(self, uc, vc, score, src, now, g, tw, th):
+        # (a partly visible thing: the crop below falls outside the image and is skipped)
         self.state, self.score, self.pixel, self.depth_src = "tracking", score, (uc, vc), src
         self.last_seen = now
         self.seen += 1
