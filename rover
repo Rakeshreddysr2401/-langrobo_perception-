@@ -1258,7 +1258,9 @@ track)
   sleep 3
   echo
   echo "  GATE track:"
-  rexec "n=\$(ros2 topic info /target/lock 2>/dev/null | awk '/Subscription count/{print \$3}'); \
+  # Asked up to 3 times, as detect's gate: on the loaded real robot the graph had
+  # not seen the node 3 s after start and this said FAIL for a running node (2026-10-21).
+  rexec "for i in 1 2 3; do n=\$(ros2 topic info /target/lock 2>/dev/null | awk '/Subscription count/{print \$3}'); [ \"\${n:-0}\" -ge 1 ] && break; sleep 3; done; \
          printf '      %-26s %5s        (want >= 1)   %s\n' 'track listening' \"\${n:-0}\" \"\$([ \"\${n:-0}\" -ge 1 ] && echo OK || echo FAIL)\""
   echo "  State: ros2 topic echo /target/state     Log: ./rover logs track"
   ;;
