@@ -168,6 +168,12 @@ by this plan (JetPack 7.2.1 stays; the host `isaac-ros-cli` 2.5 stays dormant).
 
 ## Log
 
+- 2026-10-24: **test tools** in the repo (were scratch files in 4.6): `docker/2.0/check.sh [image]`
+  (packages, plugins, ldd, sm_87, DDS librealsense, TensorRT, python deps; PASS/FAIL),
+  `docker/2.0/vo_check.sh [image]` (cuVSLAM on `phase1/harness/fake_stereo.py`, domain 99,
+  `--network none`). **Baseline orin-nav:1.2 (4.6):** 30.0 Hz, 2.047 m tracked vs 2.097 m
+  truth (−2.4 %), tracker 21 % of a core / 583 MB, 0 resets, 233 landmarks. PASS.
+
 - 2026-10-24: binary check of the 5.0 debs: `libcuvslam.so`, the cuvslam node and
   `libnvblox_ros_lib.so` have **0 SVE**; GPU code **sm_87** in both (nvblox 4.6 was sm_75-only,
   so its 4-minute first-run JIT should be gone). Plugin class unchanged
