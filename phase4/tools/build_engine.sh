@@ -4,28 +4,27 @@
 #   phase4/tools/build_engine.sh [models/yolov8n.pt] [height width]     (default 384 640)
 #   -> models/<name>_<w>x<h>_trt<version>.engine
 #
-# Why the host and not the image: orin-nav:1.2 carries TensorRT 10.13, which
-# refuses this Orin ("Target GPU SM 87 is not supported"); JetPack 7.2's own
-# 10.16 builds and runs it (yolo_backend.py has the numbers). An engine only
-# loads in the TensorRT that built it, so the version is in the file name and
-# in the header, and a JetPack update means: run this again.
+# trtexec runs on the host: JetPack 7.2's TensorRT 10.16, the same version orin-nav:2.0
+# ships, so the engine loads in the image (yolo_backend.py). An engine only loads in the
+# TensorRT that built it, so the version is in the file name and in the header, and a
+# JetPack update means: run this again.
 #
 # Steps, each with its own error:
-#   1. ONNX export in a throwaway orin-nav:1.2 container (CPU only). Ultralytics
-#      needs the `onnx` package, which the image lacks and must never gain:
-#      pip installs it ONCE into ~/.cache/rover-onnx-export (needs internet the
-#      first time), and only the container that exports sees it.
+#   1. ONNX export in a throwaway orin-nav:2.0 container (CPU only). Ultralytics,
+#      torch (CPU) and onnx stay OUT of the image (2.0 has no torch at all): pip
+#      installs them ONCE into ~/.cache/rover-onnx-export-2 (~6 GB, needs internet
+#      the first time), and only the container that exports sees them.
 #   2. trtexec on the host, FP16 (the same build as Ultralytics' half=True).
 #   3. Wrap: Ultralytics' header layout (int32 length + JSON: names, imgsz,
 #      stride, task, batch, half) plus "trt": the exact TensorRT version.
 # Nothing here moves the robot; step 2 loads the GPU for ~1-7 min.
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-IMAGE=${IMAGE:-orin-nav:1.2}
+IMAGE=${IMAGE:-orin-nav:2.0}
 PT=${1:-$REPO/models/yolov8n.pt}
 H=${2:-384}; W=${3:-640}
 TRTEXEC=/usr/src/tensorrt/bin/trtexec
-DEPS="$HOME/.cache/rover-onnx-export"
+DEPS="$HOME/.cache/rover-onnx-export-2"   # ultralytics + torch (CPU) + onnx, for orin-nav:2.x
 
 die(){ echo "  ✗ $*" >&2; exit 1; }
 [ -f "$PT" ] || die "no model at $PT"
@@ -40,15 +39,15 @@ cp "$PT" "$WORK/model.pt"
 
 echo "[engine] $STEM -> ${W}x${H} FP16 for TensorRT $TRTV"
 echo "  1/3 ONNX export (container, CPU)"
-if [ ! -d "$DEPS/onnx" ]; then
-  echo "      first run: fetching the onnx package into $DEPS"
+if [ ! -d "$DEPS/ultralytics" ]; then
+  echo "      first run: fetching ultralytics, torch (CPU) and onnx into $DEPS (~6 GB: PyPI torch brings CUDA libs)"
   mkdir -p "$DEPS"
   docker run --rm --entrypoint bash -v "$DEPS":/deps "$IMAGE" -c '
-    pip install --break-system-packages -q --root-user-action=ignore --target /deps onnx onnxslim 2>&1 \
+    pip install --break-system-packages -q --root-user-action=ignore --target /deps ultralytics torch torchvision onnx onnxslim 2>&1 \
       | grep -v -E "requires|incompatible|dependency resolver" ;
-    [ -d /deps/onnx ] &&
-    cd /deps && rm -rf numpy numpy.libs numpy-* sympy sympy-* mpmath mpmath-* packaging packaging-* typing_extensions* isympy.py &&
-    chmod -R a+rwX /deps' || die "could not install onnx (internet?)"
+    [ -d /deps/ultralytics ] && [ -d /deps/onnx ] &&
+    cd /deps && rm -rf numpy numpy.libs numpy-* packaging packaging-* &&
+    chmod -R a+rwX /deps' || die "could not install ultralytics/torch/onnx (internet?)"
 fi
 docker run --rm --entrypoint bash -e YOLO_OFFLINE=1 -e YOLO_AUTOINSTALL=False \
   -v "$DEPS":/deps:ro -v "$WORK":/work "$IMAGE" -c "
