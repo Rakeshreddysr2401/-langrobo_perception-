@@ -99,6 +99,8 @@ Visualization Manager:
     # ── the lidar ring: what the C1 sees, in the laser frame ────────────
     # Points, not squares — 720 of them at 10 Hz. Best-effort QoS to match
     # the driver; Reliable would show nothing.
+    # Filter size 50 (default 10): over WiFi the TF reaches the laptop up to
+    # 3 s late, and at 10 RViz dropped the scans as "queue is full" (2026-10-24).
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Class: rviz_default_plugins/LaserScan
@@ -115,6 +117,7 @@ Visualization Manager:
         Depth: 5
         Durability Policy: Volatile
         History Policy: Keep Last
+        Filter size: 50
         Reliability Policy: Best Effort
         Value: /scan
       Use Fixed Frame: true
@@ -237,7 +240,9 @@ Visualization Manager:
     # (footprint_padding), clear = floor the rover may be on. ON by default
     # since 2026-09-27; nav2's own view above is drawn for the rover's CENTRE
     # (a ~23 cm cyan band) and made a rover 15 cm from a wall look trapped.
-    - Alpha: 1
+    # Alpha 0.99, not 1: at exactly 1 RViz draws the map opaque, so the clear
+    # floor cells came out SOLID BLACK and hid the room (2026-10-24).
+    - Alpha: 0.99
       Binary representation: false
       Class: rviz_default_plugins/Map
       Color Scheme: costmap
@@ -299,6 +304,7 @@ Visualization Manager:
         Depth: 1
         Durability Policy: Volatile
         History Policy: Keep Last
+        Filter size: 20
         Reliability Policy: Reliable
         Value: /goal_exec/obstacles
       Use Fixed Frame: true
