@@ -3,7 +3,7 @@
 Real recipes, built on the Jetson (Orin Nano, JetPack 7.2). Plan and test log:
 `../../ISAAC_ROS_5_UPGRADE.md`.
 
-## Two layers
+## Image layers
 
 ```
 nvcr.io/nvidia/base/ubuntu:noble-20251013
