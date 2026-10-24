@@ -74,7 +74,7 @@ def log(event, **kw):
 def probe():
     cmd = ['docker', 'exec', 'rover', 'bash', '-lc',
            'unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE; export ROS_DOMAIN_ID=0; '
-           'source /opt/ros/jazzy/setup.bash; python3 /opt/rover3/tools/health_probe.py 6']
+           'for f in /opt/ros/*/setup.bash; do source "$f"; done; python3 /opt/rover3/tools/health_probe.py 6']
     out = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     return json.loads(out.stdout.strip().splitlines()[-1])
 

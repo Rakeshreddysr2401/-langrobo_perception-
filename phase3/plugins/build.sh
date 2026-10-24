@@ -11,7 +11,7 @@ IMAGE=${IMAGE:-orin-nav:1.2}
 echo "[plugins] colcon build in $IMAGE"
 docker run --rm --user "$(id -u):$(id -g)" --entrypoint bash \
   -v "$HERE/..":/opt/rover3 "$IMAGE" -c \
-  'source /opt/ros/jazzy/setup.bash && cd /opt/rover3/plugins/ws && \
+  'for f in /opt/ros/*/setup.bash; do source $f; done && cd /opt/rover3/plugins/ws && \
    colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release 2>&1 | tail -15'
 # install/ holds symlinks to /opt/rover3/... (container paths): check build/
 [ -f "$HERE/ws/build/rover_costmap_plugins/librover_costmap_plugins.so" ] \

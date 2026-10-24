@@ -1,4 +1,4 @@
-"""vo_isaac.launch.py — the packaged Isaac ROS 4.6 cuVSLAM on the D555's IR pair.
+"""vo_isaac.launch.py — the packaged Isaac ROS cuVSLAM (4.6 in 1.2, 5.0 in 2.0) on the D555's IR pair.
 
 Replaces the pyCuVSLAM wheel (vo_node.py) from orin-nav:1.2 on. Isaac ROS 4.4's
 isaac_ros_visual_slam was a Thor build (5280 SVE instructions; SIGILL on this
@@ -23,6 +23,15 @@ from launch_ros.descriptions import ComposableNode
 
 CAM_NS = '/camera/camera0'
 
+# Isaac ROS 5.0 renamed isaac_ros_visual_slam -> isaac_ros_cuvslam (same plugin
+# class). Use whichever this image has: orin-nav:1.2 = 4.6, orin-nav:2.0 = 5.0.
+try:
+    from ament_index_python.packages import get_package_prefix
+    get_package_prefix('isaac_ros_cuvslam')
+    VSLAM_PKG = 'isaac_ros_cuvslam'
+except Exception:
+    VSLAM_PKG = 'isaac_ros_visual_slam'
+
 
 def generate_launch_description():
     ground = LaunchConfiguration('ground')
@@ -30,7 +39,7 @@ def generate_launch_description():
 
     node = ComposableNode(
         name='visual_slam_node',
-        package='isaac_ros_visual_slam',
+        package=VSLAM_PKG,
         plugin='nvidia::isaac_ros::visual_slam::VisualSlamNode',
         parameters=[{
             'num_cameras': 2,

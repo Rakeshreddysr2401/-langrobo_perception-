@@ -167,7 +167,7 @@ CU12="$CU/cuvslam:$CU/nvidia/cuda_runtime/lib:$CU/nvidia/cublas/lib:$CU/nvidia/c
 # the same driver, at the same moment. (The 2026-10-10 "UDP-only worked"
 # above, kill_match, was the same failure.) The Pi 5 and laptop were UDP
 # already; this only changes traffic inside the container.
-ENVSET="unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE; export FASTDDS_BUILTIN_TRANSPORTS=UDPv4; export ROS_DOMAIN_ID=$DOMAIN; source /opt/ros/jazzy/setup.bash;"
+ENVSET="unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE; export FASTDDS_BUILTIN_TRANSPORTS=UDPv4; export ROS_DOMAIN_ID=$DOMAIN; for f in /opt/ros/*/setup.bash /opt/realsense_ws/install/setup.bash; do [ -f \$f ] && source \$f; done;"
 
 dexec(){ docker exec -d "$NAME" bash -lc "$ENVSET $1"; }
 rexec(){ docker exec    "$NAME" bash -lc "$ENVSET $1"; }
@@ -463,7 +463,7 @@ camera)
   # 448x252x15 is the D555's low-res profile (~5 MB/s). The valid list:
   #   ros2 param describe /camera/camera0 rgb_camera.color_profile
   dexec 'printf "{\"context\":{\"dds\":{\"enabled\":true,\"domain\":0}}}" > ~/.realsense-config.json;
-         export LD_LIBRARY_PATH=/root/librealsense/install/lib:$LD_LIBRARY_PATH;
+         export LD_LIBRARY_PATH=/opt/librealsense/lib:/root/librealsense/install/lib:$LD_LIBRARY_PATH;
          exec ros2 launch realsense2_camera rs_launch.py camera_name:=camera0 \
             enable_infra1:=true enable_infra2:=true depth_module.infra_profile:=896x504x30 \
             depth_module.emitter_enabled:=false depth_module.laser_power:=0.0 \

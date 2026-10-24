@@ -35,7 +35,7 @@ done
 echo "[lidar] colcon build in $IMAGE (≈30 s)"
 docker run --rm --user "$(id -u):$(id -g)" --entrypoint bash \
   -v "$HERE":/opt/lidar "$IMAGE" -c \
-  'source /opt/ros/jazzy/setup.bash && cd /opt/lidar/ws && \
+  'for f in /opt/ros/*/setup.bash; do source $f; done && cd /opt/lidar/ws && \
    colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release 2>&1 | tail -3'
 
 [ -x "$HERE/ws/build/sllidar_ros2/sllidar_node" ] \

@@ -22,6 +22,7 @@ THE ROVER CAN TURN IN PLACE -- THE DOCSTRING THAT SAID OTHERWISE WAS STALE
     spin in a 45 cm gap swung the outline into a chair leg; reach's looks are
     outline-checked instead. bt/navigate_to_pose.xml says why.) Read nav2.yaml before changing any rotation value here.
 """
+import glob
 import os
 
 from launch import LaunchDescription
@@ -58,7 +59,7 @@ STOP_ALL = dict(on_exit=[Shutdown(reason='a nav2 node exited')])
 # correlation. backward_ros's libbackward.so installs a signal handler when
 # loaded: the trace of the crashing thread lands in /tmp/nav.log, right
 # before nav2_supervise.sh's restart line. Costs nothing until a crash.
-BACKWARD = '/opt/ros/jazzy/lib/libbackward.so'
+BACKWARD = next(iter(glob.glob('/opt/ros/*/lib/libbackward.so')), '')
 STOP_ALL['additional_env'] = {'LD_PRELOAD': BACKWARD} if os.path.exists(BACKWARD) else {}
 
 
