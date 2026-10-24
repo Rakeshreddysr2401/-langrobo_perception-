@@ -168,6 +168,36 @@ by this plan (JetPack 7.2.1 stays; the host `isaac-ros-cli` 2.5 stays dormant).
 
 ## Log
 
+- **2026-10-24 night — steps 1-4 DONE on the Jetson (no hardware, no domain 0).**
+  `orin-nav:2.0` = `21e7b7e2b28c`, 43.4 GB unpacked (1.2: 73.4 GB), from `docker/2.0/Dockerfile`.
+  Build fixes on the way: colcon/rosdep need packages.ros.org; realsense-ros 4.58.2 needs only
+  `lyrical` added to its distro switch (NVIDIA's 4.56.3 patch doesn't apply); Isaac pip-shim
+  packages need `/etc/isaac-ros-cli/environment.conf` = docker-activated.
+
+  | check (script) | orin-nav:1.2 (4.6, Jazzy) | orin-nav:2.0 (5.0, Lyrical) |
+  |---|---|---|
+  | image checks (`check.sh`) | — | **0 FAIL** (packages, plugins, ldd, sm_87, DDS librealsense 2.58.2, TensorRT 10.16 in-image) |
+  | cuVSLAM, fake stereo (`vo_check.sh`) | 30.0 Hz, −2.4 %, 21 % core, 583 MB | **30.0 Hz, +2.4 %**, 21 % core, 580 MB, 479 landmarks |
+  | nvblox, fake depth (`nvblox_check.sh`) | first slice after ~240 s (sm_75 JIT) | **first slice 1.9 s**, 4.9 Hz, 17 % core, 958 MB, 0 errors |
+  | our nav2 offline (`nav2_check.sh`) | PASS | **PASS** after 2 fixes (below) |
+  | YOLO TensorRT engine | host TRT via /hosttrt, 11.6 ms | **image's own TRT 10.16, 12.5 ms**, 724 MB; no /hosttrt |
+  | sllidar_ros2 / costmap plugin build | OK | **OK** (per-distro `build_lyrical/`, `install_lyrical/`) |
+  | all 94 rover python modules import | — | **94/94** |
+  | Jazzy ↔ Lyrical topics (13 msg types, both ways, UDPv4) | — | **13/13 both ways** |
+
+  Code changes for nav2 1.5 (both images keep working): MPPI motion model is a plugin
+  (`DiffDrive.plugin: mppi::DiffDriveMotionModel` in nav2.yaml); BT `IsPathValid` → `ValidatePath`
+  (Lyrical copy written by nav2.launch.py); costmap plugin uses `declare_or_get_parameter` on 1.5.
+  **nav2 action definitions differ between Jazzy and Lyrical** (NavigateToPose gained error codes,
+  feedback fields): fine while every action caller runs on the Jetson (reach_node, navto,
+  plan_check — they do; goals cross machines as the `/reach/goal` topic). To check on the Pi 5:
+  that its brain never calls nav2 actions directly; RViz's nav2 panel (actions) would need Lyrical.
+  Found: `phase2/tools/relocalize.py` already does lidar global localization (1-3 s, ~2 cm) —
+  **B2 must beat it**; cuVGL (B3) could break its "ambiguous" verdict in symmetric rooms.
+  B1 note: MPS daemon runs on the HOST with sudo (`nvidia-cuda-mps-control -d`, pipe /tmp/nvidia-mps).
+  **Disk: 6.5 GB free** after the build (2.0 + 1.2 + 56 GB of bags in logs/bags) — owner decides.
+  Next: step 5/6 (laptop is off), then step 8 (real robot, owner).
+
 - 2026-10-24: **test tools** in the repo (were scratch files in 4.6): `docker/2.0/check.sh [image]`
   (packages, plugins, ldd, sm_87, DDS librealsense, TensorRT, python deps; PASS/FAIL),
   `docker/2.0/vo_check.sh [image]` (cuVSLAM on `phase1/harness/fake_stereo.py`, domain 99,

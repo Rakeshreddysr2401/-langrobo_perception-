@@ -53,3 +53,15 @@ docker build -f Dockerfile.arm -t orin-arm:2.0 .    # later, for the arm
 ```
 Then rebuild the host-mounted workspaces against it:
 `IMAGE=orin-nav:2.0 ~/rover/lidar/build.sh` and `IMAGE=orin-nav:2.0 ~/rover/phase3/plugins/build.sh`.
+
+## Checks (run after every build; each prints PASS/FAIL)
+
+| script | what |
+|---|---|
+| `check.sh [image]` | packages, composable plugins, ldd, sm_87 GPU code, DDS librealsense, TensorRT, python deps |
+| `vo_check.sh [image]` | cuVSLAM on `phase1/harness/fake_stereo.py`: rate + error vs known motion |
+| `nvblox_check.sh [image]` | nvblox on a synthetic wall: time to first map, rate, CPU/RAM, errors |
+| `nav2_check.sh [image]` | the rover's nav2 (launch + yaml + BT + plugin) offline: all nodes active, 0 errors |
+
+All run with `--network none` on ROS domain 99 — never the robot. Results: plan's Log.
+
