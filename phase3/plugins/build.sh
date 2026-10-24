@@ -7,7 +7,7 @@
 # nav2_supervise.sh sources ws/install/setup.bash when it exists.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-IMAGE=${IMAGE:-orin-nav:1.1}
+IMAGE=${IMAGE:-orin-nav:1.2}
 echo "[plugins] colcon build in $IMAGE"
 docker run --rm --user "$(id -u):$(id -g)" --entrypoint bash \
   -v "$HERE/..":/opt/rover3 "$IMAGE" -c \

@@ -10,7 +10,7 @@
 # Runs as the calling user, not root, so the output is deletable without sudo.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-IMAGE=${IMAGE:-orin-nav:1.1}
+IMAGE=${IMAGE:-orin-nav:1.2}
 SLLIDAR_REPO=https://github.com/Slamtec/sllidar_ros2.git
 SLLIDAR_REV=34300099fadfc772965962dec837bf436706188f   # verified on the C1, 2026-09-22
 

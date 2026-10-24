@@ -62,7 +62,7 @@ set -eo pipefail
 # packaged Isaac cuVSLAM (VO=isaac); 1.1's is the pyCuVSLAM wheel (VO=pycuvslam)
 # -- 1.1's Isaac 4.4 node is a Thor build and SIGILLs here, and 1.2 has no wheel.
 # The twin runs 1.2 too since 2026-10-18 (step E of ISAAC_ROS_4_6_UPGRADE.md passed).
-# Roll the robot back with:  IMAGE=orin-nav:1.1 ./rover up
+# orin-nav:1.1 was deleted 2026-10-24 (owner); 1.2 is the rollback once 2.0 lands.
 IMAGE=${IMAGE:-orin-nav:1.2}
 VO=${VO:-$([ "$IMAGE" = orin-nav:1.1 ] && echo pycuvslam || echo isaac)}
 NAME=${NAME:-rover}
