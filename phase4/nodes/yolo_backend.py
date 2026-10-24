@@ -20,10 +20,8 @@ confidence cut (FP16 rounding); matched confidences differ by 0.004 on
 average. A 448x256 engine (the camera's own size) was 7 ms but found only 5 of
 18 of the .pt's objects -- the model wants the 640 upscale. Keep 640.
 
-TensorRT here is the HOST's (JetPack 7.2, 10.16): the orin-nav:1.2 image's own
-10.13 predates Orin and refuses SM 87 ("Target GPU SM 87 is not supported").
-./rover mounts the host's three runtime libraries and its Python bindings at
-/hosttrt and points ONLY this process at them (the image is never modified).
+TensorRT is the image's own: orin-nav:2.0 ships 10.16, JetPack 7.2's version. (1.2's 10.13
+refused SM 87, so until 2026-10-24 ./rover mounted the host's at /hosttrt.)
 An engine is tied to the exact TensorRT version that built it, so the version
 is in its file name and its header; after a JetPack update the engine is
 refused here, the .pt is used instead, and the log says to run
@@ -67,15 +65,8 @@ class TrtYolo:
     """YOLOv8-style detect head ((1, 4 + classes, N) output) on TensorRT, no torch."""
 
     def __init__(self, path):
-        # orin-nav:1.2: the image's TensorRT 10.13 refuses this Orin (SM 87), so ./rover detect
-        # points PYTHONPATH at the host's (/hosttrt). orin-nav:2.0 ships 10.16, the host's own
-        # version: its TensorRT is used directly.
-        import tensorrt as trt
+        import tensorrt as trt   # the image's own (orin-nav:2.0: 10.16, the JetPack version)
         meta, raw = read_engine_file(path)
-        if trt.__version__.startswith("10.13.") and not trt.__file__.startswith("/hosttrt/"):
-            raise RuntimeError(f"this process has the image's TensorRT {trt.__version__}, which "
-                               f"cannot run on this Orin; the host's is not mounted at /hosttrt "
-                               f"(a container from an older ./rover: ./rover stop, then ./rover up)")
         built_with = meta.get("trt")
         if built_with and built_with != trt.__version__:
             raise RuntimeError(f"{path} was built with TensorRT {built_with}, the host now has "

@@ -16,8 +16,8 @@ from the Pi 5 (`cd ~/ros2_ws && ./scripts/fleet.sh rover`), or on the Jetson:
 
 ```bash
 cd ~/rover
-./rover up                          # orin-nav:1.2 (Isaac ROS 4.6) by default since 2026-10-18
-IMAGE=orin-nav:1.1 ./rover up       # the previous image, proven on the real robot
+./rover up                          # orin-nav:2.0 (Isaac ROS 5.0, ROS 2 Lyrical) since 2026-10-25
+                                    # recipe + checks: docker/2.0/ (ISAAC_ROS_5_UPGRADE.md)
 ```
 
 > **2026-10-18, owner's decision: 1.2 is THE image** for the robot and the twin

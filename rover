@@ -57,14 +57,11 @@
 # failure names itself.
 set -eo pipefail
 
-# orin-nav:1.2 (2026-10-18) = 1.1 + Isaac ROS 4.6 + CUDA 13.2, made by docker
-# commit like 1.1 (ISAAC_ROS_4_6_UPGRADE.md). Its visual odometry is the
-# packaged Isaac cuVSLAM (VO=isaac); 1.1's is the pyCuVSLAM wheel (VO=pycuvslam)
-# -- 1.1's Isaac 4.4 node is a Thor build and SIGILLs here, and 1.2 has no wheel.
-# The twin runs 1.2 too since 2026-10-18 (step E of ISAAC_ROS_4_6_UPGRADE.md passed).
-# orin-nav:1.1 was deleted 2026-10-24 (owner); 1.2 is the rollback once 2.0 lands.
-IMAGE=${IMAGE:-orin-nav:1.2}
-VO=${VO:-$([ "$IMAGE" = orin-nav:1.1 ] && echo pycuvslam || echo isaac)}
+# orin-nav:2.0 (2026-10-24) = Isaac ROS 5.0 / ROS 2 Lyrical, built from docker/2.0/Dockerfile
+# (ISAAC_ROS_5_UPGRADE.md; checks in docker/2.0/*.sh). Visual odometry is Isaac's cuVSLAM
+# (isaac_ros_cuvslam). 1.1 (pyCuVSLAM, 4.4) and 1.2 (Isaac ROS 4.6, Jazzy) were `docker commit`
+# images, deleted 2026-10-24/25 on the owner's call; there is no older image to roll back to.
+IMAGE=${IMAGE:-orin-nav:2.0}
 NAME=${NAME:-rover}
 LAPTOP_USER=${LAPTOP_USER:-rakhi24}   # LAPTOP_IP is DISCOVERED, not fixed: DHCP moves it
 PI5_HOST=${PI5_HOST:-192.168.1.16}    # fixed — unlike the laptop, not on DHCP
@@ -147,13 +144,6 @@ if [ "$TWIN" = 1 ]; then
     || { echo "TWIN=1: no $TWIN_SRC/jetson/d555_driver.py -- clone kino_sim to ~/kino_sim (branch main)" >&2; exit 1; }
   echo "  ── TWIN: the twin on ROS domain $DOMAIN (container $NAME). The real robot is not touched. ──"
 fi
-
-# VO=pycuvslam only (orin-nav:1.1): the cuvslam wheel ships its own
-# libcuvslam.so and CUDA-12 userspace libs, and they must come BEFORE Isaac
-# ROS's own build in /opt/ros/jazzy — in 1.1 that one is compiled for Thor and
-# will not run on this Orin.
-CU=/usr/local/lib/python3.12/dist-packages
-CU12="$CU/cuvslam:$CU/nvidia/cuda_runtime/lib:$CU/nvidia/cublas/lib:$CU/nvidia/cusolver/lib:$CU/nvidia/cusparse/lib:$CU/nvidia/nvjitlink/lib:$CU/nvidia/nvtx/lib"
 
 # A stale ROS_DISCOVERY_SERVER makes nodes silently invisible to each other,
 # which looks exactly like a crashed node. Clear it on every command.
@@ -367,38 +357,10 @@ start_container(){
     [ "$(docker inspect -f '{{.State.Running}}' rover 2>/dev/null)" = true ] \
       && echo "  ! the REAL stack's container is running too: both share the Jetson's GPU and 8 GB."
   fi
-  # JetPack 7.2.1 (L4T 39.2.1) moved libnvcuvid.so.1 from
-  # /usr/lib/aarch64-linux-gnu/nvidia/ to /opt/nvidia/l4t-gpu-libs/openrm/, and
-  # its new nv-load-gpu-libs.sh hands it to containers (l4t.csv) only on the
-  # openrm driver -- never on this Orin, which is nvgpu. The images' VPI and
-  # NITROS (so isaac_ros_visual_slam and nvblox) link it and fail to load
-  # without it (2026-10-18). Nothing here decodes video: it only has to load,
-  # as it did under 39.2.0. So put it back where 39.2.0 had it. The runtime
-  # reads only devices/drivers/l4t.csv, and l4t.csv is rewritten every boot.
-  local nvcuvid=()
-  local nvcuvid_host=/opt/nvidia/l4t-gpu-libs/openrm/libnvcuvid.so
-  [ -f "$nvcuvid_host" ] && nvcuvid=(-v "$nvcuvid_host":/usr/lib/aarch64-linux-gnu/nvidia/libnvcuvid.so.1:ro)
-  # The image's TensorRT (10.13) refuses this Orin (SM 87); JetPack 7.2's own
-  # does not. Mount the host's runtime (3 libraries + Python bindings) at
-  # /hosttrt, OUT of the image's library path: only the YOLO detector is pointed
-  # at it (./rover detect), every Isaac node keeps the image's (2026-10-21,
-  # phase4/nodes/yolo_backend.py).
-  # orin-nav:2.x ships TensorRT 10.16 itself (the host's version): no /hosttrt there.
-  local hosttrt=()
-  local hl=/usr/lib/aarch64-linux-gnu hp=/usr/lib/python3.12/dist-packages/tensorrt lib real
-  if [ -d "$hp" ] && [[ "$IMAGE" == orin-nav:1.* ]]; then
-    hosttrt=(-v "$hp":/hosttrt/py/tensorrt:ro)
-    for lib in libnvinfer.so.10 libnvinfer_plugin.so.10 libnvonnxparser.so.10; do
-      real=$(readlink -f "$hl/$lib" 2>/dev/null) && [ -f "$real" ] \
-        && hosttrt+=(-v "$real":/hosttrt/lib/$lib:ro)
-    done
-  fi
-  # Isaac ROS 4.6's nvblox ships GPU code for sm_75 only (4.4's, in 1.1, had
-  # sm_87 -- this Orin). The driver JIT-compiles its 280 MB library from PTX on
-  # first use: minutes at 100 % CPU, and that load knocked the D555's IR and
-  # depth over twice (2026-10-18). The result is cached in ~/.nv/ComputeCache --
-  # inside the container, which every bring-up recreates. Keep it on the host,
-  # one per container name, and big enough to hold it, so it compiles ONCE.
+  # CUDA's JIT cache on the host, one per container name. Isaac ROS 4.6's nvblox had sm_75
+  # code only and JIT-compiled for minutes on first use (2026-10-18: the load knocked the D555
+  # over twice). 5.0's has sm_87 (first map in 1.9 s, docker/2.0/nvblox_check.sh); the cache
+  # stays as cheap insurance for any library that still ships PTX only.
   local cuda_cache="$HOME/.cache/rover-cuda/$NAME"
   mkdir -p "$cuda_cache"
   # phase1/ is mounted READ-ONLY: edit a node on the host, restart the layer,
@@ -406,7 +368,7 @@ start_container(){
   docker run -d --name "$NAME" --entrypoint /bin/bash \
     --runtime=nvidia --network=host --privileged \
     -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all -e NVIDIA_DISABLE_REQUIRE=1 \
-    -e ROS_DOMAIN_ID=$DOMAIN "${twin_mount[@]}" "${nvcuvid[@]}" "${hosttrt[@]}" \
+    -e ROS_DOMAIN_ID=$DOMAIN "${twin_mount[@]}" \
     -v "$cuda_cache":/root/.nv/ComputeCache -e CUDA_CACHE_MAXSIZE=4294967296 \
     -v "$HOSTSRC":$SRC:ro \
     -v "$REPO/phase2":$SRC2:ro \
@@ -540,7 +502,7 @@ pose)
   echo "[pose] fixed frames from description/params.yaml (robot_state_publisher)"
   tf_up
 
-  echo "[pose] visual odometry  (stereo IR -> /vo/odom, $VO)"
+  echo "[pose] visual odometry  (stereo IR -> /vo/odom, Isaac cuVSLAM)"
   kill_match "[v]o_node.py"
   kill_match "[v]o_isaac.py"
   kill_match "[v]o_isaac.launch.py"
@@ -550,14 +512,10 @@ pose)
   # the container where SLAM is never set -- so it always resolved to true and
   # `SLAM=false ./rover pose` did nothing at all, silently. That knob is what
   # hands map -> odom to slam_toolbox, so it has to actually work.
-  if [ "$VO" = pycuvslam ]; then
-    dexec "export LD_LIBRARY_PATH=$CU12:\$LD_LIBRARY_PATH; exec python3 $SRC/nodes/vo_node.py --ros-args -p publish_tf:=false -p slam:=${SLAM:-true} > /tmp/vo.log 2>&1"
-  else
-    # Isaac ROS cuVSLAM tracks and publishes /vo/odom; vo_isaac.py gives it its
-    # optical frames and owns /vo/status and (slam:=true) map -> odom.
-    dexec "exec ros2 launch $SRC/launch/vo_isaac.launch.py > /tmp/vslam.log 2>&1"
-    dexec "exec python3 $SRC/nodes/vo_isaac.py --ros-args -p slam:=${SLAM:-true} > /tmp/vo.log 2>&1"
-  fi
+  # Isaac ROS cuVSLAM tracks and publishes /vo/odom; vo_isaac.py gives it its
+  # optical frames and owns /vo/status and (slam:=true) map -> odom.
+  dexec "exec ros2 launch $SRC/launch/vo_isaac.launch.py > /tmp/vslam.log 2>&1"
+  dexec "exec python3 $SRC/nodes/vo_isaac.py --ros-args -p slam:=${SLAM:-true} > /tmp/vo.log 2>&1"
 
   echo "[pose] gyro  (D555 IMU, re-framed into base_link -> /gyro/base)"
   kill_match "[g]yro_node.py"
@@ -623,7 +581,7 @@ lidar)
   echo "[lidar] fixed frames from description/params.yaml (robot_state_publisher)"
   tf_up
   echo "[lidar] RPLidar C1 on $LIDAR_PORT -> /scan  (10 Hz, 720 beams, 0.5 deg)"
-  dexec "I=$LIDAR/ws/install_\$ROS_DISTRO; [ -d \$I ] || I=$LIDAR/ws/install; source \$I/setup.bash; exec ros2 run sllidar_ros2 sllidar_node --ros-args \
+  dexec "source $LIDAR/ws/install_\$ROS_DISTRO/setup.bash; exec ros2 run sllidar_ros2 sllidar_node --ros-args \
             -p serial_port:=$LIDAR_PORT -p serial_baudrate:=460800 -p frame_id:=laser \
             -p inverted:=false -p angle_compensate:=true -p scan_mode:=Standard \
             -p scan_time_offset:=$LIDAR_TIME_OFFSET > /tmp/lidar.log 2>&1"
@@ -1187,15 +1145,11 @@ detect)
   model_args=""
   if [ -n "$trt_tag" ] && [ -f "$REPO/$engine" ]; then
     model_args="--ros-args -p model:=/$engine -p fallback_model:=/models/yolov8n.pt"
-    if [[ "$IMAGE" == orin-nav:1.* ]] && ! docker exec "$NAME" test -f /hosttrt/lib/libnvinfer.so.10; then
-      echo "  ! this container has no /hosttrt (started by an older ./rover): YOLO falls back to the .pt until ./rover up"
-    fi
   else
     echo "  ! no TensorRT engine for TensorRT ${trt_tag:-?} -- YOLO runs on PyTorch (~2x the CPU, +0.8 GB)."
     echo "    Build it once: ./rover engine  (~8 min)"
   fi
-  dexec "LD_LIBRARY_PATH=/hosttrt/lib:\$LD_LIBRARY_PATH PYTHONPATH=/hosttrt/py:\$PYTHONPATH \
-         exec python3 $SRC4/nodes/detections_3d.py $model_args > /tmp/detections_3d.log 2>&1"
+  dexec "exec python3 $SRC4/nodes/detections_3d.py $model_args > /tmp/detections_3d.log 2>&1"
   echo "  loading YOLO onto the GPU (~15 s)..."
   sleep 16
   rexec "grep -m1 'YOLO backend' /tmp/detections_3d.log | sed 's/^.*YOLO backend/      YOLO backend/'" || true
@@ -1236,8 +1190,7 @@ approach)
   docker exec "$NAME" pgrep -f '[t]arget_track_node.py' >/dev/null 2>&1 || die "target_track not running — ./rover track"
   echo "  THIS DRIVES THE ROVER toward the nearest '$label' YOLO sees. Ctrl-C, then ./rover stop if needed."
   extra=""; [ $# -gt 0 ] && extra=$(printf '%q ' "$@")     # printf of nothing would pass an empty ''
-  docker exec "$NAME" bash -lc "$ENVSET LD_LIBRARY_PATH=/hosttrt/lib:\$LD_LIBRARY_PATH PYTHONPATH=/hosttrt/py:\$PYTHONPATH \
-    python3 -u $SRC4/tools/closed_loop_approach.py --label $(printf '%q' "$label") $extra --out /logs/approach.jsonl"
+  docker exec "$NAME" bash -lc "$ENVSET python3 -u $SRC4/tools/closed_loop_approach.py --label $(printf '%q' "$label") $extra --out /logs/approach.jsonl"
   ;;
 
 engine)

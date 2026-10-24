@@ -31,27 +31,6 @@ from launch_ros.actions import Node
 
 CONFIG = '/opt/rover3/config/nav2.yaml'
 
-# BT node names that nav2 1.5 (Lyrical, orin-nav:2.x) renamed. The trees in bt/ are written
-# for nav2 1.3 (Jazzy, orin-nav:1.x); on Lyrical a renamed copy goes to /tmp and bt_navigator
-# reads that. Retire this with orin-nav:1.2: rename in bt/*.xml and delete it
-# (ISAAC_ROS_5_UPGRADE.md step 9).
-BT_RENAMES_LYRICAL = {'IsPathValid': 'ValidatePath'}   # same `path` port, SUCCESS = valid
-
-
-def bt_overrides():
-    if os.environ.get('ROS_DISTRO') == 'jazzy':
-        return {}
-    out = {}
-    for key, name in (('default_nav_to_pose_bt_xml', 'navigate_to_pose.xml'),
-                      ('default_nav_through_poses_bt_xml', 'navigate_through_poses.xml')):
-        xml = open(f'/opt/rover3/bt/{name}').read()
-        for old, new in BT_RENAMES_LYRICAL.items():
-            xml = xml.replace(f'<{old} ', f'<{new} ').replace(f'<{old}/>', f'<{new}/>')
-        path = f'/tmp/bt_{os.environ.get("ROS_DISTRO", "x")}_{name}'
-        open(path, 'w').write(xml)
-        out[key] = path
-    return out
-
 # Order matters: the costmaps must be up before the servers that read them.
 LIFECYCLE = [
     'controller_server',
@@ -102,7 +81,7 @@ def generate_launch_description():
              name='behavior_server', output='screen', **STOP_ALL, parameters=[CONFIG],
              remappings=[('cmd_vel', 'cmd_vel_nav')]),
         Node(package='nav2_bt_navigator', executable='bt_navigator',
-             name='bt_navigator', output='screen', **STOP_ALL, parameters=[CONFIG, bt_overrides()]),
+             name='bt_navigator', output='screen', **STOP_ALL, parameters=[CONFIG]),
         # The smoother sits between the controller and the wheels, so the
         # controller publishes cmd_vel_nav and only smoothed output reaches
         # /cmd_vel. Without it a step change in commanded velocity goes straight

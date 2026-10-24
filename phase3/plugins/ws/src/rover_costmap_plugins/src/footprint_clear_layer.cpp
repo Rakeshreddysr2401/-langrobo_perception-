@@ -41,20 +41,9 @@ public:
     // check rasterises the outline's EDGES, so a cell whose centre is up to half a
     // cell outside still counts -- clear that half cell too. heading_sweep -- half
     // the lattice's heading bin: 2*pi/16/2.
-#if __has_include("nav2_ros_common/lifecycle_node.hpp")
-    // nav2 1.5 (Lyrical, orin-nav:2.x): Layer::declareParameter is gone
     enabled_ = node->declare_or_get_parameter(name_ + ".enabled", true);
     extra_ = node->declare_or_get_parameter(name_ + ".extra_padding", 0.02);
     sweep_ = node->declare_or_get_parameter(name_ + ".heading_sweep", 0.19635);
-#else
-    // nav2 1.3 (Jazzy, orin-nav:1.x)
-    declareParameter("enabled", rclcpp::ParameterValue(true));
-    declareParameter("extra_padding", rclcpp::ParameterValue(0.02));
-    declareParameter("heading_sweep", rclcpp::ParameterValue(0.19635));
-    node->get_parameter(name_ + ".enabled", enabled_);
-    node->get_parameter(name_ + ".extra_padding", extra_);
-    node->get_parameter(name_ + ".heading_sweep", sweep_);
-#endif
     current_ = true;
   }
 

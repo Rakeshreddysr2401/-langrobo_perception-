@@ -11,7 +11,7 @@ echo "== nav2_check $IMAGE"
 docker run --rm --runtime nvidia --network none --entrypoint bash -e ROS_DOMAIN_ID=99 \
   -v "$REPO/phase3":/opt/rover3:ro "$IMAGE" -c '
 for f in /opt/ros/*/setup.bash; do source $f; done
-P=/opt/rover3/plugins/ws/install_${ROS_DISTRO}/setup.bash; [ -f $P ] || P=/opt/rover3/plugins/ws/install/setup.bash
+P=/opt/rover3/plugins/ws/install_${ROS_DISTRO}/setup.bash
 [ -f $P ] && source $P || echo "FAIL  no costmap plugin build for $ROS_DISTRO (phase3/plugins/build.sh)"
 ros2 run tf2_ros static_transform_publisher --frame-id odom --child-frame-id base_link >/dev/null 2>&1 &
 ros2 run tf2_ros static_transform_publisher --frame-id base_link --child-frame-id laser >/dev/null 2>&1 &

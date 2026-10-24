@@ -59,7 +59,6 @@ ssh rakhi24@192.168.1.15 && cd ~/rover
 ./rover health      # every layer's rate in one pass (~15 s)
 ./rover view        # RViz on the old laptop
 ./rover stop        # tear down (saves the SLAM room first)
-IMAGE=orin-nav:1.1 ./rover up           # roll back to the old image
 ```
 
 `./rover` lists all its commands at the top of the script (one layer at a time:
@@ -110,8 +109,10 @@ cd ~/kino_sim && ./sim up home_real     # ~1 min; add follow=true for an Isaac w
 
 - Laptop: Ubuntu 24.04.5, NVIDIA 580.178.04, Isaac Sim 6.2.0, Isaac Lab 3.0.0,
   Python 3.12, torch 2.11.0 + CUDA 13.0 (details: `~/kino_sim/docs/VERSIONS.md`).
-- Jetson: image `orin-nav:1.2` = Isaac ROS 4.6, ROS 2 Jazzy, CUDA 13.2, VO = the
-  packaged Isaac cuVSLAM (details: `~/rover/docker/README.md`).
+- Jetson: image `orin-nav:2.0` = Isaac ROS 5.0, ROS 2 Lyrical, CUDA 13.2, TensorRT 10.16,
+  VO = Isaac cuVSLAM (`isaac_ros_cuvslam`); recipe + checks in `~/rover/docker/2.0/`.
+  The Pi 5 and the laptop stay on Jazzy for now: topics cross fine (13/13 types tested);
+  nav2 actions differ between the two (only the Jetson calls them).
 - Pi 5: ROS 2 Jazzy on the host.
 
 ## 7. Known problems right now
@@ -129,5 +130,5 @@ cd ~/kino_sim && ./sim up home_real     # ~1 min; add follow=true for an Isaac w
   not reproduced since: if VO goes wild, `./sim vocheck`, restart the twin (laptop
   `docs/STATUS.md`, gap 1).
 - Owner to-dos: rename GitHub `mitra_sim` → `kino_sim` (then update remotes); restart
-  `langrobo-brain` on the Pi 5 (sudo); install the sonar service (Pi 5 `TODO.md` 0b); delete `orin-nav:1.1`
+  `langrobo-brain` on the Pi 5 (sudo); install the sonar service (Pi 5 `TODO.md` 0b); ~~delete `orin-nav:1.1`~~ (done 2026-10-24; 1.2 too, 2026-10-25)
   (58 GB; the real robot has run on 1.2 since 2026-10-18).

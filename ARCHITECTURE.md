@@ -49,8 +49,8 @@ The diagram is the pose path. Not drawn: the **Mac mini** (llama.cpp LLM + VLM, 
                    │  DDS over Ethernet
    ┌───────────────▼─────────────────────────────────────────────┐
    │  Jetson Orin Nano             192.168.1.15                  │
-   │  everything in orin-nav:1.1                                 │
-   │    vo_node      stereo IR → cuVSLAM → /vo/odom              │
+   │  everything in orin-nav:2.0                                 │
+   │    vo_isaac     stereo IR → cuVSLAM → /vo/odom              │
    │    gyro_node    IMU → base_link → /gyro/base                │
    │    lidar_odom   /scan + gyro → /lidar/odom (every scan)     │
    │    fusion2      gyro·LiDAR·VO·wheels → /odom + TF           │
@@ -291,17 +291,19 @@ reference) are why fusion2 gates every source and scales the wheels by slip.
 
 ## 7. Environment
 
-**The container `orin-nav:1.1` has no build recipe.** It was made by
-`docker commit`, not from a Dockerfile, and neither it nor its 57.8 GB base can
-be reproduced. **Never install into it; never delete it.** `phase1/` is mounted
-read-only, so nodes are edited on the host and the layer restarted — no rebuild.
+**The image is `orin-nav:2.0`** (Isaac ROS 5.0, ROS 2 Lyrical, since 2026-10-25), built from
+`docker/2.0/Dockerfile`; `docker/2.0/README.md` lists every package and where it comes from, and
+its `*_check.sh` scripts test an image offline. Don't install into a running container — change the
+Dockerfile and rebuild. `phase1/`..`phase4/` are mounted read-only, so nodes are edited on the host
+and the layer restarted — no rebuild. (1.1 and 1.2 were `docker commit` images with no recipe;
+deleted 2026-10-24/25.)
 
 `ROS_DISCOVERY_SERVER` is unset on every command. A stale one makes nodes
 silently invisible to each other, which looks exactly like a crashed node.
 
-The cuVSLAM wheel ships its own `libcuvslam.so` and CUDA-12 userspace libs, and
-they must precede Isaac ROS's own build in `/opt/ros/jazzy` — that one is
-compiled for Thor and will not run on this Orin.
+Visual odometry is Isaac's cuVSLAM (`isaac_ros_cuvslam`, `phase1/launch/vo_isaac.launch.py`)
+with `phase1/nodes/vo_isaac.py` beside it. `vo_node.py` (the pyCuVSLAM wheel) is kept only for
+its self-test and the camera constants `description/build.py` cross-checks.
 
 ---
 

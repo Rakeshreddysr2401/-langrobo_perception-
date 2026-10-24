@@ -54,7 +54,7 @@ the Stone no longer listens.) To check a suspicion:
 
 ```bash
 docker exec rover bash -lc 'unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE; \
-  export ROS_DOMAIN_ID=0; source /opt/ros/jazzy/setup.bash; \
+  export ROS_DOMAIN_ID=0; source /opt/ros/lyrical/setup.bash; \
   ros2 topic echo /voice/debug_vad --field data'
 ```
 
@@ -278,7 +278,7 @@ the JSON mid-field, so anything grepping it silently reads nothing.
 
 ```bash
 docker exec rover bash -lc 'unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE; \
-  export ROS_DOMAIN_ID=0; source /opt/ros/jazzy/setup.bash; \
+  export ROS_DOMAIN_ID=0; source /opt/ros/lyrical/setup.bash; \
   ros2 topic hz /wheel_state; ros2 topic info /cmd_vel'
 ```
 

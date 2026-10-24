@@ -3,16 +3,16 @@
 #
 # The image has no build recipe and must never be modified, so the driver is
 # compiled INSIDE the image but with the workspace bind-mounted from the host:
-# the binaries land in lidar/ws/install on the host and survive every
+# the binaries land in lidar/ws/install_<distro> on the host and survive every
 # `./rover stop`. It is mounted at /opt/lidar at runtime — the same path it is
 # built at, because colcon's --symlink-install writes absolute paths.
 #
 # Runs as the calling user, not root, so the output is deletable without sudo.
 set -euo pipefail
-# One build per ROS distro: Jazzy (orin-nav:1.x) keeps ws/build + ws/install, others get
-# ws/build_<distro> + ws/install_<distro> (orin-nav:2.x: _lyrical), so 1.2 stays a rollback.
+# One build per ROS distro: ws/build_<distro>, ws/install_<distro> (orin-nav:2.x: _lyrical),
+# so a future distro can be built next to the running one.
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-IMAGE=${IMAGE:-orin-nav:1.2}
+IMAGE=${IMAGE:-orin-nav:2.0}
 SLLIDAR_REPO=https://github.com/Slamtec/sllidar_ros2.git
 SLLIDAR_REV=34300099fadfc772965962dec837bf436706188f   # verified on the C1, 2026-09-22
 
@@ -38,10 +38,10 @@ echo "[lidar] colcon build in $IMAGE (≈30 s)"
 docker run --rm --user "$(id -u):$(id -g)" --entrypoint bash \
   -v "$HERE":/opt/lidar "$IMAGE" -c \
   'for f in /opt/ros/*/setup.bash; do source $f; done && cd /opt/lidar/ws && \
-   S=$([ "$ROS_DISTRO" = jazzy ] && echo "" || echo "_$ROS_DISTRO") && \
+   S=_$ROS_DISTRO && \
    colcon --log-base log$S build --symlink-install --build-base build$S --install-base install$S --cmake-args -DCMAKE_BUILD_TYPE=Release 2>&1 | tail -3'
 
-SUF=$(docker run --rm --entrypoint bash "$IMAGE" -c 'for f in /opt/ros/*/setup.bash; do source $f; done; [ "$ROS_DISTRO" = jazzy ] || echo "_$ROS_DISTRO"')
+SUF=$(docker run --rm --entrypoint bash "$IMAGE" -c 'for f in /opt/ros/*/setup.bash; do source $f; done; echo "_$ROS_DISTRO"')
 [ -x "$HERE/ws/build$SUF/sllidar_ros2/sllidar_node" ] \
   && echo "[lidar] OK — now: ./rover lidar" \
   || { echo "[lidar] build failed"; exit 1; }

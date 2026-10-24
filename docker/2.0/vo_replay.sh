@@ -9,7 +9,6 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 echo "== vo_replay $IMAGE  bag=$BAG ($KIND)"
 docker run --rm --runtime nvidia --network none --entrypoint bash \
   -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all -e NVIDIA_DISABLE_REQUIRE=1 \
-  -v /opt/nvidia/l4t-gpu-libs/openrm/libnvcuvid.so:/usr/lib/aarch64-linux-gnu/nvidia/libnvcuvid.so.1:ro \
   -v "$HOME/.cache/rover-cuda/vo_check":/root/.nv/ComputeCache -e CUDA_CACHE_MAXSIZE=4294967296 \
   -e ROS_DOMAIN_ID=98 -e FASTDDS_BUILTIN_TRANSPORTS=UDPv4 \
   -v "$REPO/phase1":/opt/rover:ro -v "$REPO/logs/$BAG":/bag:ro "$IMAGE" -c '

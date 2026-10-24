@@ -12,7 +12,7 @@ choice: `phase4/nodes/yolo_backend.py` docstring.
 | item | status |
 |---|---|
 | detections_3d already ran YOLO on the GPU (PyTorch), not the CPU; its cost is PyTorch's per-layer overhead: 35 ms + 33 ms CPU a frame, 1.4 GB | measured |
-| orin-nav:1.2's TensorRT 10.13 refuses this Orin ("Target GPU SM 87 is not supported"); JetPack 7.2's host 10.16 works. So `isaac_ros_tensor_rt` / `isaac_ros_yolov8` in the image cannot run on this board either | found; worked around (below) |
+| ~~orin-nav:1.2's TensorRT 10.13 refuses this Orin ("Target GPU SM 87 is not supported"); JetPack 7.2's host 10.16 works. So `isaac_ros_tensor_rt` / `isaac_ros_yolov8` in the image cannot run on this board either | found; worked around (below) |  **CLOSED 2026-10-24: orin-nav:2.0 ships TensorRT 10.16; YOLO uses it directly, no /hosttrt.**
 | choice of four: PyTorch fp16/448 (no gain), Ultralytics+engine (12 ms, still 1.4 GB), **own TensorRT runner (12 ms, 0.6 GB)** = default, .pt as automatic fallback. 448x256 input rejected: 5 of 18 of the .pt's objects | decided |
 | same detections: 287/291 of the .pt's boxes, every difference at the 0.25 floor (FP16) | `phase4/tools/test_yolo_backend.py`: ALL PASS |
 | real node, target hunt: CPU 36.4 -> 16.1 % of a core at 5 Hz, 69 -> 34 % at 15 Hz; RSS 1389 -> 608 MB; same answers | measured |
@@ -138,7 +138,7 @@ with furniture in front (takes the furniture); only `approach` sends `what=`
 (`locate.py`, `photo_recall.py` do not).
 
 **Test:** rover ~2 m facing the closed door, then
-`docker exec rover bash -lc 'source /opt/ros/jazzy/setup.bash; python3 /opt/rover4/tools/ground_check.py "the door"'`
+`docker exec rover bash -lc 'source /opt/ros/lyrical/setup.bash; python3 /opt/rover4/tools/ground_check.py "the door"'`
 (never drives) and compare with the LiDAR; again at an angle and with the door open.
 
 **If it does not work:**

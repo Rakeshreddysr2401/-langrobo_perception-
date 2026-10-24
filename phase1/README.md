@@ -73,9 +73,9 @@ actually catch a broken `camera_info`.
 - Passing the **same numpy array object** for both cameras raises
   `ValueError: The same image buffer for images 0, 1`. Left and right must be
   distinct buffers.
-- `tf_transformations` is **not installed** in `orin-nav:1.1`. Don't import it;
-  the image has no build recipe so nothing should be installed into it.
-- The packaged `isaac_ros_visual_slam` is a Thor build and does not run on this
+- `tf_transformations` is **not installed** in the image. Don't import it; add
+  a package only through `docker/2.0/Dockerfile`.
+- (1.1 only, history) The packaged `isaac_ros_visual_slam` was a Thor build and did not run on this
   Orin. The `cuvslam` wheel's own libs must come first on `LD_LIBRARY_PATH`.
 - Harmless `nanobind: leaked N functions!` spew on exit — shutdown noise, not a
   fault.

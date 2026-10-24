@@ -1,4 +1,9 @@
-# docker/ — provenance of the image, NOT a build recipe
+# docker/ — image history. **The current image is `orin-nav:2.0`: see `docker/2.0/`.**
+
+Since 2026-10-25 the rover runs `orin-nav:2.0` (Isaac ROS 5.0 / ROS 2 Lyrical), built from a
+real Dockerfile in `docker/2.0/`. Everything below is the record of the `docker commit` images
+1.1 and 1.2, both deleted (2026-10-24 and 2026-10-25, owner's call).
+
 
 **Nothing here has been built or tested from this repo.** These files are a
 *record* of where `orin-nav:1.1` came from, copied in on 2026-08-11 as insurance

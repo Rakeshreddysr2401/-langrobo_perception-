@@ -119,7 +119,7 @@ Acceptance and the latest numbers: [SENSOR_FUSION_PLAN.md](SENSOR_FUSION_PLAN.md
 All of these run inside the container. Prefix with:
 
 ```bash
-docker exec -it rover bash -lc 'source /opt/ros/jazzy/setup.bash; export ROS_DOMAIN_ID=0; <command>'
+docker exec -it rover bash -lc 'source /opt/ros/lyrical/setup.bash; export ROS_DOMAIN_ID=0; <command>'
 ```
 
 | what | command | procedure |
@@ -358,7 +358,7 @@ on screen**; it says which layer holds each lethal cell ahead:
 
 ```bash
 docker exec rover bash -lc 'unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE; \
-  export ROS_DOMAIN_ID=0; source /opt/ros/jazzy/setup.bash; python3 /opt/rover3/tools/ghost_check.py'
+  export ROS_DOMAIN_ID=0; source /opt/ros/lyrical/setup.bash; python3 /opt/rover3/tools/ghost_check.py'
 ```
 
 `live` = the LiDAR sees it now; `camera memory` = only nvblox's planning slice

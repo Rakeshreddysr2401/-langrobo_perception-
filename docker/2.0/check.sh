@@ -9,7 +9,6 @@ echo "== $IMAGE  ($(docker image inspect -f '{{.Id}}' "$IMAGE" 2>/dev/null | cut
 
 docker run --rm --runtime nvidia --network none --entrypoint bash \
   -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all -e NVIDIA_DISABLE_REQUIRE=1 \
-  -v /opt/nvidia/l4t-gpu-libs/openrm/libnvcuvid.so:/usr/lib/aarch64-linux-gnu/nvidia/libnvcuvid.so.1:ro \
   -e ROS_DOMAIN_ID=99 -e ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST "$IMAGE" -c '
 fails=0
 ok(){ echo "PASS  $1"; }
