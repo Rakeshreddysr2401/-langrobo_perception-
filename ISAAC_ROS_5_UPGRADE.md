@@ -117,6 +117,11 @@ GPU and cuVSLAM rate before/after; a feature that drops cuVSLAM below 25 Hz does
 
 ### Features, in order
 
+**Priority (owner, 2026-10-24): navigation first.** B1–B5 (GPU sharing, localization, cuVGL,
+nav2 improvements, people) are the focus until nav works well on the real robot. B6 (Grounding
+DINO) follows. B7–B8 (arm) stay planned, not started, until the owner starts the arm; step 7
+(arm in the twin) moves after Part B nav.
+
 | # | feature | package(s) | replaces / improves | pass test (twin, then real) |
 |---|---|---|---|---|
 | B1 | GPU partitioning | `isaac_ros_gpu_partitioning` (needs `nvidia-cuda-mps-control` ≥ 13010; check MPS works on Orin) | protects cuVSLAM from YOLO/DNN load | YOLO + Grounding DINO under load: cuVSLAM ≥ 25 Hz, 0 pose jumps |
