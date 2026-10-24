@@ -52,7 +52,7 @@ class GyroNode(Node):
             cands = [n for n, types in self.get_topic_names_and_types()
                      if n.startswith(self.ns) and 'sensor_msgs/msg/Imu' in types]
             if not cands:
-                self.get_logger().warn(f'no sensor_msgs/Imu topic under {self.ns} yet', once=True)
+                self.get_logger().warning(f'no sensor_msgs/Imu topic under {self.ns} yet', once=True)
                 return
             # Prefer a combined/motion stream over a bare gyro stream if both exist.
             cands.sort(key=lambda n: (0 if ('motion' in n or n.endswith('/imu')) else 1, len(n)))

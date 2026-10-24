@@ -230,7 +230,7 @@ class VoIsaac(Node):
             self.max_gap_s = max(self.max_gap_s, gap)
             if gap > 1.0:
                 self.gaps_over_limit += 1
-                self.get_logger().warn(f'frame gap {gap:.2f} s — tracking may reset.')
+                self.get_logger().warning(f'frame gap {gap:.2f} s — tracking may reset.')
         self.prev_ts = ts
         if self.vo_state == 1:
             self.tracked += 1
@@ -253,7 +253,7 @@ class VoIsaac(Node):
                 self._reset()
             return
         if self.z_bad_since is not None:
-            self.get_logger().warn('cuvslam z recovered on its own')
+            self.get_logger().warning('cuvslam z recovered on its own')
             self.z_bad_since = None
 
         self.frozen = self.frozen + 1 if p == self.last_pose else 0
@@ -303,13 +303,13 @@ class VoIsaac(Node):
         mag = float(np.linalg.norm(corr[:3, 3]))
         if abs(z_raw) > MAX_CORRECTION_Z:
             self.correction_flattened += 1
-            self.get_logger().warn(
+            self.get_logger().warning(
                 f'SLAM correction had z={z_raw:+.2f} m — flattened to the floor; '
                 f'using its {mag:.2f} m planar part. ({self.correction_flattened} so far)',
                 throttle_duration_sec=30.0)
         if mag > MAX_CORRECTION_M:
             self.correction_rejected += 1
-            self.get_logger().warn(
+            self.get_logger().warning(
                 f'SLAM correction implausible ({mag:.1f} m planar, z was {z_raw:+.1f} m) '
                 '— not publishing map->odom. Odometry is unaffected.',
                 throttle_duration_sec=10.0)

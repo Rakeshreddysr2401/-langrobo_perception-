@@ -219,7 +219,7 @@ class DepthObstacles:
             q.x, q.y, q.z, q.w = d['q']
             self.cam = (quat_R(q), np.array(d['t']))
             self.cam_src = 'cache'
-            self.node.get_logger().warn(f'depth camera mount from {CAM_CACHE} (no /tf_static after {TF_WAIT:.0f} s)')
+            self.node.get_logger().warning(f'depth camera mount from {CAM_CACHE} (no /tf_static after {TF_WAIT:.0f} s)')
 
     # ── the model, no ROS (testable) ────────────────────────────────────────
     def update(self, d, pose, now):

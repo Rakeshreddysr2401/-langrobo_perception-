@@ -168,6 +168,23 @@ by this plan (JetPack 7.2.1 stays; the host `isaac-ros-cli` 2.5 stays dormant).
 
 ## Log
 
+- **2026-10-25 04:00 — step 8 (real robot, STANDING STILL, motor supply removed by the owner) on 2.0:**
+  camera IR 30.0 / depth 30.1 Hz (DDS librealsense 2.58.2 source build) · lidar 10.0 Hz, 720 beams ·
+  gyro 200 Hz · lidar odom 10.1 Hz · fused /odom 20.0 Hz, `pose ok — LiDAR-anchored, sd 0.83 cm` ·
+  slam_toolbox 0.5 Hz · nvblox grid 4.9 Hz, depth-to-map 28.6 Hz (no JIT wait) · nav2 active,
+  0 errors, global/local costmap 0.7/1.7 Hz · `plan_check.py` (planner only): 3/3 reachable goals
+  planned, 0 body overlaps, median 451 ms · YOLO live on the image's TensorRT 10.16 · ESP32
+  /wheel_state 20.1 Hz, /cmd_vel 2 subscribers · Pi 5 (Jazzy) reads Jetson (Lyrical) /odom at 20.0 Hz;
+  Pi's Jazzy NavigateToPose client finds the Lyrical server (goal part identical; no goal sent).
+  RAM 5.5/7.4 GB, CPU ~60 %.
+  **cuVSLAM "lost"** — NOT the upgrade: 4 AM, dark room, emitter off by design → IR frames mean 18/255,
+  std 1, 0 corners. A 20 s recording replayed into BOTH images (`docker/2.0/vo_replay.sh`) gave the
+  same wander, reset and PoseGraph failure on 4.6 and 5.0. Re-check VO in light.
+  Lyrical fixes found live: `get_logger().warn()` removed in Lyrical rclpy → `.warning()` (5 files;
+  vo_isaac.py crashed in its z-recovery handler); `ros2 bag record` needs `--topics` (our harness
+  already does). Pi brain default nav backend = `reach` (topic); its direct-nav2 fallback is the only
+  cross-distro action use.
+
 - **2026-10-24 night — steps 1-4 DONE on the Jetson (no hardware, no domain 0).**
   `orin-nav:2.0` = `21e7b7e2b28c`, 43.4 GB unpacked (1.2: 73.4 GB), from `docker/2.0/Dockerfile`.
   Build fixes on the way: colcon/rosdep need packages.ros.org; realsense-ros 4.58.2 needs only

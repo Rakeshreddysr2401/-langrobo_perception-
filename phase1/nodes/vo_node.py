@@ -453,7 +453,7 @@ def main():
             skew = abs((lmsg.header.stamp.sec - rmsg.header.stamp.sec) * 1e9 +
                        (lmsg.header.stamp.nanosec - rmsg.header.stamp.nanosec))
             if skew > 1e6:  # 1 ms — cuVSLAM's stated tolerance
-                self.get_logger().warn(f'dropping pair, stereo skew {skew / 1e6:.2f} ms', throttle_duration_sec=5.0)
+                self.get_logger().warning(f'dropping pair, stereo skew {skew / 1e6:.2f} ms', throttle_duration_sec=5.0)
                 return
 
             limg = self.bridge.imgmsg_to_cv2(lmsg, 'mono8')
@@ -470,7 +470,7 @@ def main():
                     self.max_gap_s = gap
                 if gap > 1.0:
                     self.gaps_over_limit += 1
-                    self.get_logger().warn(
+                    self.get_logger().warning(
                         f'frame gap {gap:.2f} s — past cuVSLAM max_frame_delta_s '
                         f'(1.0 s). Tracking may reset.')
             self.prev_ts = ts
@@ -478,14 +478,14 @@ def main():
             try:
                 est, slam_pose = self.tracker.track(ts, [limg, rimg])
             except ValueError as e:
-                self.get_logger().warn(f'track rejected frame: {e}', throttle_duration_sec=5.0)
+                self.get_logger().warning(f'track rejected frame: {e}', throttle_duration_sec=5.0)
                 return
 
             self.frames += 1
             if est is None or est.world_from_rig is None:
                 # Tracking lost. Worth naming, because a run of these either side
                 # of a divergence would be the smoking gun.
-                self.get_logger().warn('tracking lost this frame', throttle_duration_sec=2.0)
+                self.get_logger().warning('tracking lost this frame', throttle_duration_sec=2.0)
                 return
             self.tracked += 1
 
@@ -559,7 +559,7 @@ def main():
                     self.resets += 1
                     return
             elif self.z_bad_since is not None:
-                self.get_logger().warn('cuvslam z recovered on its own')
+                self.get_logger().warning('cuvslam z recovered on its own')
                 self.z_bad_since = None
 
             # How many landmarks the tracker is holding is the real health signal.
@@ -682,7 +682,7 @@ def main():
             # optimiser is diverging, so it is reported rather than acted on.
             if abs(z_raw) > MAX_CORRECTION_Z:
                 self.correction_flattened += 1
-                self.get_logger().warn(
+                self.get_logger().warning(
                     f'SLAM correction had z={z_raw:+.2f} m — flattened to the '
                     f'floor; using its {mag:.2f} m planar part. '
                     f'({self.correction_flattened} so far)',
@@ -707,7 +707,7 @@ def main():
             # only -- the one number a ground rover can actually be wrong about.
             if mag > MAX_CORRECTION_M:
                 self.correction_rejected += 1
-                self.get_logger().warn(
+                self.get_logger().warning(
                     f'SLAM correction implausible ({mag:.1f} m planar, '
                     f'z was {z_raw:+.1f} m) '
                     f'— not publishing map->odom. Odometry is unaffected.',

@@ -70,7 +70,7 @@ class TurnGate:
             return False
         if not self.hist or self.hist[-1][0] < t - STALE_S:
             if not self.warned:
-                self.node.get_logger().warn(f'turn gate: no {GYRO} -- depth frames pass ungated')
+                self.node.get_logger().warning(f'turn gate: no {GYRO} -- depth frames pass ungated')
                 self.warned = True
             self.blind += 1
             return True
