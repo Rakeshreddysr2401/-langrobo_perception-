@@ -87,8 +87,11 @@ RUN mkdir -p /opt/realsense_ws/src && cd /opt/realsense_ws/src \
     && rm -rf build log src /tmp/realsense-ros-lyrical.patch \
     && echo "source /opt/realsense_ws/install/setup.bash" >> /etc/bash.bashrc
 
-# 5. GPU sharing (CUDA MPS): lets YOLO run next to cuVSLAM without starving it.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# 5. Isaac ROS environment = docker (what isaac-ros-cli's own Dockerfile writes). Isaac
+#    packages with pip shims (python3-*-pip-shim) refuse to install without it.
+#    Then GPU sharing (CUDA MPS): lets YOLO run next to cuVSLAM without starving it.
+RUN echo "ISAAC_ROS_ENVIRONMENT=docker-activated" > /etc/isaac-ros-cli/environment.conf \
+    && apt-get update && apt-get install -y --no-install-recommends \
         ros-lyrical-isaac-ros-gpu-partitioning \
     && rm -rf /var/lib/apt/lists/*
 

@@ -9,7 +9,8 @@
 n=0
 mkdir -p /logs/nav_crashes 2>/dev/null
 # the rover's own costmap plugins (footprint_clear; phase3/plugins/build.sh)
-PLUGINS=/opt/rover3/plugins/ws/install/setup.bash
+PLUGINS=/opt/rover3/plugins/ws/install_${ROS_DISTRO:-none}/setup.bash   # orin-nav:2.x
+[ -f "$PLUGINS" ] || PLUGINS=/opt/rover3/plugins/ws/install/setup.bash   # Jazzy (1.x)
 if [ -f "$PLUGINS" ]; then source "$PLUGINS"; else echo "[nav2_supervise] WARNING: $PLUGINS missing -- run phase3/plugins/build.sh"; fi
 # BRINGUP WATCHDOG (2026-09-28). Under load (Jetson ~9 on 6 cores) the
 # lifecycle manager twice lost the reply to "Configuring controller_server":

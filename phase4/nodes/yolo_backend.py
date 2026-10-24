@@ -67,9 +67,12 @@ class TrtYolo:
     """YOLOv8-style detect head ((1, 4 + classes, N) output) on TensorRT, no torch."""
 
     def __init__(self, path):
-        import tensorrt as trt   # the host's, via PYTHONPATH=/hosttrt/py (./rover detect)
+        # orin-nav:1.2: the image's TensorRT 10.13 refuses this Orin (SM 87), so ./rover detect
+        # points PYTHONPATH at the host's (/hosttrt). orin-nav:2.0 ships 10.16, the host's own
+        # version: its TensorRT is used directly.
+        import tensorrt as trt
         meta, raw = read_engine_file(path)
-        if not trt.__file__.startswith("/hosttrt/"):
+        if trt.__version__.startswith("10.13.") and not trt.__file__.startswith("/hosttrt/"):
             raise RuntimeError(f"this process has the image's TensorRT {trt.__version__}, which "
                                f"cannot run on this Orin; the host's is not mounted at /hosttrt "
                                f"(a container from an older ./rover: ./rover stop, then ./rover up)")

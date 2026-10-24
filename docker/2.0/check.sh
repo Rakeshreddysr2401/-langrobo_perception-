@@ -19,7 +19,7 @@ echo "ROS_DISTRO=$ROS_DISTRO"
 
 # 1. packages the rover launches
 for p in isaac_ros_cuvslam isaac_ros_visual_slam_interfaces nvblox_ros nvblox_msgs \
-         nav2_bringup nav2_mppi_controller nav2_smac_planner nav2_collision_monitor \
+         nav2_bt_navigator nav2_controller nav2_planner nav2_behaviors nav2_lifecycle_manager nav2_mppi_controller nav2_smac_planner nav2_collision_monitor \
          nav2_velocity_smoother nav2_map_server slam_toolbox realsense2_camera \
          robot_state_publisher cv_bridge image_transport rosbag2_py isaac_ros_gpu_partitioning; do
   ros2 pkg prefix $p >/dev/null 2>&1 && ok "pkg $p" || no "pkg $p"

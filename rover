@@ -383,9 +383,10 @@ start_container(){
   # /hosttrt, OUT of the image's library path: only the YOLO detector is pointed
   # at it (./rover detect), every Isaac node keeps the image's (2026-10-21,
   # phase4/nodes/yolo_backend.py).
+  # orin-nav:2.x ships TensorRT 10.16 itself (the host's version): no /hosttrt there.
   local hosttrt=()
   local hl=/usr/lib/aarch64-linux-gnu hp=/usr/lib/python3.12/dist-packages/tensorrt lib real
-  if [ -d "$hp" ]; then
+  if [ -d "$hp" ] && [[ "$IMAGE" == orin-nav:1.* ]]; then
     hosttrt=(-v "$hp":/hosttrt/py/tensorrt:ro)
     for lib in libnvinfer.so.10 libnvinfer_plugin.so.10 libnvonnxparser.so.10; do
       real=$(readlink -f "$hl/$lib" 2>/dev/null) && [ -f "$real" ] \
@@ -622,7 +623,7 @@ lidar)
   echo "[lidar] fixed frames from description/params.yaml (robot_state_publisher)"
   tf_up
   echo "[lidar] RPLidar C1 on $LIDAR_PORT -> /scan  (10 Hz, 720 beams, 0.5 deg)"
-  dexec "source $LIDAR/ws/install/setup.bash; exec ros2 run sllidar_ros2 sllidar_node --ros-args \
+  dexec "I=$LIDAR/ws/install_\$ROS_DISTRO; [ -d \$I ] || I=$LIDAR/ws/install; source \$I/setup.bash; exec ros2 run sllidar_ros2 sllidar_node --ros-args \
             -p serial_port:=$LIDAR_PORT -p serial_baudrate:=460800 -p frame_id:=laser \
             -p inverted:=false -p angle_compensate:=true -p scan_mode:=Standard \
             -p scan_time_offset:=$LIDAR_TIME_OFFSET > /tmp/lidar.log 2>&1"
@@ -1186,8 +1187,9 @@ detect)
   model_args=""
   if [ -n "$trt_tag" ] && [ -f "$REPO/$engine" ]; then
     model_args="--ros-args -p model:=/$engine -p fallback_model:=/models/yolov8n.pt"
-    docker exec "$NAME" test -f /hosttrt/lib/libnvinfer.so.10 \
-      || echo "  ! this container has no /hosttrt (started by an older ./rover): YOLO falls back to the .pt until ./rover up"
+    if [[ "$IMAGE" == orin-nav:1.* ]] && ! docker exec "$NAME" test -f /hosttrt/lib/libnvinfer.so.10; then
+      echo "  ! this container has no /hosttrt (started by an older ./rover): YOLO falls back to the .pt until ./rover up"
+    fi
   else
     echo "  ! no TensorRT engine for TensorRT ${trt_tag:-?} -- YOLO runs on PyTorch (~2x the CPU, +0.8 GB)."
     echo "    Build it once: ./rover engine  (~8 min)"
