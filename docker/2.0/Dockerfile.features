@@ -1,0 +1,28 @@
+# syntax=docker/dockerfile:1
+# orin-nav:2.1 -- orin-nav:2.0 + the Isaac ROS 5.0 navigation features of ISAAC_ROS_5_UPGRADE.md
+# Part B (nav first, owner 2026-10-24). Packages only: every feature is OFF in ./rover until its
+# pass test beats what the rover does today.
+#   cd ~/rover/docker/2.0 && docker build -f Dockerfile.features -t orin-nav:2.1 .
+# Models and maps are NOT baked in: they live on the host in ~/rover/models/isaac/ (mounted).
+FROM orin-nav:2.0
+
+# B2 lidar start-up localization  (baseline to beat: phase2/tools/relocalize.py, 1-3 s, ~2 cm).
+#    Depends on nav2_bringup, which drags in Gazebo/Qt bits we never run -- NVIDIA's declared
+#    dependency, kept rather than forced around.
+# B3 camera mapping + global localization: cuVGL (visual_global_localization), visual_mapping,
+#    isaac_mapping_ros (offline map building from a recorded drive).
+# B4 nvblox -> nav2 costmap layer (nvblox_nav2), to compare with our fused_obstacles.
+# B5 people out of the map: segformer + the PeopleSemSegFormer model installer.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ros-lyrical-isaac-ros-occupancy-grid-localizer \
+        ros-lyrical-isaac-ros-visual-global-localization \
+        ros-lyrical-isaac-ros-visual-mapping \
+        ros-lyrical-isaac-mapping-ros \
+        ros-lyrical-nvblox-nav2 \
+        ros-lyrical-isaac-ros-segformer \
+        ros-lyrical-isaac-ros-peoplesemseg-models-install \
+    && rm -rf /var/lib/apt/lists/*
+
+LABEL org.orin-nav.version="2.1" \
+      org.orin-nav.stack="orin-nav:2.0 + Isaac ROS 5.0 nav features (Part B: B2-B5)" \
+      org.orin-nav.recipe="rover/docker/2.0/Dockerfile.features"
