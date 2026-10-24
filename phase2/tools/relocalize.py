@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """relocalize.py — where am I in the saved home? One lidar scan against the saved map.
 
-    python3 relocalize.py <map.yaml> [--hint x,y,theta] [--json]     (in the container: reads one /scan)
+    python3 relocalize.py <map.yaml> [--hint x,y,theta]     (in the container: reads one /scan)
 
 slam_toolbox resumes a saved room only from a GIVEN pose (map_start_pose):
 `./rover slam` used to give it where the rover stood at the last autosave. On
