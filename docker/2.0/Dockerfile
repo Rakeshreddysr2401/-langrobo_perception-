@@ -72,9 +72,11 @@ RUN git clone --depth 1 -b ${LIBREALSENSE_VERSION} https://github.com/IntelRealS
     && rm -rf /tmp/librealsense
 ENV LD_LIBRARY_PATH=/opt/librealsense/lib
 
-# 4. realsense-ros against that librealsense, with NVIDIA's Lyrical patch (isaac-ros-cli 2.6.0).
+# 4. realsense-ros 4.58.2 against that librealsense. 4.58.2 already has the Kilted-era fixes
+#    NVIDIA patches 4.56.3 for (target_link_libraries, tf2 .hpp); it only lacks "lyrical" in its
+#    ROS_DISTRO switch -- patches/realsense-ros-4.58.2-lyrical.patch adds it.
 ARG REALSENSE_ROS_VERSION=4.58.2
-COPY patches/realsense-ros-lyrical.patch /tmp/realsense-ros-lyrical.patch
+COPY patches/realsense-ros-4.58.2-lyrical.patch /tmp/realsense-ros-lyrical.patch
 RUN mkdir -p /opt/realsense_ws/src && cd /opt/realsense_ws/src \
     && git clone --depth 1 -b ${REALSENSE_ROS_VERSION} https://github.com/IntelRealSense/realsense-ros \
     && git -C realsense-ros apply /tmp/realsense-ros-lyrical.patch \
