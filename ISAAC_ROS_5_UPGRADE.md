@@ -84,6 +84,61 @@ Navigation itself is not expected to improve. Sources: the 5.0.0 release notes
 9. **Clean up:** delete `orin-nav:1.2` only after 8 passes and the owner agrees; update
    ARCHITECTURE / OPERATIONS / docker/README; merge `isaac-ros-5`.
 
+## Part B: the new 5.0 features we adopt (owner, 2026-10-24: "use all the useful ones")
+
+Starts after step 6 (2.0 works on the twin). Same rules: one feature at a time, twin first,
+measured against the twin's TRUE pose / objects, then the real robot standing still, then
+driven only with the owner's OK. Each feature is a switch in `./rover` (off = today's behaviour),
+so nothing replaces working code until its numbers beat it.
+
+### Images
+
+```
+orin-nav:2.0   core: cuVSLAM, nvblox, nav2, D555, YOLO-TRT, GPU partitioning   (steps 1-9)
+orin-nav:2.1   + Part B packages (one Dockerfile layer per feature group)
+orin-arm:2.1   + arm (MoveIt, cuMotion, FoundationPose, SAM2, pick-and-place)  (B7-B8)
+```
+Model files (TensorRT engines, ONNX, cuVGL maps) live on the host in `~/rover/models/isaac/`,
+mounted read-only — never baked into an image, so rebuilds don't re-download GBs.
+
+### The budget rule (Orin Nano: 6 CPU cores, 7.4 GB RAM shared with the GPU)
+
+Not everything runs at once. The rover works in **modes**; heavy models run on demand:
+
+| mode | always on | on demand |
+|---|---|---|
+| **start-up** | camera, lidar | cuVGL / occupancy-grid localizer → once, until the pose is found, then off |
+| **drive** | cuVSLAM, nvblox (+ people), nav2, YOLO-TRT at 5 Hz, tracker | Grounding DINO: once per "find X", then YOLO + our lock-and-track follows it |
+| **arm** (rover parked, nav2 paused) | cuVSLAM, camera | SAM2 → FoundationPose → cuMotion; FoundationStereo/ESS depth for the grasp |
+
+`isaac_ros_gpu_partitioning` gives cuVSLAM a fixed GPU share in every mode (the 2026-07-19
+lesson: YOLO starving the tracker blew up the pose). Every feature's test records CPU, RAM,
+GPU and cuVSLAM rate before/after; a feature that drops cuVSLAM below 25 Hz doesn't ship.
+
+### Features, in order
+
+| # | feature | package(s) | replaces / improves | pass test (twin, then real) |
+|---|---|---|---|---|
+| B1 | GPU partitioning | `isaac_ros_gpu_partitioning` (needs `nvidia-cuda-mps-control` ≥ 13010; check MPS works on Orin) | protects cuVSLAM from YOLO/DNN load | YOLO + Grounding DINO under load: cuVSLAM ≥ 25 Hz, 0 pose jumps |
+| B2 | startup localization (lidar) | `isaac_ros_occupancy_grid_localizer` | manual initial pose; `SLAM_FRESH=1` on the twin | from 10 random start poses in a saved map: found pose within 0.15 m / 5° |
+| B3 | visual mapping + global localization | `isaac_ros_visual_mapping`, `isaac_mapping_ros`, `isaac_ros_visual_global_localization` (cuVGL) | the "saved room locks onto the wrong place" problem | map from one recorded drive; relocalize from 10 starts + 1 "kidnap": within 0.15 m; cuVSLAM resumes in the map |
+| B4 | nvblox → nav2 official path | `nvblox_nav2` | part of our `fused_obstacles` | side by side on the same bag/scenario: same or fewer missed obstacles, no new ghost walls |
+| B5 | people in the map | nvblox people segmentation (`isaac_ros_peoplesemseg_models_install`, Segformer/U-Net) | people leave ghost obstacles | twin with walking people: no permanent ghost cells; budget held |
+| B6 | open-vocabulary "find X" | `isaac_ros_grounding_dino` | YOLO's fixed 80 classes for the brain | twin objects by name (incl. non-COCO): found ≥ 9/10, latency measured; hands off to target_lock |
+| B7 | DNN depth for grasping | `isaac_ros_ess` (light) / `isaac_ros_foundationstereo` (heavy) | D555 depth on shiny/dark/small objects | depth error vs twin truth on test objects; FoundationStereo only if Orin rate is usable |
+| B8 | pick-and-place | `isaac_ros_segment_anything2`, `isaac_ros_foundationpose`, cuMotion + MoveIt, `isaac_ros_manipulation_pick_and_place` | (new) | twin: pose error, grasp success ≥ 8/10 on the test objects; then the real arm |
+| B9 | watch only | COMPASS / X-Mobility (`isaac_ros_deploy_*`): learned nav policy, beta, gated models | — | a twin experiment later; never replaces nav2 without the owner's call |
+
+Not adopted: VDA5050 / mission client (warehouse fleets).
+
+### Risks to check early
+
+- Grounding DINO, FoundationStereo and FoundationPose are big models; their Orin **Nano**
+  rate is unknown (NVIDIA's numbers are mostly AGX Orin / Thor). B6–B8 start with a 10-minute
+  rate + RAM check before any integration work.
+- cuVGL forum reports (2025) of trouble building maps from rosbags — may be fixed in 5.0; B3 starts small.
+- cuMotion MoveIt on Lyrical: 5.0 known issue (vendor packages not certified).
+
 ## Rollback
 
 Until step 9: `IMAGE=orin-nav:1.2 ./rover up` on the old branch. The host is not changed

@@ -18,7 +18,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # 1. Apt sources: Isaac ROS 5.0 (Jetson), NVIDIA's ROS Lyrical buildfarm for noble,
-#    CUDA, Jetson r39.2. isaac-ros-cli with ISAAC_ROS_PLATFORM=arm64-jetpack writes the
+#    CUDA, Jetson r39.2, packages.ros.org (colcon, rosdep only). isaac-ros-cli with ISAAC_ROS_PLATFORM=arm64-jetpack writes the
 #    official apt pins (CUDA 13.2, TensorRT 10.16) -- that is its only job here.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl gnupg lsb-release wget \
@@ -34,6 +34,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && curl -fsSL https://repo.download.nvidia.com/jetson/jetson-ota-public.asc | gpg --dearmor -o $j \
     && echo "deb [signed-by=$j] http://repo.download.nvidia.com/jetson/common r39.2 main" \
          > /etc/apt/sources.list.d/nvidia-jetson.list \
+    && curl -fsSL -o /tmp/ros2-apt-source.deb \
+         https://github.com/ros-infrastructure/ros-apt-source/releases/download/1.1.0/ros2-apt-source_1.1.0.noble_all.deb \
+    && dpkg -i /tmp/ros2-apt-source.deb && rm /tmp/ros2-apt-source.deb \
     && apt-get update \
     && ISAAC_ROS_PLATFORM=arm64-jetpack apt-get install -y --no-install-recommends isaac-ros-cli \
     && rm -rf /var/lib/apt/lists/*
@@ -81,6 +84,11 @@ RUN mkdir -p /opt/realsense_ws/src && cd /opt/realsense_ws/src \
        colcon build --merge-install --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
     && rm -rf build log src /tmp/realsense-ros-lyrical.patch \
     && echo "source /opt/realsense_ws/install/setup.bash" >> /etc/bash.bashrc
+
+# 5. GPU sharing (CUDA MPS): lets YOLO run next to cuVSLAM without starving it.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ros-lyrical-isaac-ros-gpu-partitioning \
+    && rm -rf /var/lib/apt/lists/*
 
 LABEL org.orin-nav.version="2.0" \
       org.orin-nav.stack="Isaac ROS 5.0 / ROS 2 Lyrical / JetPack 7.2 (Orin)" \
