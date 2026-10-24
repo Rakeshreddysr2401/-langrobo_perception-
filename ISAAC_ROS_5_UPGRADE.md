@@ -136,6 +136,23 @@ DINO) follows. B7–B8 (arm) stay planned, not started, until the owner starts t
 
 Not adopted: VDA5050 / mission client (warehouse fleets).
 
+### Notes for B2 / B3 (from NVIDIA's release-5.0 docs, 2026-10-24)
+
+- **cuVGL node** (`isaac_ros_visual_global_localization`): in = grayscale stereo
+  `visual_localization/image_{0,1}` + `camera_info_{0,1}` (our D555 IR pair, as cuVSLAM gets);
+  trigger = topic `visual_localization/trigger_localization` or the Trigger service of the same name;
+  out = `visual_localization/pose` (PoseWithCovarianceStamped), optional `vmap → base_link` TF
+  (`publish_map_to_base_tf` — **off for us**: fusion2 / vo_isaac own the TF tree; we feed the pose in).
+  Needs `map_dir`, `config_dir` (`keypoint_creation_config.pb.txt`, `localizer_config.pb.txt`).
+- **Map creation is offline** from a rosbag (`create_map_offline.py`, Isaac Perceptor tutorial):
+  makes the cuVGL map, a cuVSLAM map and an occupancy grid in one go. NVIDIA's converter steps are
+  written for x86 → plan for the laptop (RTX 4050) to build maps from bags the Jetson records.
+  Unknown until tried: whether the Jetson can do it, how long a room takes.
+- **Occupancy grid localizer**: lidar scan + a known occupancy map → pose for nav2. 5.0 assets exist on
+  NGC; exact topics/params to be read from the installed package (docs page moved). A 2025 forum
+  report says results were slow → measure time-to-pose.
+- Both run **once at start-up / on request**, then stop (budget rule).
+
 ### Risks to check early
 
 - Grounding DINO, FoundationStereo and FoundationPose are big models; their Orin **Nano**
