@@ -168,6 +168,24 @@ by this plan (JetPack 7.2.1 stays; the host `isaac-ros-cli` 2.5 stays dormant).
 
 ## Log
 
+- **2026-10-25 twin session (home_real, judged on the truth; full stack on 2.0).**
+  First 2.0 run **2/4 reached** (1.2 baseline 4/4). Three silent nav2 1.5 changes found, fixed in
+  nav2.yaml (commits eef8244, 0cb65d5), each from logs/param dumps:
+  1. **`enable_stamped_cmd_vel` defaults to true** → the smoother published TwistStamped, the collision
+     monitor subscribed Twist → **nav2 never moved the rover**; reach's fallback did. Now false on
+     every nav2 velocity publisher. (`docker/2.0/topic_audit.sh` finds such type splits.)
+  2. MPPI path settings (prune_distance, enforce_path_inversion, inversion_*) **moved to a PathHandler
+     plugin and were ignored** → moved. (`docker/2.0/param_audit.sh` lists ignored keys.)
+  3. `costmap_update_timeout` (0.3 s, new) aborted goals under load → 1.0 s; `wait_for_service_timeout`
+     1 s failed the first bring-up → 5 s.
+  **After the fixes, fresh start:** 4/4 reached on nav2's first attempt, nothing touched, pose err max
+  7.9 cm; time 47 + 19 + 26 + 67 = **159 s vs 271 s on 1.2 (41 % faster)**.
+  Open: collision_monitor logs TF "extrapolation into the future" (laser → base_link) 13x.
+  **B2 on the twin's SLAM map (`twin_home`), 3 spots measured standing still:** ours 4.0-4.7 cm,
+  5.5-7.2 s; NVIDIA 4.0-4.5 cm, **0.6 s** (both share the SLAM map's ~4 cm offset). Real cramped room
+  (3.5 m map): NVIDIA wrong. → Adopt as **NVIDIA first, verified by relocalize.agreement() (one
+  pose, ms), our full search only if the check fails.** Needs orin-nav:2.1 at runtime.
+
 - **2026-10-25 05:xx — step 9 done + Part B started.** `orin-nav:1.2` deleted (owner) → 75 GB free;
   all 4.6/Jazzy compatibility code removed (one Lyrical path; checks re-run green, see commit
   920041f). `./rover engine` re-done for 2.0 (ultralytics/torch/onnx in a 5.7 GB host cache; tested).

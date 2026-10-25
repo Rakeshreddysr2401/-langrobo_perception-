@@ -18,19 +18,31 @@ B2_PARAMS=${B2_PARAMS:-}   # extra localizer params, python dict body, e.g. "'in
 ENVSET="unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE; export FASTDDS_BUILTIN_TRANSPORTS=UDPv4; export ROS_DOMAIN_ID=$DOMAIN; for f in /opt/ros/*/setup.bash; do source \$f; done;"
 
 echo "== B2 on map $MAP ($RUNS runs each), domain $DOMAIN"
-if [ "$TWIN" = 1 ]; then
-  echo "-- truth (/sim/truth/pose):"
+truth(){ # $1 = label
+  echo "-- truth $1 (/sim/truth/pose, after 3 s standing still):"
   docker exec $CT bash -lc "$ENVSET python3 - <<'PY'
 import math, time, rclpy
 from geometry_msgs.msg import PoseStamped
 rclpy.init(); n = rclpy.create_node('b2_truth'); got = []
 n.create_subscription(PoseStamped, '/sim/truth/pose', got.append, 10)
 t0 = time.time()
-while not got and time.time() - t0 < 10: rclpy.spin_once(n, timeout_sec=0.2)
+# wait until the rover has stood still for 3 s (a moving rover makes every comparison void)
+still = None; last = None
+while time.time() - t0 < 180:
+    rclpy.spin_once(n, timeout_sec=0.1)
+    if not got: continue
+    c = (got[-1].pose.position.x, got[-1].pose.position.y, got[-1].pose.orientation.z)
+    if last and max(abs(a - b) for a, b in zip(c, last)) < 0.002:
+        still = still or time.time()
+        if time.time() - still > 3: break
+    else:
+        still = None
+    last = c
 p = got[-1].pose; q = p.orientation
 print('   truth: x=%.3f y=%.3f yaw=%.1f deg' % (p.position.x, p.position.y, math.degrees(math.atan2(2*(q.w*q.z+q.x*q.y), 1-2*(q.y*q.y+q.z*q.z)))))
 PY" 2>&1 | grep -v XMLPARSER
-fi
+}
+[ "$TWIN" = 1 ] && truth before
 echo "-- ours: phase2/tools/relocalize.py"
 for i in $(seq "$RUNS"); do
   t0=$(date +%s.%N)
@@ -88,3 +100,5 @@ PY" 2>&1 | grep -v XMLPARSER
 done
 echo "   (its errors/warnings:)"; docker logs b2_gridloc 2>&1 | grep -E "ERROR|WARN" | grep -v "deprecated" | sed -E 's/\x1b\[[0-9;]*m//g' | cut -c1-200 | sort | uniq -c | head -6
 docker rm -f b2_gridloc >/dev/null
+[ "$TWIN" = 1 ] && truth after
+exit 0
