@@ -1,0 +1,13 @@
+# Isaac ROS 5.0 mapping (isaac_mapping_ros create_map_offline.py --camera_topic_config) for the
+# rover's D555, modelled on NVIDIA's data_converter_realsense.yaml. Frame ids are vo_isaac.py's
+# vslam_*_optical frames (camera_info baseline, REP-104 sign), NOT the driver's camera0_infra*
+# frames, whose infra2 sign is the opposite of REP-104 (phase1/launch/vo_isaac.launch.py).
+# The images are the driver's image_rect_raw (already rectified). Plan: ISAAC_ROS_5_UPGRADE.md B3.
+stereo_cameras:
+  - name: front_stereo_camera
+    left: /camera/camera0/infra1/image_rect_raw
+    left_camera_info: /camera/camera0/infra1/camera_info
+    left_frame_id: vslam_left_optical
+    right: /camera/camera0/infra2/image_rect_raw
+    right_camera_info: /camera/camera0/infra2/camera_info
+    right_frame_id: vslam_right_optical

@@ -168,6 +168,23 @@ by this plan (JetPack 7.2.1 stays; the host `isaac-ros-cli` 2.5 stays dormant).
 
 ## Log
 
+- **2026-10-25 05:xx — step 9 done + Part B started.** `orin-nav:1.2` deleted (owner) → 75 GB free;
+  all 4.6/Jazzy compatibility code removed (one Lyrical path; checks re-run green, see commit
+  920041f). `./rover engine` re-done for 2.0 (ultralytics/torch/onnx in a 5.7 GB host cache; tested).
+  **`orin-nav:2.1`** = `fa4d12545a6c` (56.3 GB; +13 GB is torch 2.12.1+cu132 from an Isaac pip shim)
+  from `docker/2.0/Dockerfile.features`: grid localizer, cuVGL, visual mapping, isaac_mapping_ros,
+  nvblox_nav2, segformer + PeopleSemSeg. check.sh 0 FAIL, nav2_check PASS, 83/83 imports.
+  **B2 first result (`docker/2.0/b2_gridloc.sh`, live scan, maps/last = 3.5 m room, robot in a corner):**
+  ours `relocalize.py` locked, 99.4 % of beams on walls, 1.6-9 s; NVIDIA 0.3-0.5 s but wrong and
+  unstable (10-27 % of beams on walls, either frame reading; also with invalid_range_threshold 0.25).
+  → keep ours; NVIDIA's gets the twin test with truth (10 starts) before any further thought.
+  **B3 ready to record:** no existing bag has BOTH IR cameras (floor_clear: infra1 only). The whole
+  mapping toolchain (create_map_offline.py, cuSFM, cuVGL map) is installed for aarch64 in 2.1, so
+  maps can be built ON the Jetson. `phase2/tools/record_cuvgl.sh <name>` records the drive
+  (IR pair + infos + tf + odom + scan, ~27 MB/s); `phase2/config/cuvgl_d555.yaml` maps our topics
+  (vslam_*_optical frames). Needs: daylight, motor power, owner teleop.
+  B1 needs host sudo (MPS). B4/B5 next (B4: replay floor_clear depth into nvblox_nav2 vs our costmap).
+
 - **2026-10-25 04:00 — step 8 (real robot, STANDING STILL, motor supply removed by the owner) on 2.0:**
   camera IR 30.0 / depth 30.1 Hz (DDS librealsense 2.58.2 source build) · lidar 10.0 Hz, 720 beams ·
   gyro 200 Hz · lidar odom 10.1 Hz · fused /odom 20.0 Hz, `pose ok — LiDAR-anchored, sd 0.83 cm` ·
