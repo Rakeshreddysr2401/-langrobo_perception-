@@ -38,6 +38,7 @@ MAPS = '/maps'
 EXTS = ('posegraph', 'data')
 CONFLICT_MAX = 0.20      # > this fraction of scan endpoints on known-open floor: SLAM's pose is wrong
 CONFLICT_SAVES = 2       # ... at this many saves in a row (one bad moment -- a person -- is not enough)
+LISTEN_S = 3.0           # s of listening before each save (TF, scan and map fresh again)
 
 
 class Watch:
@@ -192,7 +193,11 @@ def main():
     print('reference room:', 'maps/.ref (the gate is on)' if ref is not None else 'none (a fresh room: no gate)', flush=True)
     strikes = 0
     while True:
-        w.spin(period)
+        # Sleep, then listen only long enough to have a fresh /map, /scan and TF for the save.
+        # Spinning the whole period decoded every /tf, /scan and /map message for nothing:
+        # 15 % of a core, continuously, on the loaded real Orin (2026-10-25).
+        time.sleep(max(0.0, period - LISTEN_S))
+        w.spin(LISTEN_S)
         try:
             ok, why, strikes = save_once(w, ref, strikes)
         except Exception as e:  # noqa: BLE001 - keep trying; a missed save is not fatal
