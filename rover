@@ -11,6 +11,7 @@
 #                      --calibrate  DRIVES 0.20 m and measures the yaw itself
 #   ./rover goto X Y [DEG]  DRIVES: an exact (x, y, θ) move, learned slide, LiDAR-checked (M4)
 #   ./rover navto X Y DEG [--exact]  DRIVES: nav2 route, then goal_exec's exact finish (M5)
+#   ./rover explore [minutes]  DRIVES: map the home by itself, frontier by frontier, via reach
 #   ./rover pass [D] [--dry]  DRIVES: find the tight gap ahead, crawl straight through (3 cm margin)
 #   ./rover reach X Y [DEG]  DRIVES: nav2 + exact finish, retrying (look, pass, wait) until there
 #   ./rover drive      DRIVES: exact short moves that plan around the pivot fault
@@ -1455,6 +1456,22 @@ navto)
   fi
   ttyflag=""; [ -t 0 ] && ttyflag="-it"
   docker exec $ttyflag "$NAME" bash -lc "$ENVSET python3 -u $SRC3/tools/navto.py $(printf '%q ' "$@")"
+  ;;
+
+explore)
+  # frontier exploration on the LiDAR map (phase3/nodes/explore_node.py); every goal goes
+  # through reach, so nav2, goal_exec and the "too tight" refusals apply as for any goal
+  need_container
+  shift
+  assert_rate /odom 15 "fused odom" || die "no pose — ./rover fused first"
+  assert_rate /map 0.3 "lidar map"  || die "no /map — ./rover slam first (exploration grows the SLAM map)"
+  docker exec "$NAME" pgrep -f '[r]each_node.py' >/dev/null 2>&1 || die "reach is not running — ./rover nav"
+  refuse_if_manual
+  echo "  THIS DRIVES THE ROVER through the whole home until no unexplored edge is left."
+  echo "  A person watches: it cannot see drops (stairs) or things under 10 cm. Ctrl-C stops it;"
+  echo "  MANUAL on the phone cancels the current goal. Save the result: ./rover slam --save <name>"
+  ttyflag=""; [ -t 0 ] && ttyflag="-it"
+  docker exec $ttyflag "$NAME" bash -lc "$ENVSET python3 -u $SRC3/nodes/explore_node.py ${1:-20}"
   ;;
 
 # ── response ────────────────────────────────────────────────────────────────
