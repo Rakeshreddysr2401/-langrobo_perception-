@@ -28,7 +28,10 @@ TOPICS = [
     '/vo/odom', '/gyro/base', '/scan', '/wheel_state', '/odom', '/map',
     '/ghost_clear/grid', '/global_costmap/costmap', '/local_costmap/costmap',
     '/depth_gate/passed', '/goal_exec/obstacles',
-    '/camera/color/image_raw/compressed', '/vision/people',
+    '/camera/color/image_raw/compressed',
+    # NOT /vision/people: subscribing to it WAKES detections_3d (YOLO sleeps without demand),
+    # and the watchdog probes 6 s of every 30 -> YOLO awake ~16 s of every 30 for nobody
+    # (33 % of a core on the real robot, 2026-10-25). The detect layer is checked by publisher.
 ]
 
 
