@@ -168,6 +168,13 @@ by this plan (JetPack 7.2.1 stays; the host `isaac-ros-cli` 2.5 stays dormant).
 
 ## Log
 
+- **2026-10-25 regression suite on 2.0** (kino_sim `tools/run_suite.sh`, fresh twin + fresh stack per
+  world, judged on the truth; log `~/kino_sim/build/run_20261025/suite_2.0.log`): **0 touches**.
+  door49 2/2 in 80 + 81 s (1.x: 119 + 72 s). apt_hard 7/7, 0 touches (1.x: 6/6 with a −18 cm touch at
+  (−0.55, −2.05); its 154 s goal now 32 s). chairs44 1/2 (return: planner found no path ×3; 1.x was
+  flaky there too: 2/2 and 1/2) → repeat runs needed. B2 integrated in `./rover slam` (fdc1a11):
+  ~1 s faster at start-up (ROS discovery dominates; 0.6 s answers need a resident check). B4 set aside.
+
 - **2026-10-25 twin session (home_real, judged on the truth; full stack on 2.0).**
   First 2.0 run **2/4 reached** (1.2 baseline 4/4). Three silent nav2 1.5 changes found, fixed in
   nav2.yaml (commits eef8244, 0cb65d5), each from logs/param dumps:
