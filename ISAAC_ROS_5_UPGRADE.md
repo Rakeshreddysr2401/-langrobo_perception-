@@ -168,6 +168,15 @@ by this plan (JetPack 7.2.1 stays; the host `isaac-ros-cli` 2.5 stays dormant).
 
 ## Log
 
+- **2026-10-25 11:20 real robot, second session (owner moved it within the room).** Bring-up green; a
+  ~1 min WiFi dropout during start-up (router RTT 7-456 ms, Jetson power-save already off) took
+  /wheel_state, /cmd_vel subscriber and teleop with it -- recovered on its own. relocalize locked at
+  fit 0.78 next to the hint; owner had moved it a little in the same room -> plausible, accuracy unknown;
+  room archived (maps/archive/room1_*), SLAM fresh. YOLO/follow/track/image_bridge paused again:
+  /odom 19.7 Hz. reach goals: 0.7 m forward 6.4 s / 0.6 cm; back to start turned 180 deg 19.8 s /
+  3.2 cm / 0.5 deg; sideways (0.3, 0.5, 90 deg) 27.0 s / 1.2 cm -- all first attempt, 0 safety stops.
+  Fused vs lidar odom within 2 cm throughout.
+
 - **2026-10-25 11:00 real robot, motors ON, owner present (step 8 with motion).** All gates green on 2.0
   (camera 30 Hz after a physical PoE re-seat: the Jetson port had no carrier). Fixed live: stray `c` before
   reach_node.py's shebang (accidental edit); ./rover lidar checked the old build/ path (8534029); relocalize
