@@ -582,7 +582,7 @@ lidar)
   echo "[lidar] TWIN: the laptop's simulated C1 -> c1_driver -> /scan  (10 Hz, 720 beams, 0.5 deg)"
   dexec "exec python3 -u /opt/twin/jetson/c1_driver.py --laptop $ip > /tmp/lidar.log 2>&1"
   else
-  [ -x "$REPO/lidar/ws/build/sllidar_ros2/sllidar_node" ] \
+  ls "$REPO"/lidar/ws/build_*/sllidar_ros2/sllidar_node >/dev/null 2>&1 \
     || die "driver not built — run: lidar/build.sh   (one-off, ~30 s)"
   [ -e "$LIDAR_PORT" ] || die "no $LIDAR_PORT — is the C1's USB cable in? (lsusb: Silicon Labs CP210x)"
   kill_match '[s]llidar_node'
