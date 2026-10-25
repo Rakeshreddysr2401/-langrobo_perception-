@@ -38,6 +38,11 @@ bt_navigator:
     robot_base_frame: base_link
     odom_topic: /odom
     bt_loop_duration: 10
+    # nav2 1.5: the tree is built when bt_navigator ACTIVATES and every action server must answer
+    # within wait_for_service_timeout (default 1000 ms). Under load follow_path came up later:
+    # "Action server follow_path not available" -> bring-up failed, nav2_supervise restarted
+    # after its 60 s hang (twin, 2026-10-25). 5 s only bounds a wait at start-up.
+    wait_for_service_timeout: 5000
     # 1000 ms from 20 (2026-09-28). The BT gives each action server this long
     # to ACKNOWLEDGE a request; on the loaded Jetson (load ~10) the planner,
     # busy in a search, answered late, and the BT failed the whole goal:
@@ -65,6 +70,28 @@ controller_server:
     # 1.6 m goal. At <= 0.25 m/s a command every 0.1 s moves 2.5 cm -- ample --
     # and half the rate is half the CPU. model_dt must equal the period.
     controller_frequency: 10.0
+    # nav2 1.5 (Lyrical, 2026-10-25): the controller now WAITS for a fresh local costmap every
+    # cycle and aborts the goal past costmap_update_timeout (default 0.3 s) -- error 107,
+    # "Costmap timed out waiting for update". nav2 1.3 drove on the last costmap. On the loaded
+    # Jetson the local costmap's 5 Hz update stalls past 0.3 s (gate: 1.7 Hz): twin home_real on
+    # 2.0 failed goal 1 ("nav2 failed 3 times", 9x error 107) and timed out goal 4, where 1.2
+    # reached all 4. 1.0 s = two of its 2 Hz publish periods: still a stop for a dead costmap.
+    costmap_update_timeout: 1.0
+    # nav2 1.5 moved path pruning and cusp handling out of MPPI into a PathHandler plugin. Our
+    # FollowPath.prune_distance / enforce_path_inversion / inversion_* were SILENTLY IGNORED
+    # (ros2 param dump, twin 2026-10-25): enforce_path_inversion fell back to false, so MPPI
+    # blended the lattice's forward and reverse segments at a cusp into a stall -- 8x "Failed to
+    # make progress", goal 4 of twin home_real timed out. Same values as before, new home.
+    # (FollowPath.transform_tolerance has no 1.5 equivalent here: the costmaps keep theirs.)
+    path_handler_plugins: [PathHandler]
+    PathHandler:
+      plugin: nav2_controller::FeasiblePathHandler
+      prune_distance: 1.5
+      # true with reverse paths: at a cusp MPPI stops, then follows the next
+      # segment, instead of blending "forward" and "back" into a stall
+      enforce_path_inversion: true
+      inversion_xy_tolerance: 0.2
+      inversion_yaw_tolerance: 0.4
     odom_topic: /odom
     # Below these the rover is considered stopped. 0.01 matches the firmware's
     # own dead zone in pidStep(), so nav2 and the board agree on "not moving".
@@ -76,7 +103,7 @@ controller_server:
     # FollowPath at once into clear/spin/backup/wait -- 24-36 aborts on goals
     # that then went straight through. The rover is stopped meanwhile.
     failure_tolerance: 2.0
-    progress_checker_plugin: progress_checker
+    progress_checker_plugins: [progress_checker]   # nav2 1.5 name (was progress_checker_plugin)
     goal_checker_plugins: [general_goal_checker]
     controller_plugins: [FollowPath]
 
@@ -200,13 +227,8 @@ controller_server:
       vx_std: 0.2
       vy_std: 0.0
       wz_std: 0.5
-      prune_distance: 1.5
-      transform_tolerance: 0.2
-      # true with reverse paths: at a cusp MPPI stops, then follows the next
-      # segment, instead of blending "forward" and "back" into a stall
-      enforce_path_inversion: true
-      inversion_xy_tolerance: 0.2
-      inversion_yaw_tolerance: 0.4
+      # prune_distance, transform_tolerance and the path-inversion settings moved out of MPPI
+      # in nav2 1.5: see PathHandler above (controller_server level).
       retry_attempt_limit: 1
       regenerate_noises: false         # CPU
       visualize: false                 # true draws the sampled trajectories (CPU)

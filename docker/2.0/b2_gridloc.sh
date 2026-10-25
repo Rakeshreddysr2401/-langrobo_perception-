@@ -2,21 +2,39 @@
 # b2_gridloc.sh -- Part B2: NVIDIA's occupancy-grid localizer vs our relocalize.py, on the SAME
 # live /scan and the SAME saved map. Passive: NVIDIA's nodes live under /b2 and publish only
 # /b2/localization_result; nothing is fed back to the rover, nothing moves.
-#   ~/rover/docker/2.0/b2_gridloc.sh [map name in ~/rover/maps, default last] [runs, default 3]
+#   ~/rover/docker/2.0/b2_gridloc.sh [map name, default last] [runs, default 3]
+#   TWIN=1 ...   the same on the twin (domain 42, container rover_twin, ~/.rover_twin/maps), and
+#                both answers are scored against the twin's TRUE pose (/sim/truth/pose; its frame
+#                `odom` = the world; a SLAM_FRESH map frame starts on it).
 # Needs: the rover container up with ./rover lidar (and robot_state_publisher's TF).
 set -uo pipefail
 MAP=${1:-last}; RUNS=${2:-3}
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+TWIN=${TWIN:-0}
+if [ "$TWIN" = 1 ]; then DOMAIN=42; CT=rover_twin; MAPS=$HOME/.rover_twin/maps; else DOMAIN=0; CT=rover; MAPS=$REPO/maps; fi
 IMAGE=${IMAGE:-orin-nav:2.1}
 B2_PARAMS=${B2_PARAMS:-}   # extra localizer params, python dict body, e.g. "'invalid_range_threshold': 0.25"
-[ -f "$REPO/maps/$MAP.yaml" ] || { echo "no $REPO/maps/$MAP.yaml"; exit 1; }
-ENVSET="unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE; export FASTDDS_BUILTIN_TRANSPORTS=UDPv4; export ROS_DOMAIN_ID=0; for f in /opt/ros/*/setup.bash; do source \$f; done;"
+[ -f "$MAPS/$MAP.yaml" ] || { echo "no $MAPS/$MAP.yaml"; exit 1; }
+ENVSET="unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE; export FASTDDS_BUILTIN_TRANSPORTS=UDPv4; export ROS_DOMAIN_ID=$DOMAIN; for f in /opt/ros/*/setup.bash; do source \$f; done;"
 
-echo "== B2 on map $MAP ($RUNS runs each)"
+echo "== B2 on map $MAP ($RUNS runs each), domain $DOMAIN"
+if [ "$TWIN" = 1 ]; then
+  echo "-- truth (/sim/truth/pose):"
+  docker exec $CT bash -lc "$ENVSET python3 - <<'PY'
+import math, time, rclpy
+from geometry_msgs.msg import PoseStamped
+rclpy.init(); n = rclpy.create_node('b2_truth'); got = []
+n.create_subscription(PoseStamped, '/sim/truth/pose', got.append, 10)
+t0 = time.time()
+while not got and time.time() - t0 < 10: rclpy.spin_once(n, timeout_sec=0.2)
+p = got[-1].pose; q = p.orientation
+print('   truth: x=%.3f y=%.3f yaw=%.1f deg' % (p.position.x, p.position.y, math.degrees(math.atan2(2*(q.w*q.z+q.x*q.y), 1-2*(q.y*q.y+q.z*q.z)))))
+PY" 2>&1 | grep -v XMLPARSER
+fi
 echo "-- ours: phase2/tools/relocalize.py"
 for i in $(seq "$RUNS"); do
   t0=$(date +%s.%N)
-  out=$(docker exec rover bash -lc "$ENVSET python3 /opt/rover2/tools/relocalize.py /maps/$MAP.yaml 2>/dev/null" | grep '^{' | tail -1)
+  out=$(docker exec $CT bash -lc "$ENVSET python3 /opt/rover2/tools/relocalize.py /maps/$MAP.yaml 2>/dev/null" | grep '^{' | tail -1)
   echo "   run $i: $(python3 -c 'import json,sys,math; d=json.loads(sys.argv[1]); p=d.get("pose"); print(d["verdict"], ("x=%.3f y=%.3f yaw=%.1f deg" % (p[0], p[1], math.degrees(p[2]))) if p else "", "--", d.get("why",""))' "$out" 2>/dev/null || echo "$out")  ($(python3 -c "print(round($(date +%s.%N)-$t0,1))") s)"
 done
 
@@ -24,7 +42,7 @@ echo "-- NVIDIA: isaac_ros_occupancy_grid_localizer ($IMAGE) ${B2_PARAMS:+extra 
 docker rm -f b2_gridloc >/dev/null 2>&1
 docker run -d --name b2_gridloc --runtime nvidia --network host --entrypoint bash \
   -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all -e NVIDIA_DISABLE_REQUIRE=1 \
-  -v "$REPO/maps":/maps:ro "$IMAGE" -c "$ENVSET cat > /tmp/b2.launch.py <<'PY'
+  -v "$MAPS":/maps:ro "$IMAGE" -c "$ENVSET cat > /tmp/b2.launch.py <<'PY'
 from launch import LaunchDescription
 from launch_ros.actions import ComposableNodeContainer
 from launch_ros.descriptions import ComposableNode
