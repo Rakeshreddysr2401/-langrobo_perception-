@@ -20,11 +20,9 @@ cd ~/rover
                                     # recipe + checks: docker/2.0/ (ISAAC_ROS_5_UPGRADE.md)
 ```
 
-> **2026-10-18, owner's decision: 1.2 is THE image** for the robot and the twin
-> (twin: every gate OK, home_real 4/4). The first real-robot run is step F of
-> ISAAC_ROS_4_6_UPGRADE.md; 1.1 is kept only as the rollback until it passes.
-> Open: the board switching off a few minutes after boot since a power-supply
-> change (§0 there, OPEN_ISSUES.md).
+> **Since 2026-10-25 the whole robot is on ROS 2 Lyrical**: the Jetson (`orin-nav:2.0`, Isaac
+> ROS 5.0) and the Pi 5 host (`~/ros2_ws/scripts/ros_env.sh`). The older images 1.1/1.2 are
+> deleted; their record is in git history.
 
 It brings up and checks each layer in order: camera (D555 depth) → LiDAR → pose
 → fused pose → slam → nvblox map → nav2 → VLM → ESP32 wheels → Pi 5 teleop +

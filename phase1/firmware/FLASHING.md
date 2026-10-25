@@ -87,8 +87,10 @@ will not compile.
 https://github.com/micro-ROS/micro_ros_arduino/archive/refs/heads/jazzy.zip
 ```
 
-Then Sketch → Include Library → **Add .ZIP Library** → pick that file. The branch
-must be **jazzy**, matching the Pi 5's ROS 2 distro.
+Then Sketch → Include Library → **Add .ZIP Library** → pick that file. Use the
+**jazzy** branch (what the firmware is built and tested with). It does not have to match the
+Pi 5's distro: the ESP32 speaks XRCE to the standalone agent, which bundles its own Fast DDS
+(3.6.2 = Lyrical's); verified 2026-10-25 with the Pi 5 on Lyrical, /wheel_state 20 Hz.
 
 **3. ESP32Encoder.** Library Manager → search `ESP32Encoder` → install the one by
 **madhephaestus**.

@@ -101,19 +101,23 @@ cd ~/kino_sim && ./sim up home_real     # ~1 min; add follow=true for an Isaac w
 
 | repo | read first | then |
 |---|---|---|
-| Jetson `~/rover` | `STARTUP.md` (after a power-on: all boxes, in order, what good looks like), `SYSTEM_OVERVIEW.md` (how it all fits, the topic contract), `OPEN_ISSUES.md` (what is open) | `OPERATIONS.md` (the runbook: calibration, diagnosis), `ARCHITECTURE.md`, `NAV_GUIDE.md`, `LOCALIZATION.md`, `ISAAC_ROS_4_6_UPGRADE.md`, `docker/README.md` (the images) |
+| Jetson `~/rover` | `STARTUP.md` (after a power-on: all boxes, in order, what good looks like), `SYSTEM_OVERVIEW.md` (how it all fits, the topic contract), `OPEN_ISSUES.md` (what is open) | `OPERATIONS.md` (the runbook: calibration, diagnosis), `ARCHITECTURE.md`, `NAV_GUIDE.md`, `LOCALIZATION.md`, `ISAAC_ROS_5_UPGRADE.md` (the 5.0 move + Part B features), `docker/2.0/README.md` (the image) |
 | Pi 5 `~/ros2_ws` | `README.md`, `HOW_IT_WORKS.md`, `TODO.md` (open items at the top) | `ARCHITECTURE_LLD.md`, `OPERATIONS.md` (systemd, health API), `NETWORKING.md`, `INTEGRATION_GAPS.md`, `TELEGRAM.md`, `MAC_MINI_TASKS.md`, `docs/voice/` |
 | Laptop `~/kino_sim` | `README.md`, `CLAUDE.md` (rules for the twin), `docs/STATUS.md` (where things stand, sim-real gaps) | `docs/IMPROVEMENT_LOOP.md` (the method), `docs/PLAN_AGENTS_NAV.md` (the plan), `docs/VERSIONS.md` (exact versions) |
 
-## 6. Versions (2026-10-18)
+## 6. Versions (2026-10-25)
 
 - Laptop: Ubuntu 24.04.5, NVIDIA 580.178.04, Isaac Sim 6.2.0, Isaac Lab 3.0.0,
   Python 3.12, torch 2.11.0 + CUDA 13.0 (details: `~/kino_sim/docs/VERSIONS.md`).
 - Jetson: image `orin-nav:2.0` = Isaac ROS 5.0, ROS 2 Lyrical, CUDA 13.2, TensorRT 10.16,
   VO = Isaac cuVSLAM (`isaac_ros_cuvslam`); recipe + checks in `~/rover/docker/2.0/`.
-  The Pi 5 and the laptop stay on Jazzy for now: topics cross fine (13/13 types tested);
-  nav2 actions differ between the two (only the Jetson calls them).
-- Pi 5: ROS 2 Jazzy on the host.
+- Pi 5: ROS 2 **Lyrical** on the host since 2026-10-25 (NVIDIA's buildfarm, same as the
+  Jetson; Jazzy kept installed as the rollback). The ONE switch: `~/ros2_ws/scripts/ros_env.sh`
+  (`echo jazzy > ~/.langrobo/ros_distro` rolls back); builds: `./scripts/build_ws.sh`.
+  The wheels' micro-ROS agent (XRCE 3.0.1) bundles Fast DDS 3.6.2 = Lyrical's; the ESP32
+  firmware's micro_ros_arduino (jazzy branch) speaks XRCE to it, so it needs no reflash.
+- Laptops: still Jazzy (Isaac Sim 6.2 bundles Humble/Jazzy only; the RViz laptop's apt
+  install) -- the next step, after the robot.
 
 ## 7. Known problems right now
 

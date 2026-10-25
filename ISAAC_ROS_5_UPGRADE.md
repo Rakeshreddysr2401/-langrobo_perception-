@@ -168,6 +168,15 @@ by this plan (JetPack 7.2.1 stays; the host `isaac-ros-cli` 2.5 stays dormant).
 
 ## Log
 
+- **2026-10-25 21:50 — step 5 answered: the Pi 5 moves to Lyrical (owner: "if there are any issues
+  change to Lyrical").** The issue: on the live real graph the Jetson's `image_bridge` writer never
+  matched the Jazzy Pi's readers (0 frame packets to the Pi; brain blind; fine on an isolated test
+  domain) -- OPEN_ISSUES 2026-10-25. Pi 5: NVIDIA buildfarm Lyrical (`~/ros2_ws/scripts/
+  setup_lyrical_root.sh`), one switch `scripts/ros_env.sh`, Jazzy kept as rollback; all services on
+  Lyrical (wheels 20 Hz, sonars 15 Hz, brain). Cold `./rover up` with it: every gate OK except one
+  fused-odom dip (10.5 Hz, the 15 W overload); brain 42 frames/10 s, answered "what do you see" from
+  the camera. `./rover vlm` gate now counts the frames on the Pi 5. Laptops are next (owner: robot first).
+
 - **2026-10-25 11:20 real robot, second session (owner moved it within the room).** Bring-up green; a
   ~1 min WiFi dropout during start-up (router RTT 7-456 ms, Jetson power-save already off) took
   /wheel_state, /cmd_vel subscriber and teleop with it -- recovered on its own. relocalize locked at

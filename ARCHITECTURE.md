@@ -12,9 +12,9 @@ All machines and repos on one page: [SYSTEM_OVERVIEW.md](SYSTEM_OVERVIEW.md). Re
 
 | layer | technology | why this one |
 |---|---|---|
-| OS / middleware | **ROS 2 Jazzy**, Fast-DDS | the version Isaac ROS ships against on Orin |
+| OS / middleware | **ROS 2 Lyrical**, Fast DDS 3.6, on the Jetson (`orin-nav:2.0`) AND the Pi 5 (since 2026-10-25) | the distro Isaac ROS 5.0 ships; one DDS version on both ends (Jazzy on the Pi left the brain blind, OPEN_ISSUES 2026-10-25) |
 | camera | **RealSense D555** — PoE **ethernet DDS**, not USB | it is what the rover has. The ethernet transport is the source of several traps: it pings while dead, and subscribing to raw camera topics can take it offline |
-| visual odometry | **cuVSLAM 16.0.0** via the standalone `pyCuVSLAM` wheel | the packaged `isaac_ros_visual_slam` is a **Thor** build and will not run on this Orin. The wheel is the only path |
+| visual odometry | **Isaac ROS cuVSLAM 5.0** (`isaac_ros_cuvslam`, `phase1/launch/vo_isaac.launch.py`) | Orin-native (sm_87, 0 SVE) since Isaac ROS 4.6/5.0; the 1.x pyCuVSLAM wheel and its Thor-only package are gone with `orin-nav:1.1` |
 | heading | the D555's own **gyro**, complementary-filtered | measured −0.2% to −0.9% error over four 360° turns — better than the wheels can do through scrub |
 | distance | **wheel encoders**, calibrated against a tape | excellent in a straight line, useless mid-turn (§13) |
 | fusion | **fusion2**, an EKF, `phase1/nodes/fusion2.py` (since 2026-09-26) | four sources, each weighted by its own evidence and gated (§5). The Phase 1 complementary filter (`fusion.py`, 20.5 cm / 13° worst) is in git history |

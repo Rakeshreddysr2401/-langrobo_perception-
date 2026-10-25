@@ -2,7 +2,19 @@
 
 How the rover plans and moves, why it is limited, and the fix order F1-F5: [NAV_GUIDE.md](NAV_GUIDE.md) (2026-10-11).
 
-## 2026-10-25 — the brain was blind: camera frames stopped reaching the Pi 5 (fixed by restart, cause open)
+## 2026-10-25 — the brain was blind: camera frames stopped reaching the Pi 5 — FIXED (Pi 5 on Lyrical)
+
+**Cause and fix (2026-10-25 21:00-21:50, measured):** a Jazzy (Fast DDS 2.14) Pi 5 against the
+Lyrical (Fast DDS 3.6) Jetson. With the real graph up, `image_bridge`'s writer matched only the
+Jetson's own readers: a raw-socket count on the Jetson showed **0 frame packets sent to the Pi**
+(nor to the laptop), while discovery traffic flowed both ways; a restart matched one fresh reader,
+then the next fresh reader got 0 again a minute later. On an isolated test domain (77) the same
+writer matched 8/8 and 6/6 fresh Jazzy readers, also under a 20 MB/s local load, so it is not
+size, WiFi or load alone -- a cross-version matching fault in the live graph. **The Pi 5 moved to
+Lyrical** (`~/ros2_ws` lyrical-move, `scripts/ros_env.sh`): 5/5 fresh Pi readers 38-42 frames/10 s,
+`agent_node` 42 frames/10 s, "Kino, what do you see?" answered from the camera in 11 s.
+**Gate gap closed:** `./rover vlm` now also counts the frames ON the Pi 5 ("received on the Pi 5").
+
 
 | what | evidence | status |
 |---|---|---|
@@ -89,8 +101,8 @@ numbers: [NAV_PLAN.md](NAV_PLAN.md) "Session 2026-10-19"; how it works now:
 
 ## 2026-10-18 — Isaac ROS 4.6 upgrade: `orin-nav:1.2` built, twin run (step E) passed; real-robot run (F) next
 
-The plan, the reasons, the rules (never touch `orin-nav:1.1`) and the gate (the Jetson froze
-four times after today's power change: fix that first): [ISAAC_ROS_4_6_UPGRADE.md](ISAAC_ROS_4_6_UPGRADE.md).
+Done and superseded by Isaac ROS 5.0 (`orin-nav:2.0`); the plan is in git history
+(`git log -- ISAAC_ROS_4_6_UPGRADE.md`).
 
 ## 2026-10-18 — the twin moves to Isaac Sim (new laptop)
 
