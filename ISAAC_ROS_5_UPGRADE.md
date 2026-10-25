@@ -168,6 +168,18 @@ by this plan (JetPack 7.2.1 stays; the host `isaac-ros-cli` 2.5 stays dormant).
 
 ## Log
 
+- **2026-10-25 B1 + B5 set up and measured (no robot motion).**
+  **B1 MPS:** passwordless sudo on the Jetson host → `ops/mps.sh start|stop|status`; `MPS=1 ./rover up`
+  mounts the pipe (off by default). Orin + container client verified (`nvidia-cuda-mps-server -force-tegra`).
+  cuVSLAM + nvblox together, synthetic: no difference (30.0 Hz both; nvblox 4.8 vs 5.0 Hz) → needs the full
+  stack with YOLO on the twin before it can be called better.
+  **B5 people:** owner accepted the NGC EULA for PeopleSemSegNet ShuffleSeg (AMR) → `~/rover/models/isaac/`
+  (engine built on this Orin: 6.7 ms GPU at 960x544). `phase4/tools/peopleseg_check.py` on 2 real drives,
+  800 frames: **recall 5/8 YOLO person boxes (62 %)** -- full masks facing the camera, partial side-on/far;
+  **false marks 0.00-0.14 % of pixels** on 792 person-free frames; 17.6-20.1 ms per frame wall (YOLO 12.7-14.2).
+  Note: the engine's output is INT64 although NVIDIA's config.pbtxt says INT32. Not yet in the map: next is
+  the mask into nvblox's people mode or ghost_clear, tested on the twin with a walking person.
+
 - **2026-10-25 regression suite on 2.0** (kino_sim `tools/run_suite.sh`, fresh twin + fresh stack per
   world, judged on the truth; log `~/kino_sim/build/run_20261025/suite_2.0.log`): **0 touches**.
   door49 2/2 in 80 + 81 s (1.x: 119 + 72 s). apt_hard 7/7, 0 touches (1.x: 6/6 with a −18 cm touch at
