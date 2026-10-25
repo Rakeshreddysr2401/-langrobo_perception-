@@ -62,6 +62,12 @@ bt_navigator:
 
 controller_server:
   ros__parameters:
+    # nav2 1.5 publishes geometry_msgs/TwistStamped by DEFAULT (1.3: Twist). collision_monitor,
+    # turn_shaper, goal_exec and the ESP32 firmware speak Twist, so a stamped smoother output
+    # never reached them: on the twin (2026-10-25) EVERY nav2 command was dropped at
+    # /cmd_vel_smoothed (TwistStamped pub, Twist sub) and nav2 never moved the rover -- reach's
+    # fallback moves did. Every nav2 node that publishes a velocity is plain Twist, explicitly.
+    enable_stamped_cmd_vel: false
     use_sim_time: false
     # 10 Hz (NAV_PLAN.md N3). It was 20, and on 2026-09-28 the Jetson (load
     # 9 on 6 cores, OPEN_ISSUES #1) held MPPI at 8.7 Hz: "Control loop missed
@@ -908,6 +914,12 @@ local_costmap:
 
 behavior_server:
   ros__parameters:
+    # nav2 1.5 publishes geometry_msgs/TwistStamped by DEFAULT (1.3: Twist). collision_monitor,
+    # turn_shaper, goal_exec and the ESP32 firmware speak Twist, so a stamped smoother output
+    # never reached them: on the twin (2026-10-25) EVERY nav2 command was dropped at
+    # /cmd_vel_smoothed (TwistStamped pub, Twist sub) and nav2 never moved the rover -- reach's
+    # fallback moves did. Every nav2 node that publishes a velocity is plain Twist, explicitly.
+    enable_stamped_cmd_vel: false
     use_sim_time: false
     local_frame: odom
     global_frame: odom
@@ -958,6 +970,12 @@ behavior_server:
 
 velocity_smoother:
   ros__parameters:
+    # nav2 1.5 publishes geometry_msgs/TwistStamped by DEFAULT (1.3: Twist). collision_monitor,
+    # turn_shaper, goal_exec and the ESP32 firmware speak Twist, so a stamped smoother output
+    # never reached them: on the twin (2026-10-25) EVERY nav2 command was dropped at
+    # /cmd_vel_smoothed (TwistStamped pub, Twist sub) and nav2 never moved the rover -- reach's
+    # fallback moves did. Every nav2 node that publishes a velocity is plain Twist, explicitly.
+    enable_stamped_cmd_vel: false
     use_sim_time: false
     smoothing_frequency: 20.0
     scale_velocities: false
