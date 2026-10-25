@@ -8,7 +8,9 @@ set -uo pipefail
 IMAGE=${1:-orin-nav:2.0}
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 echo "== vo_check $IMAGE"
-docker run --rm --runtime nvidia --network none --entrypoint bash \
+# MPS=1: run through the host CUDA MPS daemon (B1; start it with ~/rover/ops/mps.sh start)
+MPSARGS=(); [ "${MPS:-0}" = 1 ] && MPSARGS=(--ipc=host -v /tmp/nvidia-mps:/tmp/nvidia-mps -e CUDA_MPS_PIPE_DIRECTORY=/tmp/nvidia-mps)
+docker run --rm --runtime nvidia --network none "${MPSARGS[@]}" --entrypoint bash \
   -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all -e NVIDIA_DISABLE_REQUIRE=1 \
   -v "$HOME/.cache/rover-cuda/vo_check":/root/.nv/ComputeCache -e CUDA_CACHE_MAXSIZE=4294967296 \
   -e ROS_DOMAIN_ID=99 -e FASTDDS_BUILTIN_TRANSPORTS=UDPv4 \

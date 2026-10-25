@@ -365,10 +365,18 @@ start_container(){
   mkdir -p "$cuda_cache"
   # phase1/ is mounted READ-ONLY: edit a node on the host, restart the layer,
   # no rebuild. The image has no build recipe, so it must never be modified.
+  # MPS=1: every CUDA user in the container goes through the host's MPS daemon (ops/mps.sh start;
+  # ISAAC_ROS_5_UPGRADE.md B1). Off by default until it is measured better on the full stack.
+  local mps_args=()
+  if [ "${MPS:-0}" = 1 ]; then
+    [ -S /tmp/nvidia-mps/control ] || die "MPS=1 but no MPS daemon: ops/mps.sh start"
+    mps_args=(--ipc=host -v /tmp/nvidia-mps:/tmp/nvidia-mps -e CUDA_MPS_PIPE_DIRECTORY=/tmp/nvidia-mps)
+    echo "  MPS: GPU shared through the host daemon"
+  fi
   docker run -d --name "$NAME" --entrypoint /bin/bash \
     --runtime=nvidia --network=host --privileged \
     -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all -e NVIDIA_DISABLE_REQUIRE=1 \
-    -e ROS_DOMAIN_ID=$DOMAIN "${twin_mount[@]}" \
+    -e ROS_DOMAIN_ID=$DOMAIN "${twin_mount[@]}" "${mps_args[@]}" \
     -v "$cuda_cache":/root/.nv/ComputeCache -e CUDA_CACHE_MAXSIZE=4294967296 \
     -v "$HOSTSRC":$SRC:ro \
     -v "$REPO/phase2":$SRC2:ro \
