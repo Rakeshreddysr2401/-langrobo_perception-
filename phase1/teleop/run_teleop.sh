@@ -2,13 +2,11 @@
 # LangRobo mobile teleop web server (hold-to-move -> /cmd_vel).
 # Mirrors the brain's ROS env: domain 0, FastRTPS, plain multicast (NOT the
 # discovery server) so it shares the graph with the micro-ROS agent + Jetson.
-# ROS distro: the Pi 5's one switch (~/ros2_ws/scripts/ros_env.sh), Lyrical since
-# 2026-10-25; `echo jazzy > ~/.langrobo/ros_distro` rolls back.
+# ROS 2 Lyrical, the Pi 5's only distro since 2026-10-25 (as ~/ros2_ws/scripts/ros_env.sh).
 set -eo pipefail
 
-D="${KINO_ROS_DISTRO:-$(cat "$HOME/.langrobo/ros_distro" 2>/dev/null || echo lyrical)}"
 set +u
-source "/opt/ros/$D/setup.bash"
+source /opt/ros/lyrical/setup.bash
 set -u
 
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-0}"
