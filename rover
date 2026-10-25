@@ -802,7 +802,7 @@ slam)
       echo "[slam] where am I in the saved room? (one lidar scan against maps/last)"
       # NVIDIA's localizer first if ./rover lidar started it (orin-nav:2.1), else straight to the search
       fast=--no-fast; rexec "pgrep -f '[g]ridloc.launch.py'" >/dev/null 2>&1 && fast=
-      rl=$(rexec "python3 $SRC2/tools/relocalize.py /maps/last.yaml ${hint:+--hint $hint} $fast" 2>/dev/null | grep '^{' | tail -1 || true)
+      rl=$(rexec "python3 $SRC2/tools/relocalize.py /maps/last.yaml ${hint:+--hint=$hint} $fast" 2>/dev/null | grep '^{' | tail -1 || true)
       verdict=$(printf '%s' "$rl" | python3 -c 'import json,sys; print(json.load(sys.stdin)["verdict"])' 2>/dev/null || echo lost)
       echo "        $verdict: $(printf '%s' "$rl" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["why"])' 2>/dev/null || echo 'no answer')"
       echo "        ($(printf '%s' "$rl" | python3 -c 'import json,sys; d=json.load(sys.stdin); print("%s, %s s%s" % (d.get("method","search"), d.get("secs","?"), ("; fast path: " + d["fast"]) if d.get("fast") else ""))' 2>/dev/null || echo '?'))"
