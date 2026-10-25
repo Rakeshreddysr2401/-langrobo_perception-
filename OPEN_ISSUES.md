@@ -2,6 +2,17 @@
 
 How the rover plans and moves, why it is limited, and the fix order F1-F5: [NAV_GUIDE.md](NAV_GUIDE.md) (2026-10-11).
 
+## 2026-10-25 — collision_monitor drops a LiDAR cycle when odom TF is late (twin, measured)
+
+nav2 1.5's collision_monitor (`base_shift_correction: true`) looks up odom -> base_link AT the scan's
+stamp. 150 x "Lookup would require extrapolation into the future" in ~40 min on the twin = ~0.6 % of
+cycles: that cycle runs without the LiDAR (sonars still in). Measured 60 s: fusion2's odom TF arrives
+19.1 Hz but already **53 ms old** (median; max 410 ms); scans arrive 107 ms after their stamp and **16 %**
+carry a stamp newer than the newest TF. So the cause is fusion2 stamping its pose late, not the
+monitor; very likely older than Isaac ROS 5 (fusion2 is unchanged), only reported now. Options, not
+yet chosen: fusion2 publishes TF propagated to "now" (gyro + velocity); or base_shift_correction off
+(no lookup, but a 0.1-0.2 s old scan at 0.9 rad/s is up to ~10 deg off). Measure on the real robot first.
+
 ## 2026-10-21 — YOLO on TensorRT + lock-and-track (CLOSED_LOOP_PLAN.md stages 1-4, branch `detector-trt`)
 
 First step of the closed-loop "go near X" plan ([CLOSED_LOOP_PLAN.md](CLOSED_LOOP_PLAN.md)).
