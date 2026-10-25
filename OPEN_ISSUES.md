@@ -1,6 +1,16 @@
-# Open issues — where things stand (newest first; last updated 2026-10-21)
+# Open issues — where things stand (newest first; last updated 2026-10-25)
 
 How the rover plans and moves, why it is limited, and the fix order F1-F5: [NAV_GUIDE.md](NAV_GUIDE.md) (2026-10-11).
+
+## 2026-10-25 — the brain was blind: camera frames stopped reaching the Pi 5 (fixed by restart, cause open)
+
+| what | evidence | status |
+|---|---|---|
+| Telegram 19:56-19:58 IST: "go near the door" -> "My camera feed isn't giving me a fresh image"; "send me the pic" -> "no current camera frame". Movement (L:180, F:100) worked | Pi 5 `~/.ros/log/python3_1824_*.log` | fixed by `./rover vlm` |
+| `image_bridge` published 4 Hz **on the Jetson** (the vlm gate passed, `ros2 topic bw` 16 KB/msg) and the Pi 5 **discovered** it, but a fresh Pi 5 subscriber got **0 frames in 12 s** (reliable and best-effort alike). `/scan` reached the Pi fine | `ros2 topic info -v`: QoS and type hash match on both ends | — |
+| Not the network: a probe publishing 1/4/8/16/32 KB Strings over the same Wi-Fi (MTU 1500) delivered 82/82 of every size | probe from the container -> Pi 5 subscriber | — |
+| Restarting the vlm layer alone (`./rover vlm`) brought it back: 47 frames / 12 s on the Pi | | **cause open** — `image_bridge` had started at the moment nav2's bringup hung and was restarted (`/tmp/nav_restarts.log`, 14:16 UTC) |
+| **The gap: the vlm gate only measures the rate on the Jetson**, so a bridge that the Pi cannot hear passes green | | next: have `./rover up` / `./rover vlm` check delivery from the Pi 5 side (frame_age of agent_node, or a Pi-side count) |
 
 ## 2026-10-25 — collision_monitor drops a LiDAR cycle when odom TF is late (twin, measured)
 
