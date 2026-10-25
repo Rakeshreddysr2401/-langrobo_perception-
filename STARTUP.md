@@ -619,6 +619,29 @@ left. The difference is deliberate in some places and a known gap in others.
   refuses; driving the rover to a new spot with the phone leaves it in MANUAL.
 - **`./rover wheels --nudge` first** after any power cycle (§4): a healthy link
   rate says nothing about motor power.
+- **Pause YOLO, follow and track while driving** until the overload is fixed (OPEN_ISSUES R8):
+  with all of them up on the real robot (2026-10-25) `/odom` fell to 14.7 Hz and the gyro to 104 Hz;
+  without them `/odom` held 19.8 Hz. `./rover detect` / `follow` / `track` bring them back.
+- **If the D555 does not come up after a power cycle**, look at the Jetson's Ethernet first:
+  `cat /sys/class/net/enP8p1s0/carrier` -- `0` is a cable / PoE problem (re-seat the plug at
+  both ends, check the injector's light), not the camera's software (2026-10-25).
 - **Turns slide.** A plain turn "in place" moves the centre ~30 cm per 90°
   ([LOCALIZATION.md](LOCALIZATION.md)). Give turns room, and use
   `./rover drive` when the position after a turn matters.
+
+## 10. The whole-home map — once, with the owner watching
+
+The brain's "go to the bedroom" needs ONE map of the whole home that survives power cycles
+(`maps/last.*`, resumed by `./rover slam`) and the rooms saved in it by name. Do this once:
+
+1. `SLAM_FRESH=1 ./rover up`, then `./rover wheels --nudge`. Pause YOLO/follow/track (§9).
+2. Map it: either drive slowly room to room with the phone (teleop), **or** `./rover explore 30`
+   and walk behind it (frontier exploration through `reach`; twin home_real: whole house in
+   8.9 min). Doors open; nothing on the floor you do not want it to drive at.
+3. In each room, stop and tell the brain on Telegram: "save this place as bedroom" (the
+   `save_location` tool; places are stored per room id, `/home/room`).
+4. `./rover slam --save home` (a named copy), and `./rover stop` (saves `maps/last.*`).
+5. Next start, `./rover slam` says where it is in that map ("locked"), and "go to the bedroom"
+   works. Optional, for cuVGL (camera "where am I?"): record the same drive with
+   `phase2/tools/record_cuvgl.sh home 300` -- it loads the Jetson, so drive slowly.
+

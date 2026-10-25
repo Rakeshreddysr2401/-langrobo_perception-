@@ -43,7 +43,7 @@ brain → LangGraph Studio → Pi 5 voice + Bluetooth speaker → RViz on the la
   does not prove the motor supply is on. Teleop must be in AUTO.
 - Stop: `./rover stop` (OPERATIONS.md).
 
-## Where it stands (2026-10-04)
+## Where it stands (2026-10-25)
 
 | | what | status |
 |---|---|---|
@@ -55,6 +55,8 @@ brain → LangGraph Studio → Pi 5 voice + Bluetooth speaker → RViz on the la
 | **M5 Safe navigation** | nav2 on the fused pose, LiDAR + depth obstacles, 5 cm margin, collision monitor | nav2 drives on fusion2; nav2 route + goal_exec finish 1.3 cm (`navto --exact`); tight gaps by `./rover pass` (3 cm margin): a 55 cm gap passed at 1.1 cm. Close quarters (2026-10-03): no blind Spin, depth into the map only when not turning, 3 cm map slice; ~50 cm gaps pass, **45 cm cannot be promised** and things under 3 cm are not seen (OPEN_ISSUES.md). 2026-10-04: marks people leave in the camera map are erased by the LiDAR (`ghost_clear`), low things stay; on "no path" `reach` drives back along its own trail and stops repeating a failure |
 | **Brain (B1–B3)** | the Pi 5's LangGraph brain drives through `reach` / `goal_exec`, finds things from its own photos (`pixel_to_goal` on the held photo), checks on arrival | ✅ floor-tested 2026-09-26 → 10-02 ([INTELLIGENCE_PLAN.md](INTELLIGENCE_PLAN.md)) |
 | **Twin** | the laptop's `kino_sim` simulates the robot's HARDWARE in Isaac Sim and THIS code runs on it unchanged, `TWIN=1 ./rover up`, on ROS domain 42, judged on the true pose -- with the Pi 5 brain too (`fleet.sh twin` on the Pi 5; real-looking `home_real` world) | ✅ Isaac day 2026-10-18: every gate OK; `reach 1.0 -0.6 90` believed vs true 0.4 cm; home_real 4/4 reached through the 80 cm door, over the 1 cm tablet as the robot does ([SYSTEM_OVERVIEW.md](SYSTEM_OVERVIEW.md)) |
+| **Isaac ROS 5** | `orin-nav:2.0` (Isaac ROS 5.0, ROS 2 Lyrical) from `docker/2.0/Dockerfile`; 2.1 adds the Part B packages | ✅ 2026-10-25: twin home_real 4/4 in 159 s (4.6: 271 s), 0 touches in the regression suite; **real robot driven**: reach goals 0.6-3.2 cm, nav2 drives the wheels. Three silent nav2 1.5 breaks found and fixed (Twist!). Checks: `docker/2.0/*.sh` ([ISAAC_ROS_5_UPGRADE.md](ISAAC_ROS_5_UPGRADE.md)) |
+| **Explore** | the rover maps the home by itself: frontiers of the LiDAR map, every goal through `reach` | twin home_real: whole house in 8.9 min, "no frontier left" (`./rover explore`); **not yet run on the real robot** |
 
 Numbers and how each was measured: [LOCALIZATION.md](LOCALIZATION.md).
 What is still missing, measured: [LOCALIZATION_GAPS.md](LOCALIZATION_GAPS.md).
@@ -69,13 +71,15 @@ Making the brain use all this (object memory, exact moves, fast detection, learn
 |---|---|
 | `rover` | the launcher: one layer at a time, each gated on the one below |
 | `description/` | **the rover's shape**: `params.yaml` (every measurement, with status and date) → `rover.urdf`, `cad/rover.step`; `description/build` also checks every other copy of those numbers |
-| `phase1/nodes/` | the pose: `vo_node` (cuVSLAM), `gyro_node`, `lidar_odom` (+ node), `fusion2` (+ node), `health`, the calibration tools (`floor_calib`, `cam_lidar_calib`) |
+| `phase1/nodes/` | the pose: `vo_isaac` (Isaac cuVSLAM; `vo_node` = the old pyCuVSLAM path, self-test only), `gyro_node`, `lidar_odom` (+ node), `fusion2` (+ node), `health`, the calibration tools (`floor_calib`, `cam_lidar_calib`) |
 | `phase1/harness/` | **the test harness**: `./rover record <scenario>` drives or records a run, `./rover grade` scores every estimate against LiDAR truth |
 | `phase1/firmware/` | ESP32: motors, encoders, telemetry |
 | `lidar/` | the RPLidar C1 driver build and its calibration (yaw by driving, timestamp lag) |
 | `phase2/` | mapping: nvblox (depth → obstacles 5-27 cm), slam_toolbox, RViz |
 | `phase3/` | nav2 (costmaps: nvblox + LiDAR), `./rover drive` exact moves |
 | `phase4/` | the VLM bridge: `image_bridge` (photos for the brain), `pixel_to_goal` (pixel → goal), `detections_3d` (opt-in YOLO) |
+| `docker/2.0/` | **the image**: Dockerfile (+ `Dockerfile.features` for 2.1) and its checks: `check.sh`, `vo_check.sh`, `nvblox_check.sh`, `nav2_check.sh`, `topic_audit.sh`, `param_audit.sh`, `tf_lag.sh`, `b2_gridloc.sh`, `b3_cuvgl.sh` |
+| `ops/` | `rover_watchdog.py`, `mps.sh` (CUDA MPS, B1) |
 | `docs/archive/` | history: the phase logs, the old TODO and READINESS, the knowledge notes |
 
 The Pi 5 brain (LangGraph, voice, teleop) is a separate repo: `~/ros2_ws` on the Pi.
@@ -98,6 +102,11 @@ description/build                  # after any measurement change: URDF, CAD, dr
 ./rover goto X Y [DEG]             # an exact move, relative (DRIVES); --map / --odom for frames
 ./rover navto X Y DEG [--exact]    # nav2 plans the route; --exact: goal_exec finishes to ~1 cm (DRIVES)
 ./rover pass [D] [--dry]           # find the tight gap ahead, crawl straight through, 3 cm margin (DRIVES)
+./rover explore [minutes]          # map the home by itself, frontier by frontier, via reach (DRIVES; a person watches)
+
+docker/2.0/topic_audit.sh          # topics whose publishers and subscribers disagree on the type (stack up)
+docker/2.0/param_audit.sh          # nav2.yaml keys the running nav2 silently ignores (stack up)
+ops/mps.sh start; MPS=1 ./rover up # GPU shared through CUDA MPS (off by default: no gain measured yet)
 ```
 
 [OPERATIONS.md](OPERATIONS.md) has the rest and the troubleshooting;
