@@ -168,6 +168,19 @@ by this plan (JetPack 7.2.1 stays; the host `isaac-ros-cli` 2.5 stays dormant).
 
 ## Log
 
+- **2026-10-25 B3 cuVGL end to end on the twin.** Recorded 238 s of the twin's IR pair while it drove
+  home_real (`TWIN=1 phase2/tools/record_cuvgl.sh`, 5.5 GB, ~/.rover_twin/logs/bags); built on the
+  Jetson with `create_map_offline.py` (edex + compute_poses: cuVSLAM map, 21.7 m of keyframes) and
+  `create_cuvgl_map.py --feature_type=sift` (37 s, 127 MB; **ALIKED cannot be built by TensorRT for SM 87**
+  -- "no implementation for Conv + Selu"). Live (`docker/2.0/b3_cuvgl.sh`, cuVGL 1 Hz while the twin
+  drove): **19/19 answers right, median 4.0 cm, p90 9.6 cm, heading 3.4 deg** (map->world fit −0.5 deg,
+  4/6 cm: the map frame is the recording's start). But it answered only **19 of ~216 tries**: the rest
+  rejected for too little feature coverage (0.11-0.17 < 0.2) in the twin's plain rooms. Needed
+  `phase2/nodes/cuvgl_relay.py`: the driver stamps infra2's camera_info with infra1's frame and cuVGL
+  matches by frame. Real house: owner drive with record_cuvgl.sh.
+  Recording at 27 MB/s while driving: one wall touch −0.9 cm (run without recording: 0 touches, 151 s);
+  record maps standing-still-heavy or slower. Pose err on goal 1 varies 3.8-18.4 cm run to run (open).
+
 - **2026-10-25 B1 + B5 set up and measured (no robot motion).**
   **B1 MPS:** passwordless sudo on the Jetson host → `ops/mps.sh start|stop|status`; `MPS=1 ./rover up`
   mounts the pipe (off by default). Orin + container client verified (`nvidia-cuda-mps-server -force-tegra`).

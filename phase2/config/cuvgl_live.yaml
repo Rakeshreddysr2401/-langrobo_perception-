@@ -1,0 +1,10 @@
+# cuVGL's LIVE inputs: phase2/nodes/cuvgl_relay.py's re-framed IR pair (see its docstring).
+# The map is built from a bag with phase2/config/cuvgl_d555.yaml (the raw driver topics).
+stereo_cameras:
+  - name: front_stereo_camera
+    left: /cuvgl/left/image
+    left_camera_info: /cuvgl/left/camera_info
+    left_frame_id: vslam_left_optical
+    right: /cuvgl/right/image
+    right_camera_info: /cuvgl/right/camera_info
+    right_frame_id: vslam_right_optical
