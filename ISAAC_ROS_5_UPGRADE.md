@@ -168,6 +168,18 @@ by this plan (JetPack 7.2.1 stays; the host `isaac-ros-cli` 2.5 stays dormant).
 
 ## Log
 
+- **2026-10-25 11:00 real robot, motors ON, owner present (step 8 with motion).** All gates green on 2.0
+  (camera 30 Hz after a physical PoE re-seat: the Jetson port had no carrier). Fixed live: stray `c` before
+  reach_node.py's shebang (accidental edit); ./rover lidar checked the old build/ path (8534029); relocalize
+  hint with a negative x parsed as an option -> 'lost: no answer' (995b6aa). Audits = twin (1 benign type
+  split, 14 inert params). **Real overload R8 again: load 30-44, /odom 14.7 Hz, gyro 104 Hz** with YOLO,
+  follow, track, image_bridge up; paused them -> /odom 19.8, VO 30.2, gyro 173. Motion: nudge OK (both
+  sides); reach 0.6 m forward 5.4 s, 0.9 cm; **nav2 goals drive the real wheels** (Twist fix): 0.6 m back
+  66 s with 2 collision_monitor stops ('invalid source' after the laser TF extrapolation) + 1 progress
+  abort; 0.5 m forward 10.9 s; reach 90 deg turn in a tight spot 52 s, 8.5 cm (goal_exec refused a leg,
+  then nav2 + finish). Fused == lidar odom to the mm throughout. One unexplained nav2 start pose log
+  (-0.12, -0.60) when TF/odom said (0.64, 0.01). Paused for the owner to move the rover to another room.
+
 - **2026-10-25 B3 cuVGL end to end on the twin.** Recorded 238 s of the twin's IR pair while it drove
   home_real (`TWIN=1 phase2/tools/record_cuvgl.sh`, 5.5 GB, ~/.rover_twin/logs/bags); built on the
   Jetson with `create_map_offline.py` (edex + compute_poses: cuVSLAM map, 21.7 m of keyframes) and
