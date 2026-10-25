@@ -23,7 +23,15 @@ This finds the pose instead of assuming it:
 
 `verdict` is one of: 'locked' (use it), 'ambiguous' (two places fit), 'lost'
 (nothing fits: a new room, or the furniture moved a lot). Pure numpy + cv2:
-~1-3 s on the Orin for a home-sized map.
+~1-3 s on the Orin for a home-sized map (5-9 s measured on the twin's house, 2026-10-25).
+
+FAST PATH (Isaac ROS 5.0, ISAAC_ROS_5_UPGRADE.md B2): if NVIDIA's occupancy-grid localizer is
+up (phase2/launch/gridloc.launch.py, ./rover lidar starts it on orin-nav:2.1), its answer comes
+first -- 0.6 s, 4.0-4.5 cm on the twin -- and is used only if THIS scan agrees with it
+(>= FAST_HITS of the beams on walls) and it is near --hint (the last saved pose). Its search
+cannot say "two places fit", so a far-away answer, or no hint, goes to the full search below. On
+the cramped real 3.5 m room it was wrong (10-27 % of beams on walls): the check catches that.
+`method` in the JSON says which one answered.
 """
 import math
 
@@ -36,6 +44,10 @@ LOCK_HITS = 0.60        # and this fraction of endpoints on walls
 MARGIN = 0.10           # the runner-up somewhere else must score this much lower
 ELSEWHERE_M = 0.5       # "somewhere else": farther than this, or ...
 ELSEWHERE_DEG = 25.0    # ... turned more than this
+FAST_HITS = 0.85        # NVIDIA's answer is used only with this fraction of beams on walls
+                        # (twin: right answers 0.99-1.00; real wrong ones 0.10-0.27)
+FAST_NEAR_M = 1.0       # ... and within this of the hint (the last saved pose)
+FAST_NEAR_DEG = 30.0
 
 
 def load_map(yaml_path):
@@ -193,23 +205,33 @@ def conflict(occupied, free, res, ox, oy, pts, pose, clear=0.15):
     return float(bad.sum() / len(pts))
 
 
-def read_scan(timeout=10.0):
-    """One /scan and the laser's pose in base_link, from the live robot (or twin)."""
+def read_inputs(timeout=10.0, fast=True, wait_s=6.0, answer_s=3.0):
+    """One /scan + the laser's pose in base_link, and (fast=True) NVIDIA's localizer answer
+    (/gridloc, gridloc.launch.py) -> (points or None, (x, y, theta) or None). ONE node for both, so
+    ROS discovery is paid once and the scan arrives while the localizer searches (2026-10-25:
+    two nodes cost 2.6 s of the fast path's 3.6 s)."""
+    import time
     import rclpy
     import tf2_ros
+    from geometry_msgs.msg import PoseWithCovarianceStamped
     from rclpy.qos import QoSProfile, ReliabilityPolicy
     from sensor_msgs.msg import LaserScan
+    from std_srvs.srv import Empty
     rclpy.init()
     n = rclpy.create_node('relocalize')
-    box = {}
+    box, got = {}, []
     n.create_subscription(LaserScan, '/scan', lambda m: box.__setitem__('s', m),
                           QoSProfile(depth=2, reliability=ReliabilityPolicy.BEST_EFFORT))
     buf = tf2_ros.Buffer()
     tf2_ros.TransformListener(buf, n)
-    import time
-    end, lp = time.time() + timeout, None
-    while time.time() < end and ('s' not in box or lp is None):
-        rclpy.spin_once(n, timeout_sec=0.1)
+    cli = None
+    if fast:
+        n.create_subscription(PoseWithCovarianceStamped, '/gridloc/localization_result', got.append, 5)
+        cli = n.create_client(Empty, '/gridloc/trigger_grid_search_localization')
+    t0 = time.time()
+    lp, asked, asked_at = None, False, None
+    while time.time() - t0 < max(timeout, wait_s + answer_s):
+        rclpy.spin_once(n, timeout_sec=0.05)
         if 's' in box and lp is None:
             try:
                 t = buf.lookup_transform('base_link', box['s'].header.frame_id, rclpy.time.Time()).transform
@@ -218,12 +240,31 @@ def read_scan(timeout=10.0):
                       math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z)))
             except Exception:  # noqa: BLE001 -- not yet
                 pass
+        if cli is not None and not asked and cli.service_is_ready():
+            cli.call_async(Empty.Request())
+            asked, asked_at = True, time.time()
+        scan_done = 's' in box and lp is not None
+        fast_done = (cli is None or got or (asked and time.time() - asked_at > answer_s)
+                     or (not asked and time.time() - t0 > wait_s))
+        if scan_done and fast_done:
+            break
+        if not scan_done and time.time() - t0 > timeout:
+            break
+    nv = None
+    if got:
+        p, q = got[0].pose.pose.position, got[0].pose.pose.orientation
+        nv = (p.x, p.y, math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z)))
     n.destroy_node()
     rclpy.shutdown()
     if 's' not in box or lp is None:
-        return None
+        return None, nv
     s = box['s']
-    return scan_points(s.ranges, s.angle_min, s.angle_increment, lp)
+    return scan_points(s.ranges, s.angle_min, s.angle_increment, lp), nv
+
+
+def read_scan(timeout=10.0):
+    """One /scan and the laser's pose in base_link (no localizer query)."""
+    return read_inputs(timeout, fast=False)[0]
 
 
 def main():
@@ -232,14 +273,30 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('map_yaml')
     ap.add_argument('--hint', help='x,y,theta: where the rover probably is (one more candidate, not trusted)')
+    ap.add_argument('--no-fast', action='store_true', help='skip NVIDIA\'s localizer, always run the full search')
     a = ap.parse_args()
-    pts = read_scan()
+    import time
+    t0 = time.time()
+    pts, nv = read_inputs(fast=not a.no_fast)
     if pts is None:
         print(json.dumps(dict(verdict='lost', pose=None, why='no /scan or no base_link -> laser transform')))
         return 2
     occ, free, res, ox, oy = load_map(a.map_yaml)
     hint = tuple(float(v) for v in a.hint.split(',')) if a.hint else None
+    fast_note = 'not running' if nv is None else ''
+    if nv is not None:
+        hits = agreement(occ, res, ox, oy, pts, nv)
+        near = hint is not None and math.hypot(nv[0] - hint[0], nv[1] - hint[1]) <= FAST_NEAR_M \
+            and abs(math.degrees(_wrap(nv[2] - hint[2]))) <= FAST_NEAR_DEG
+        if hits >= FAST_HITS and near:
+            print(json.dumps(dict(verdict='locked', pose=nv, score=None, hits=round(hits, 3), runner_up=None,
+                                  method='nvidia', secs=round(time.time() - t0, 1),
+                                  why=f'NVIDIA grid localizer, checked: {100 * hits:.0f} % of beams on walls, near the hint')))
+            return 0
+        fast_note = (f'answer had {100 * hits:.0f} % of beams on walls' if hits < FAST_HITS else
+                     'no hint to check it against' if hint is None else 'answer far from the hint')
     out = relocalize(occ, free, res, ox, oy, pts, hint=hint)
+    out.update(method='search', secs=round(time.time() - t0, 1), fast=fast_note or None)
     print(json.dumps(out))
     return 0 if out['verdict'] == 'locked' else 1
 
