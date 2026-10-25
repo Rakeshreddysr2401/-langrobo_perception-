@@ -962,6 +962,17 @@ vlm)
   echo
   echo "  GATE vlm:"
   assert_rate /camera/color/image_raw/compressed 2 "compressed color (for Pi5)" || true
+  # Sent is not received (2026-10-25): 4 Hz here, 0 frames at the Pi 5 for hours -- the brain was
+  # blind while the line above said OK. So count where the frames are used, on the Pi 5.
+  hz=$(timeout 30 ssh -n -o BatchMode=yes -o ConnectTimeout=8 "$LAPTOP_USER@$PI5_HOST" \
+       "source ~/ros2_ws/scripts/ros_env.sh >/dev/null 2>&1; export ROS_DOMAIN_ID=$DOMAIN; unset ROS_DISCOVERY_SERVER; \
+        python3 ~/ros2_ws/scripts/topic_rates.py -d 5 /camera/color/image_raw/compressed" 2>/dev/null | awk '{print $2}')
+  if [ -z "$hz" ]; then
+    printf '      %-26s %7s        (want >= 2)   %s\n' 'received on the Pi 5' '?' "not checked (no ssh to $PI5_HOST)"
+  else
+    printf '      %-26s %7s Hz   (want >= 2)   %s\n' 'received on the Pi 5' "$hz" \
+      "$(awk -v a="$hz" 'BEGIN{print (a+0 >= 2) ? "OK" : "FAIL -- the brain is blind: ./rover vlm"}')"
+  fi
   rexec "n=\$(ros2 topic info /vision/pixel_query 2>/dev/null | awk '/Subscription count/{print \$3}'); \
          printf '      %-22s %7s        (want >= 1)   %s\n' 'pixel_to_goal listening' \"\${n:-0}\" \"\$([ \"\${n:-0}\" -ge 1 ] && echo OK || echo FAIL)\""
   echo
