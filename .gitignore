@@ -51,3 +51,6 @@ logs/watchdog.jsonl
 # probe output (logs/peek.py, scanview.py, costpeek.py)
 logs/peek/
 logs/survey_current
+
+# model weights / TensorRT engines: large, downloadable, built per JetPack (./rover engine)
+models/
