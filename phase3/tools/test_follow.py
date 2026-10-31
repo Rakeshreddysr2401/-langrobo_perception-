@@ -14,12 +14,18 @@ one wild sample is ignored. pick: the start picks the one nearest the middle.
 near_hold: something between them, the person just past the gap: it holds and
 keeps following, no 'blocked'. search: a person who walks out to the left is
 turned after, and re-acquired (new id) farther than REACQ_M from the coast.
-find / find_nobody / find_no_room: "follow me" with nobody in view turns to
-find someone (2026-10-13), gives up after a full circle, or at once with no
-room to turn. gone: lost straight ahead, it drives to their last spot and
+find / find_nobody / find_no_room / find_boxed_in: "follow me" with nobody in view turns to
+find someone (2026-10-13), gives up after a full circle; too close to turn,
+it first escapes (ESCAPE), and gives up at once only when boxed in. gone: lost straight ahead, it drives to their last spot and
 looks all around there before 'lost'. look_*: someone who looks like the
 target is re-acquired anywhere in view while searching; someone who looks
 clearly different is not, even standing where the target should be.
+escape_*: ESCAPE (2026-11-01) -- wall_corner: the 2026-10-31 floor case, a
+wall corner 4 cm off the front-right, the person 31 deg left: it gets out with
+a short move, faces them and follows, never touching the wall; far_box: a box
+a metre ahead is no reason to shuffle; gap_closing: a move stops the moment
+anything closes in; cap: never more than ESCAPE_MAX moves; find: no room to
+turn and look tries a move before 'nobody'.
 """
 import math
 import sys
@@ -80,8 +86,10 @@ def run(path, T, pose=(0.0, 0.0, 0.0), obstacles=None, visible=lambda t: True,
             c, s = math.cos(pose[2]), math.sin(pose[2])
             d = obstacles - np.array(pose[:2])
             pts = np.stack([d[:, 0] * c + d[:, 1] * s, -d[:, 0] * s + d[:, 1] * c], 1)
+        escaping = f.escape is not None
         vx, wz = f.step(t, tuple(pose), pts)
-        assert 0.0 <= vx <= fl.V_MAX + 1e-9, vx
+        # never backwards -- except in an escape move, and then only at a crawl
+        assert (-fl.ESCAPE_VX if escaping or f.escape else 0.0) - 1e-9 <= vx <= fl.V_MAX + 1e-9, vx
         assert abs(wz) <= fl.W_MAX + 1e-9, wz
         pose[0] += vx * math.cos(pose[2]) * DT
         pose[1] += vx * math.sin(pose[2]) * DT
@@ -230,10 +238,21 @@ def test_find_nobody():
 
 
 def test_find_no_room():
-    post = np.array([[0.0, 0.25]])             # right beside it: inside the turning circle
-    f, log = _find(obstacles=post)
+    # a post right beside it, inside the turning circle: since ESCAPE (2026-11-01)
+    # short moves take it off the post, then it turns and looks as usual
+    post = np.array([[0.0, 0.25]])
+    f, log = _find(obstacles=post, T=30.0)
+    assert f.escapes >= 1 and f.result == "nobody" and "full circle" in f.why, f.status()
+    gaps = [fl.EM.body_gap(_base(post, p)) for _, _, p, _, _ in log]
+    assert min(gaps) > 0.02, f"came within {min(gaps):.3f} m of the post"
+
+
+def test_find_boxed_in():
+    # boxed in on every side, 3 cm off: no move opens space -> 'nobody' at once,
+    # and it never turns
+    f, log = _find(obstacles=_ring())
     assert f.result == "nobody" and "too close" in f.why, f.status()
-    assert all(abs(wz) < 1e-9 for *_, wz in log), "turned into the post"
+    assert all(abs(wz) < 1e-9 for *_, wz in log), "turned while boxed in"
 
 
 def _lose_then(people_after, T=20.0):
@@ -299,6 +318,83 @@ def test_pick():
     assert fl.Follower().start(0.0, [], find=True)
     f3 = fl.Follower()
     assert not f3.start(0.0, [], target_id=4, find=True) and f3.result == "nobody"
+
+
+
+# ── ESCAPE ─────────────────────────────────────────────────────────────────
+
+def _base(world, pose):
+    """World points -> base_link for a rover at pose."""
+    c, s = math.cos(pose[2]), math.sin(pose[2])
+    d = world - np.array(pose[:2])
+    return np.stack([d[:, 0] * c + d[:, 1] * s, -d[:, 0] * s + d[:, 1] * c], 1)
+
+
+def _ring(off=0.03):
+    """A rectangle `off` metres around the rover's outline at the origin (world)."""
+    x0, x1, y1 = -fl.REAR - off, fl.FRONT + off, fl.SIDE + off
+    xs, ys = np.arange(x0, x1, 0.02), np.arange(-y1, y1, 0.02)
+    return np.vstack([np.c_[xs, np.full_like(xs, y1)], np.c_[xs, np.full_like(xs, -y1)],
+                      np.c_[np.full_like(ys, x0), ys], np.c_[np.full_like(ys, x1), ys]])
+
+
+# the 2026-10-31 floor case: the nearest point (0.22, -0.14) base_link; a wall
+# runs ahead-right from it and a door frame back along the right
+CORNER = np.array([[0.22 + i * 0.02, -0.14] for i in range(60)] +
+                  [[0.22, -0.14 - j * 0.02] for j in range(1, 40)])
+
+
+def test_escape_wall_corner():
+    a = math.radians(31)
+    person = (1.36 * math.cos(a), 1.36 * math.sin(a))
+    f, log = run(lambda t: person, 15.0, obstacles=CORNER)
+    assert f.state == "following" and f.escapes >= 1, f.status()
+    gaps = [fl.EM.body_gap(_base(CORNER, p)) for _, p, *_ in log]
+    assert min(gaps) > 0.0, f"touched the wall: gap {min(gaps):.3f} m"
+    back = sum(-vx * DT for _, _, vx, _, _ in log if vx < 0)
+    assert back <= 0.05 * f.escapes + 0.01, f"backed {back:.3f} m"
+    _, p, vx, wz, d = log[-1]
+    assert abs(d - fl.GAP) < 0.25, f"ended {d:.2f} m from them"
+    assert abs(fl.wrap(math.atan2(person[1] - p[1], person[0] - p[0]) - p[2])) < math.radians(10)
+
+
+def test_escape_not_for_a_far_box():
+    box = np.array([[1.0 + i * 0.02, j * 0.02] for i in range(5) for j in range(-5, 6)])
+    f, log = run(lambda t: (3.0, 0.0), 20.0, obstacles=box)
+    assert f.result == "blocked" and f.escapes == 0, f.status()
+    assert all(vx >= 0 for _, _, vx, _, _ in log), "reversed for a box a metre away"
+
+
+def test_escape_stops_when_the_gap_closes():
+    f = fl.Follower()
+    pose = (0.0, 0.0, 0.0)
+    assert f.start(0.0, [person_msg(1, 1.2, 0.7, 0, 0, pose)])
+    pts = _base(CORNER, pose)
+    assert f._plan_escape(0.0, pose, pts)
+    closer = pts - np.array([0.02, 0.0])                 # something moves 2 cm closer
+    assert f.step(0.05, pose, closer) == (0.0, 0.0)
+    assert f.escape is None and "gap was closing" in f.events[-1], f.events
+
+
+def test_escape_cap():
+    # boxed in on every side, 3 cm off: no move helps; at most ESCAPE_MAX tries,
+    # then the old rules (holding, as the person is near)
+    ring = _ring()
+    a = math.radians(40)
+    f, log = run(lambda t: (1.3 * math.cos(a), 1.3 * math.sin(a)), 20.0, obstacles=ring)
+    assert f.escapes <= fl.ESCAPE_MAX, f.status()
+    gaps = [fl.EM.body_gap(_base(ring, p)) for _, p, *_ in log]
+    assert min(gaps) > 0.0, f"touched the ring: gap {min(gaps):.3f} m"
+
+
+def test_escape_find_with_no_room():
+    # nobody in view, the wall corner too close to turn and look: an escape move,
+    # then the find turn -- and the person behind it is found
+    f, log = _find(person=(-1.5, 0.3), obstacles=CORNER)
+    assert f.escapes >= 1, f.status()
+    assert f.state == "following" and f.found, f.status()
+    gaps = [fl.EM.body_gap(_base(CORNER, p)) for _, _, p, _, _ in log]
+    assert min(gaps) > 0.0, f"touched the wall: gap {min(gaps):.3f} m"
 
 
 if __name__ == "__main__":

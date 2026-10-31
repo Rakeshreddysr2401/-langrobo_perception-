@@ -27,6 +27,27 @@ frame in 0.6 s, every time (7/7). Probe with a subscriber, not `hz`, for slow to
 |---|---|
 | `health_probe.py` segfaults at exit about 1 run in 4 (rclpy shutdown beside its spin thread); its JSON is printed first, so readings are fine | open, pre-existing (original code: 1/4) |
 
+## 2026-11-01 — follow gets out of tight spots (escape moves) — BUILT, floor test pending
+
+**What happened (2026-10-31, Telegram "follow me"):** follow found the owner 1.4 m away, 31 deg left,
+and never moved: a wall corner 4 cm off the front-right corner was in the corridor ahead AND inside
+the turning circle (`nearest in the corridor at (0.22, -0.14) base_link, from fused map`), so it could
+neither drive nor turn to face them. Follow never reversed, so it held there until it gave up.
+
+**Fix:** `phase3/nodes/follow.py` ESCAPE. Stuck (something within 12 cm of the outline, and the turn
+or the drive it wants is refused) for 1.5 s -> one short move picked by reach's own
+`escape_moves.best_move()` (5-10 cm forward, at most 5 cm back, a 10-30 deg turn, or forward then
+turn), driven slowly and stopped the moment the gap closes. At most 3 per follow; then the old rules.
+Also when FIND has no room to turn. Far obstacles (a box a metre ahead) never trigger it.
+`/follow/status` carries `escaping` + `escapes`; the follow log has a line per move.
+Offline: `python3 phase3/tools/test_follow.py` 24/24 (the floor case is `test_escape_wall_corner`).
+
+| what | status |
+|---|---|
+| Floor test: park it against a wall corner, "follow me" from beside it, owner watching | **next** |
+| The 1.5 s / 12 cm / 3-move numbers are first guesses | tune from the follow log after the floor test |
+| reach_node has its own copy of the pivot-file loader (`escape_moves.load_pivots` is the shared one) | tidy when reach is next touched |
+
 ## 2026-10-25 — the brain was blind: camera frames stopped reaching the Pi 5 — FIXED (Pi 5 on Lyrical)
 
 **Cause and fix (2026-10-25 21:00-21:50, measured):** a Jazzy (Fast DDS 2.14) Pi 5 against the

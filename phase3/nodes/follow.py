@@ -46,7 +46,30 @@ find and follow him").
     were last seen (at SEARCH_V, the corridor governor still in charge; a
     block there skips ahead), then turn a full circle there. Nobody -> 'lost'.
 
-MOTION (vx, wz; no reversing — the camera looks forward):
+ESCAPE (2026-11-01, owner: "fix the follow node to back out of tight spots").
+On 2026-10-31 a Telegram "follow me" found the owner 1.4 m away, 31 deg to the
+left -- and never moved: a wall corner 4 cm off the front-right corner was in
+the corridor ahead AND inside the turning circle, so it could neither drive
+nor turn to face them. It held there until it gave up.
+  - STUCK = something within ESCAPE_NEAR of the outline, and it wants to turn
+    but the turn is not clear, or wants to drive but the corridor is blocked.
+    Stuck for ESCAPE_AFTER_S -> one ESCAPE MOVE.
+  - The move is reach's: escape_moves.best_move() picks the short move that
+    opens the most space around the body -- 5-10 cm forward, 5 cm back (no
+    more: the robot is nearly blind behind), a 10-30 deg turn, or forward
+    then turn -- checking the whole sweep, about the learned pivot.
+  - It is driven slowly (ESCAPE_VX, ESCAPE_WZ) and ends the moment the gap to
+    anything closes by ESCAPE_STOP, on time, or when done. Then following
+    goes on as normal; still stuck -> the next move at once.
+  - At most ESCAPE_MAX moves per follow. After that, or when no move opens
+    space, the old rules: holding, 'blocked' after BLOCKED_S, or 'nobody'.
+  - FIND with no room to turn tries the same before it gives up 'nobody'.
+  - Far obstacles (a box a metre ahead) are not "stuck": nothing is within
+    ESCAPE_NEAR, so it holds and gives up as before -- no pointless shuffle.
+  - status() carries 'escaping' (the move) while one runs and 'escapes'
+    (moves used); events lists each start and end for the node's log.
+
+MOTION (vx, wz; reverses only in an ESCAPE move -- the camera looks forward):
   - wz = K_W * bearing error, capped W_MAX; inside TURN_DEADBAND none;
   - vx = K_V * (distance - GAP), capped V_MAX, none inside DIST_DEADBAND;
     scaled by cos(error)^2 and zero beyond DRIVE_MAX_ERR, so it turns to
@@ -78,6 +101,7 @@ import math
 
 import numpy as np
 
+import escape_moves as EM
 from goal_exec import FRONT, REAR, SIDE, wrap
 
 GAP = 1.0             # m kept between base_link and the person
@@ -115,6 +139,13 @@ LOOK_SAME = 0.70      # look_sim this high, anywhere in view while searching: th
 LOOK_OTHER = 0.40     # look_sim this low: someone else, even where they should be
 LOOK_ALPHA = 0.2      # weight of a new look in the target's running average
 LOOK_BINS = 11        # = phase4/nodes/person_look.BINS (one band's histogram)
+ESCAPE_NEAR = 0.12    # m from the outline: closer than this can be "stuck" (the turning
+                      # circle reaches ~11 cm past the corners' sides and front)
+ESCAPE_AFTER_S = 1.5  # s stuck before an escape move
+ESCAPE_MAX = 3        # escape moves per follow
+ESCAPE_VX = 0.05      # m/s: = reach_node ESCAPE_VX
+ESCAPE_WZ = SEARCH_W  # rad/s: the turn find and search already use on this robot
+ESCAPE_STOP = 0.005   # m: the gap may close this much during a move, then it stops (= reach)
 
 TURN_R = math.hypot(max(FRONT, REAR), SIDE)
 FULL_TURN = 2 * math.pi - math.radians(10)   # a "full circle", allowing for the stop
@@ -163,6 +194,11 @@ class Follower:
         self.jumped = False
         self.vx = self.wz = 0.0
         self.t = None
+        self.pivots = getattr(self, 'pivots', None) or {+1: np.zeros(2), -1: np.zeros(2)}
+        self.escape = None           # the escape move under way (ESCAPE), or None
+        self.escapes = 0             # escape moves used in this follow
+        self.stuck_since = None
+        self.events = []             # escape starts/ends, for the node's log
 
     # ── who ────────────────────────────────────────────────────────────────
     def start(self, t, people, target_id=None, find=False):
@@ -274,6 +310,16 @@ class Follower:
         dist = math.hypot(dx, dy)
         err = wrap(math.atan2(dy, dx) - pose[2])
 
+        # target in base_link: its points are the person, not an obstacle
+        c, s = math.cos(pose[2]), math.sin(pose[2])
+        tb = np.array([dx * c + dy * s, -dx * s + dy * c])
+        if pts is not None and len(pts):
+            pts = pts[np.hypot(pts[:, 0] - tb[0], pts[:, 1] - tb[1]) > PERSON_R]
+
+        if self.escape is not None:          # an escape move runs to its end first
+            self.dist, self.err = dist, err
+            return self._escape_step(t, pose, pts)
+
         wz = 0.0 if abs(err) < TURN_DEADBAND else max(-W_MAX, min(W_MAX, K_W * err))
         vx = 0.0
         if abs(dist - GAP) > DIST_DEADBAND and dist > GAP and abs(err) < DRIVE_MAX_ERR:
@@ -285,12 +331,7 @@ class Follower:
             vx, wz = self._search(pose, px, py, err)
             if self.state != 'following':
                 return 0.0, 0.0
-
-        # target in base_link: its points are the person, not an obstacle
-        c, s = math.cos(pose[2]), math.sin(pose[2])
-        tb = np.array([dx * c + dy * s, -dx * s + dy * c])
-        if pts is not None and len(pts):
-            pts = pts[np.hypot(pts[:, 0] - tb[0], pts[:, 1] - tb[1]) > PERSON_R]
+        vx_want, wz_want = vx, wz
 
         free = self.free_ahead(pts)
         v_cap = max(0.0, free - FRONT_MARGIN) / STOP_T
@@ -328,7 +369,15 @@ class Follower:
             vx = min(vx, v_cap)          # ...but never past what the free distance allows
         # a stop for safety is immediate; everything else is rate limited
         wz = max(self.wz - AW_MAX * dt, min(self.wz + AW_MAX * dt, wz))
-        if not self.turn_clear(pts):
+        turn_ok = self.turn_clear(pts)
+        if not searching:
+            stuck = EM.body_gap(pts) < ESCAPE_NEAR and (
+                (wz_want != 0.0 and not turn_ok) or (vx_want > 0.0 and not ok))
+            if self._escape_due(t, stuck) and self._plan_escape(t, pose, pts):
+                self.holding, self.blocked_since = '', None
+                self.dist, self.err = dist, err
+                return 0.0, 0.0
+        if not turn_ok:
             wz = 0.0
             if self.search_phase == 'turn':       # no room to turn: go to their spot instead
                 self.search_phase = 'go'
@@ -339,6 +388,69 @@ class Follower:
         self.vx, self.wz = vx, wz
         self.dist, self.err = dist, err
         return vx, wz
+
+    # ── escape (see ESCAPE) ────────────────────────────────────────────────
+    def _escape_due(self, t, stuck):
+        """Track how long it has been stuck; True when an escape move is due."""
+        if not stuck:
+            self.stuck_since = None
+            return False
+        self.stuck_since = self.stuck_since if self.stuck_since is not None else t
+        return self.escapes < ESCAPE_MAX and t - self.stuck_since >= ESCAPE_AFTER_S
+
+    def _plan_escape(self, t, pose, pts):
+        """Start the move escape_moves.best_move picks. False when none opens space."""
+        g0 = EM.body_gap(pts)
+
+        def gap_of(dx=0.0, a=0.0, P=(0.0, 0.0)):
+            return EM.body_gap(EM.moved(pts, dx, a, P))
+
+        best = EM.best_move(gap_of, g0, self.pivots)
+        self.escapes += 1
+        self.stuck_since = None
+        if best is None:
+            self.events.append(f'escape {self.escapes}: no short move opens space '
+                               f'({g0 * 100:.1f} cm free)')
+            return False
+        kind, v, end = best
+        dx, a = (v, 0.0) if kind == 'drive' else (0.0, v) if kind == 'turn' else v
+        what = ' then '.join(w for w in (f'{"forward" if dx > 0 else "back"} {abs(dx) * 100:.0f} cm' if dx else '',
+                                         f'turn {math.degrees(a):+.0f} deg' if a else '') if w)
+        self.escape = {'dx': dx, 'a': a, 'x0': pose[0], 'y0': pose[1], 'yaw0': pose[2],
+                       'g0': g0, 't0': t, 'turning': dx == 0.0, 'what': what}
+        self.events.append(f'escape {self.escapes}: {what} ({g0 * 100:.1f} -> {end * 100:.1f} cm free)')
+        self.vx = self.wz = 0.0
+        return True
+
+    def _escape_step(self, t, pose, pts):
+        """(vx, wz) for the escape move under way; it ends when done, when the
+        gap to anything closes by ESCAPE_STOP, or on time."""
+        e = self.escape
+        if EM.body_gap(pts) < e['g0'] - ESCAPE_STOP:
+            return self._end_escape(t, 'stopped: the gap was closing')
+        if t - e['t0'] > abs(e['dx']) / ESCAPE_VX + abs(e['a']) / (0.5 * ESCAPE_WZ) + 3.0:
+            return self._end_escape(t, 'stopped: timed out')
+        if not e['turning']:
+            if math.hypot(pose[0] - e['x0'], pose[1] - e['y0']) < abs(e['dx']) - 0.005:
+                self.vx, self.wz = math.copysign(ESCAPE_VX, e['dx']), 0.0
+                return self.vx, self.wz
+            if not e['a']:
+                return self._end_escape(t, 'done', ok=True)
+            e['turning'], e['yaw0'] = True, pose[2]
+        if abs(wrap(pose[2] - e['yaw0'])) < abs(e['a']) - math.radians(2):
+            self.vx, self.wz = 0.0, math.copysign(ESCAPE_WZ, e['a'])
+            return self.vx, self.wz
+        return self._end_escape(t, 'done', ok=True)
+
+    def _end_escape(self, t, how, ok=False):
+        self.events.append(f'escape {self.escapes} ({self.escape["what"]}): {how}')
+        self.escape = None
+        self.vx = self.wz = 0.0
+        self.blocked_since = None            # a fresh start: BLOCKED_S counts again
+        self.find_yaw = None                 # the escape's turn is not part of a find circle
+        # still stuck after a good move: the next one at once; after a stop, wait again
+        self.stuck_since = t - ESCAPE_AFTER_S if ok else None
+        return 0.0, 0.0
 
     def _turned(self, pose):
         """Radians turned since the last call (and remember this heading)."""
@@ -387,6 +499,8 @@ class Follower:
         """FIND: nobody in view at the start -- look ahead, then turn a full circle."""
         dt = 0.05 if self.t is None else min(max(t - self.t, 0.0), 0.2)
         self.t = t
+        if self.escape is not None:          # no room to turn: an escape move first
+            return self._escape_step(t, pose, pts)
         wz = 0.0
         if t - self.find_t0 >= FIND_WAIT_S:
             if self.find_yaw is not None:
@@ -400,6 +514,9 @@ class Follower:
                                        f'{math.degrees(self.find_turned):.0f} deg, and saw no one')
                 return 0.0, 0.0
             if not self.turn_clear(pts):
+                if (self.escapes < ESCAPE_MAX and EM.body_gap(pts) < ESCAPE_NEAR
+                        and self._plan_escape(t, pose, pts)):
+                    return 0.0, 0.0
                 self._finish('nobody', 'no one in view, and something too close beside me '
                                        'to turn and look')
                 return 0.0, 0.0
@@ -445,4 +562,9 @@ class Follower:
                 d['turned'] = round(math.degrees(self.search_turned))
             if self.found:
                 d['found'] = True
+        if self.state in ('finding', 'following'):
+            if self.escape is not None:
+                d['escaping'] = self.escape['what']
+            if self.escapes:
+                d['escapes'] = self.escapes
         return d

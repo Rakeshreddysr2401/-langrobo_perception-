@@ -15,6 +15,7 @@ a left turn), and the real slide varies (2.6-13.6 cm per 60 deg, real robot
 2026-10-18). So a turn is checked about the centre, about P and about 2P, and
 its WORST sweep counts.
 """
+import json
 import math
 
 import numpy as np
@@ -68,6 +69,16 @@ def slide_steer(pts, tie=0.003):
     if abs(front - rear) < tie:
         return 0
     return int(-side if front < rear else side)
+
+
+def load_pivots(path):
+    """{+1: P, -1: P}: where this rover turns about, per direction, from goal_exec's
+    learned file (logs/goal_exec_pivot.json); the centre when it is missing."""
+    try:
+        P = json.loads(path.read_text())
+        return {+1: np.array(P['1'], float), -1: np.array(P['-1'], float)}
+    except (OSError, ValueError, KeyError, TypeError):
+        return {+1: np.zeros(2), -1: np.zeros(2)}
 
 
 SAMPLES = 6                                     # poses checked along each move

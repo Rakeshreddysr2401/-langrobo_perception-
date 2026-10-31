@@ -14,7 +14,9 @@
                              state (finding | following | done), target, dist,
                              bearing, vx, wz, blocked, holding, searching
                              (turn | go | spin) + turned, found (true once the
-                             target was found by turning), paused; done: result + why
+                             target was found by turning), escaping (the escape
+                             move under way, follow.py ESCAPE) + escapes (moves
+                             used), paused; done: result + why
                              (reached | lost | blocked | nobody | cancelled |
                               timeout | pose unsure | no people | taken over)
 
@@ -56,7 +58,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from follow import GAP, DIST_DEADBAND, SIDE_MARGIN, Follower  # noqa: E402
 from goal_exec import FRONT, REAR, SIDE  # noqa: E402
 from fused_obstacles import make_obstacles  # noqa: E402
+import escape_moves as EM  # noqa: E402
 
+PIVOT_FILE = Path(os.environ.get('ROVER_STATE_DIR', '/logs')) / 'goal_exec_pivot.json'   # = reach_node
 SD_MAX_CM = 3.0          # = goal_exec_node
 SCAN_STALE_S = 0.5       # = goal_exec_node
 PAUSE_S = 5.0            # = goal_exec_node
@@ -159,6 +163,7 @@ class FollowNode(Node):
             self.ge_cancel.publish(Empty())
             self.reach_cancel.publish(Empty())
         self.f = Follower()                    # no result left over from the last follow
+        self.f.pivots = EM.load_pivots(PIVOT_FILE)   # for its escape moves (follow.py ESCAPE)
         self.last_why = ''
         self.stop_at_gap = bool(d.get('stop_at_gap'))
         self.req = d.get('req')
@@ -244,6 +249,9 @@ class FollowNode(Node):
         st = m.header.stamp
         t = st.sec + st.nanosec * 1e-9 if (st.sec or st.nanosec) else time.time()
         vx, wz = self.f.step(t, self.pose, pts)
+        for e in self.f.events:                # escape moves, as they start and end
+            self.get_logger().info(e)
+        self.f.events.clear()
         self._log_why(pts, n_scan)
         if self.f.state == 'done':
             self._end(self.f.result, self.f.why)
@@ -342,7 +350,7 @@ class FollowNode(Node):
         if extra:
             d.update(extra)
         key = (d['state'], d.get('result'), d.get('target'), bool(d.get('blocked')), d.get('paused'),
-               bool(d.get('holding')), d.get('searching'), d.get('found'))
+               bool(d.get('holding')), d.get('searching'), d.get('found'), d.get('escaping'))
         now = time.time()
         if force or key != self.last_key or (d['state'] in ('following', 'finding') and now - self.last_report > 0.5):
             self.last_key, self.last_report = key, now
