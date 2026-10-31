@@ -290,7 +290,6 @@ def drift(g):
 
 
 def summary(g):
-    v = g['v']
     print(f'  base_link: nose {g["nose_x"]:+.4f}  tail {g["tail_x"]:+.4f}  wheelbase {g["wheelbase"]:.3f}')
     print(f'  wheels:    x ±{g["wheel_x"]:.4f}  y ±{g["wheel_y"]:.3f}  z {g["wheel_z"]:.3f}')
     print('  camera0_link: x {:+.4f} y {:+.4f} z {:.4f}'.format(*g['cam'])

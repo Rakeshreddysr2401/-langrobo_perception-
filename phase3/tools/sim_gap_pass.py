@@ -66,7 +66,6 @@ def run(gap, cond, rng, noise, t_max=180.0):
     rov = Rover(P, eff, arc, rng)
     rov.x = np.array([0.0, rng.uniform(-0.05, 0.05), phi + math.radians(rng.choice([-20, 20]))])
     u = np.array([math.cos(phi), math.sin(phi)])
-    n = np.array([-u[1], u[0]])
     p0 = R(phi) @ np.array([xg, c])             # constriction centre, world
     end = p0 + (REAR + 0.15 + 0.15) * u         # rear 15 cm past the blocks' far face
     pre = p0 - (0.15 + FRONT + 0.30) * u        # front 30 cm before the near face

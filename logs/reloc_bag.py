@@ -2,13 +2,11 @@
 # bag's final /map, and compare with SLAM's own map -> base_link at that moment.
 import sys, math, time
 sys.path.insert(0, '/r/phase2/tools')
-import numpy as np
 import relocalize as RL
 import rosbag2_py
 from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
 import tf2_py
-from builtin_interfaces.msg import Time as TimeMsg
 from rclpy.duration import Duration
 
 bag = sys.argv[1]
@@ -48,7 +46,7 @@ for t, s in scans:
     try:
         lp = buf.lookup_transform_core('base_link', s.header.frame_id, stamp)
         tb = buf.lookup_transform_core('map', 'base_link', stamp)
-    except Exception as e:
+    except Exception:
         continue
     q = lp.transform.rotation; lyaw = math.atan2(2*(q.w*q.z+q.x*q.y), 1-2*(q.y*q.y+q.z*q.z))
     pts = RL.scan_points(s.ranges, s.angle_min, s.angle_increment, (lp.transform.translation.x, lp.transform.translation.y, lyaw))

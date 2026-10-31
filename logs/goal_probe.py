@@ -1,5 +1,5 @@
 # Safe probe: send /reach/goal = the rover's CURRENT pose (nothing to drive), stamped now, up to 3 times; print reach's answers.
-import time, json, rclpy
+import time, rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Odometry
