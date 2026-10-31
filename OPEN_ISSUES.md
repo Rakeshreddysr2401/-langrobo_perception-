@@ -1,6 +1,31 @@
-# Open issues — where things stand (newest first; last updated 2026-10-25)
+# Open issues — where things stand (newest first; last updated 2026-11-01)
 
 How the rover plans and moves, why it is limited, and the fix order F1-F5: [NAV_GUIDE.md](NAV_GUIDE.md) (2026-10-11).
+
+## 2026-11-01 — RViz laptop: no camera, no global costmap — FIXED (laptop on Lyrical)
+
+**Measured:** RViz subscribed to everything, yet on the laptop the camera JPEG and the global
+costmap arrived at 0 Hz while the Pi 5 got them (5.3 / 0.9 Hz). Three causes, in the order found:
+1. The laptop was **Jazzy** (Fast DDS 2.14) against the Lyrical robot (3.6): big messages did not
+   cross, as on the Pi 5 on 2026-10-25. -> Lyrical installed beside Jazzy
+   (`phase2/rviz/setup_lyrical_laptop.sh`, pushed by `./rover view`); `rover_live.sh` picks it.
+2. Lyrical had no **compressed-image plugin**, so RViz took `/camera/color/image_raw/compressed`
+   for a raw `sensor_msgs/Image` topic and subscribed with the wrong type (Jazzy had the plugin).
+   -> `ros-lyrical-compressed-image-transport` (in the script). A wrong-typed subscriber also
+   makes `ros2 topic echo` refuse the topic, and `health_probe` could copy the wrong type:
+   it now fixes that topic's type (`TYPES`).
+3. A stale **Jazzy `ros2` daemon** on the laptop broke every Lyrical CLI call
+   (`unknown tag 'rclpy.topic_endpoint_info.TopicEndpointInfo'`) -> killed; Lyrical starts its own.
+
+**Gate:** `./rover view` now waits for one camera frame and one global costmap ON THE LAPTOP
+(a subscription count proved nothing), and says when the laptop is not on Lyrical.
+**A trap found on the way:** `ros2 topic hz` needs seconds to start here, so on a 5 Hz topic a
+10 s window gave false "no data" -- 0/8 fresh readers while a plain subscriber got its first
+frame in 0.6 s, every time (7/7). Probe with a subscriber, not `hz`, for slow topics.
+
+| what | status |
+|---|---|
+| `health_probe.py` segfaults at exit about 1 run in 4 (rclpy shutdown beside its spin thread); its JSON is printed first, so readings are fine | open, pre-existing (original code: 1/4) |
 
 ## 2026-10-25 — the brain was blind: camera frames stopped reaching the Pi 5 — FIXED (Pi 5 on Lyrical)
 

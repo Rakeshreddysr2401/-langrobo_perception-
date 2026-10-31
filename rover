@@ -1315,6 +1315,7 @@ PY
   RVPAT="[r]viz2 -d .*$RVCFG[.]rviz"     # this window only: the real and the twin's can both be open
   scp -q $LSSH "$RVSRC" "$LAPTOP_USER@$ip:~/$RVCFG.rviz" 2>/dev/null \
     && scp -q $LSSH "$(dirname "$0")/phase2/rviz/rover_live.sh" "$LAPTOP_USER@$ip:~/rover_live.sh" 2>/dev/null \
+    && scp -q $LSSH "$(dirname "$0")/phase2/rviz/setup_lyrical_laptop.sh" "$LAPTOP_USER@$ip:~/setup_lyrical_laptop.sh" 2>/dev/null \
     && echo "  config synced from the repo" \
     || echo "  ! could not sync the config — the laptop may be showing an old one"
   [ "$TWIN" = 1 ] && rm -f "$RVSRC"
@@ -1414,13 +1415,33 @@ PY
   fi
 
   # Running is not the same as receiving. A blank RViz still shows as running.
+  # The laptop's ROS: the robot's Lyrical when installed (rover_live.sh), else Jazzy.
+  LROS='for d in lyrical jazzy; do [ -f /opt/ros/$d/setup.bash ] && { source /opt/ros/$d/setup.bash; break; }; done'
   echo "  subscriptions (0 means it is connected to nothing):"
   for t in /robot_description /scan /map /fusion/path; do
     c=$(timeout 15 ssh $LSSH "$LAPTOP_USER@$ip" \
-        "source /opt/ros/jazzy/setup.bash; export ROS_DOMAIN_ID=$DOMAIN; unset ROS_DISCOVERY_SERVER; \
+        "$LROS; export ROS_DOMAIN_ID=$DOMAIN; unset ROS_DISCOVERY_SERVER; \
          timeout 6 ros2 topic info $t 2>/dev/null | grep -oP 'Subscription count: \K[0-9]+'" 2>/dev/null || true)
     printf "      %-42s %s\n" "$t" "${c:-0}"
   done
+  # ...and subscribed is not the same as receiving: on 2026-11-01 a Jazzy laptop was
+  # subscribed to everything and got 0 Hz of the camera and the global costmap (big
+  # messages do not cross Fast DDS 2.14 <-> 3.6). Measure them where RViz runs.
+  ldistro=$(timeout 15 ssh $LSSH "$LAPTOP_USER@$ip" "$LROS; echo \$ROS_DISTRO" 2>/dev/null || true)
+  # ONE message, not a rate: `ros2 topic hz` needs seconds to start on these
+  # machines and a 5 Hz topic gave false NONEs in a 10 s window (2026-11-01:
+  # 0/8 "fresh readers" while a plain subscriber got its first frame in 0.6 s).
+  echo "  data reaching the laptop (ROS ${ldistro:-?}):"
+  # the type is named: one wrong-typed subscriber anywhere and echo refuses the topic
+  for tt in /camera/color/image_raw/compressed:sensor_msgs/msg/CompressedImage \
+            /global_costmap/costmap:nav_msgs/msg/OccupancyGrid; do
+    t=${tt%%:*}
+    got=$(timeout 30 ssh $LSSH "$LAPTOP_USER@$ip" \
+        "$LROS; export ROS_DOMAIN_ID=$DOMAIN; unset ROS_DISCOVERY_SERVER; \
+         timeout 20 ros2 topic echo --once --field header.stamp.sec $t ${tt#*:} 2>/dev/null | grep -m1 -oE '[0-9]+'" 2>/dev/null || true)
+    printf "      %-42s %s\n" "$t" "$([ -n "$got" ] && echo 'OK (a message arrived)' || echo 'NONE in 20 s')"
+  done
+  [ "$ldistro" = lyrical ] || echo "  ! the laptop is on ${ldistro:-?}, not lyrical: on the laptop run  sudo bash ~/setup_lyrical_laptop.sh  then ./rover view --restart"
   ;;
 
 # ── reach ───────────────────────────────────────────────────────────────────

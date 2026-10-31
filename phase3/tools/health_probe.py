@@ -34,6 +34,12 @@ TOPICS = [
     # (33 % of a core on the real robot, 2026-10-25). The detect layer is checked by publisher.
 ]
 
+# Topics whose type is fixed here, not read from the graph: a subscriber of the WRONG
+# type adds a second type to the list (2026-11-01: an RViz without the compressed-image
+# plugin subscribed to the camera JPEG as sensor_msgs/Image; this probe could copy it,
+# and then count nothing).
+TYPES = {'/camera/color/image_raw/compressed': 'sensor_msgs/msg/CompressedImage'}
+
 
 def main():
     window = float(sys.argv[1]) if len(sys.argv) > 1 else 6.0
@@ -63,7 +69,7 @@ def main():
             if t in subs or t not in known:
                 continue
             try:
-                cls = get_message(known[t][0])
+                cls = get_message(TYPES.get(t) or known[t][0])
                 subs[t] = node.create_subscription(cls, t, hit(t), qos_profile_sensor_data, raw=True)
                 t_sub[t] = time.time()
             except Exception:
