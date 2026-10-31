@@ -25,7 +25,8 @@ For the full runbook including calibration and troubleshooting see
 | Laptop (RViz) | **DHCP — moves** | `./rover view` finds it |
 
 **Single command:** `./rover up` runs every step below in order — camera,
-lidar, pose (with `SLAM=false`), fused, slam, map, nav, vlm, follow (not fatal), the ESP32 check,
+lidar, pose (with `SLAM=false`), fused, slam, map, nav, vlm, follow, track and memory (these three
+not fatal), the ESP32 check,
 the Pi 5 check, Studio, and the laptop view — and prints the Studio tunnel link
 and the LangSmith project at the end. Add `--voice` to also check the Pi 5's
 voice. It restarts the container, so it's for a cold power-on — don't run
@@ -110,6 +111,8 @@ SLAM=false ./rover pose   # + cuVSLAM, gyro — VO >=10 Hz, gyro >=50 Hz
 ./rover vlm         # + VLM pixel -> goal  — colour >=2 Hz, 1 listener
 ./rover detect      # + YOLO -> odom objects — publishing, target hunt listening
 ./rover follow      # + "follow me" (starts detect too) — follow listening, people publisher
+./rover track       # + the locked-target tracker  — track listening
+./rover memory      # + frame memory (model on the host GPU) — embedder reachable, >=1 keyframe, /odom still >=15 Hz
 ./rover view        # RViz on the laptop
 ```
 
@@ -189,6 +192,19 @@ seen and looks all around (40 s cap), re-acquiring by clothes colours
 (`phase4/nodes/person_look.py`). The camera sits low: a person must be
 standing to be seen. Someone seated at the frame edge (legs and arms only) gives no
 YOLO person even at conf 0.1.
+
+**`memory` is part of `up` since 2026-10-29** ([FRAME_MEMORY.md](FRAME_MEMORY.md)): the last
+10 minutes of what the robot saw, searchable by words. Two parts: EmbeddingGemma 2 in
+llama.cpp on the **host** GPU (`phase4/tools/embedder.sh`, port 8097; the image is not
+touched) and `keyframe_memory.py` in the container. Good looks like: `embedder
+reachable True`, `keyframes kept >= 1`, `embed per keyframe` ~1.6-1.9 s, `reference
+level: 38 photos` (the first start builds it in ~70 s and caches it in
+`logs/embed_reference.npz`), and `/odom` still >= 15 Hz (measured 19-20 Hz). If it
+fails, `up` warns and carries on. The model server refuses to start with too little
+free RAM and stops itself (never anything else) if available RAM drops under 600 MB,
+or when the container is gone; keyframes then pause and the status says
+`"embedder": false`. Model files: `models/embed/` (gitignored; recovery commands in
+`embedder.sh`'s header).
 
 **Do not stop at `nav`.** `vlm` is what lets the Pi 5 brain *see* — without it
 `look()` and `approach_described_object()` are silently dead, the brain answers

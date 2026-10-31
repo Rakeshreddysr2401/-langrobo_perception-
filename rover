@@ -29,6 +29,7 @@
 #   ./rover detect     YOLO + depth -> odom objects / people (TensorRT engine if built, else .pt)
 #   ./rover engine     build the YOLO TensorRT engine for this JetPack's TensorRT (~8 min, GPU)
 #   ./rover track      keep seeing ONE locked thing every frame (/target/lock -> /target/state); sees only, never drives
+#   ./rover memory     the last 10 min of what it saw, searchable by words (EmbeddingGemma 2 on the GPU; FRAME_MEMORY.md)
 #   ./rover approach L DRIVES: closed-loop "go near <L>" (YOLO finds it, the tracker refines it, /reach drives)
 #   ./rover rviz       view it on the Jetson's own screen (costs GPU)
 #   ./rover view       RViz on the laptop (--restart to re-read the config) — finds it on DHCP, checks it renders
@@ -1011,6 +1012,10 @@ up)
   # The closed-loop target tracker (CLOSED_LOOP_PLAN.md). Asleep until a lock:
   # ~1 % of a core (it only keeps image_bridge's JPEG bytes). Not fatal.
   "$0" track || echo "  ! track did not come up -- the rest of the robot is fine; retry: ./rover track"
+  # Frame memory (FRAME_MEMORY.md) is NOT started here since 2026-10-29: on the
+  # loaded real robot its model server took ~1.8 GB (free RAM 2.2 -> 0.86 GB),
+  # load rose 29 -> 33-39 and /odom read 0 in 2 of 6 samples. Start it by hand
+  # (./rover memory) only while that is being solved.
 
   echo
   echo "[wheels] ESP32 link — first check"
@@ -1250,6 +1255,40 @@ track)
   rexec "for i in 1 2 3; do n=\$(ros2 topic info /target/lock 2>/dev/null | awk '/Subscription count/{print \$3}'); [ \"\${n:-0}\" -ge 1 ] && break; sleep 3; done; \
          printf '      %-26s %5s        (want >= 1)   %s\n' 'track listening' \"\${n:-0}\" \"\$([ \"\${n:-0}\" -ge 1 ] && echo OK || echo FAIL)\""
   echo "  State: ros2 topic echo /target/state     Log: ./rover logs track"
+  ;;
+
+# ── memory ──────────────────────────────────────────────────────────────────
+# The last 10 minutes of what the robot saw, searchable by words (FRAME_MEMORY.md).
+# EmbeddingGemma 2 runs on the HOST GPU (phase4/tools/embedder.sh, outside the
+# frozen image); keyframe_memory.py runs here. Sees only, never drives.
+memory)
+  need_container
+  assert_rate /odom 15 "fused odom" || die "no /odom -- run ./rover fused"
+  echo "[memory] embedder -- EmbeddingGemma 2 on the GPU (70 image tokens, RAM guard)"
+  "$REPO/phase4/tools/embedder.sh" start || die "embedder did not start -- see logs/embedder.log"
+  kill_match '[k]eyframe_memory[.]py'
+  echo "[memory] keyframe_memory -- keyframes -> /vision/keyframe_query|result"
+  dexec "exec python3 $SRC4/nodes/keyframe_memory.py > /tmp/memory.log 2>&1"
+  sleep 8
+  echo
+  echo "  GATE memory:"
+  rexec "timeout 20 python3 -c \"
+import json, rclpy, time
+from std_msgs.msg import String
+rclpy.init(); n = rclpy.create_node('memory_gate'); got = []
+n.create_subscription(String, '/vision/keyframes/status', lambda m: got.append(json.loads(m.data)), 1)
+t = time.time()
+while not got and time.time() - t < 12: rclpy.spin_once(n, timeout_sec=0.5)
+s = got[-1] if got else {}
+ok = lambda b: 'OK' if b else 'FAIL'
+print('      %-26s %7s        (want true)   %s' % ('embedder reachable', s.get('embedder', '?'), ok(s.get('embedder'))))
+print('      %-26s %7s        (want >= 1)   %s' % ('keyframes kept', s.get('frames', 0), ok(s.get('frames', 0) >= 1)))
+print('      %-26s %7s ms' % ('embed per keyframe', s.get('embed_ms', '?')))
+print('      reference level: %s' % s.get('reference', '?'))
+\"" 2>/dev/null || echo "      no status from keyframe_memory -- ./rover logs memory"
+  assert_rate /odom 15 "fused odom, with it" || echo "      ! /odom slowed -- ./rover memory is optional: $REPO/phase4/tools/embedder.sh stop"
+  echo "  Ask:  ros2 topic pub --once /vision/keyframe_query std_msgs/String \"data: '{\\\"id\\\": \\\"t\\\", \\\"text\\\": \\\"a chair\\\", \\\"jpeg\\\": false}'\""
+  echo "        ros2 topic echo /vision/keyframe_result     Log: ./rover logs memory   Model: phase4/tools/embedder.sh status"
   ;;
 
 # ── rviz ────────────────────────────────────────────────────────────────────

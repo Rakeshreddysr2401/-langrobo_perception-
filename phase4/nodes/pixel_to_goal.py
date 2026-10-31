@@ -151,6 +151,18 @@ with the same manual-quaternion style already used elsewhere in this repo
 (e.g. fusion_node's yaw extraction) rather than pulling in a dependency the
 container can't have added to it.
 
+KEYFRAMES: THE LAST 10 MINUTES, NOT THE LAST 24 PHOTOS (2026-10-29, FRAME_MEMORY.md)
+    in   /vision/keyframe_snapshot  geometry_msgs/PointStamped (keyframe_memory.py)
+         Same as /vision/pixel_snapshot -- freeze the depth + camera pose at
+         header.stamp -- but kept in a SEPARATE store: KEYFRAMES of them for up
+         to KEYFRAME_MAX_S, the depth as lossless PNG (448x252 uint16: 226 KB raw
+         -> 68 KB, 22 ms to encode, 3 ms to decode; ~27 MB for 400). Separate so a
+         keyframe every 40 cm of driving never pushes the brain's own 24 photos
+         out of _snaps. A /vision/pixel_query whose stamp is not a photo
+         snapshot looks here next, so "the fridge you passed 6 minutes ago" is
+         placed with that keyframe's own depth and pose, by the code below,
+         unchanged.
+
 Run:  python3 pixel_to_goal.py
 """
 import json
@@ -160,6 +172,7 @@ import os
 import time
 from collections import OrderedDict, deque
 
+import cv2
 import numpy as np
 import rclpy
 from rclpy.node import Node
@@ -200,6 +213,10 @@ SNAPSHOTS = 24            # photos remembered: the Pi 5 surveys EVERY photo in t
                           # background (tools/survey.py), after a search's 8 views,
                           # so the depth must outlive the search (~0.9 MB each)
 SNAP_RETRY_S = 0.6        # TF for the stamp not in yet: retry this long
+KEYFRAMES = 400           # keyframe_memory's frames kept (see KEYFRAMES above) ...
+KEYFRAME_MAX_S = 660.0    # ... and for no longer than its 10-minute window + 1 min
+KEYFRAME_PNG_LEVEL = 3    # 68 KB, 22 ms a frame (level 1: 72 KB, slower here)
+KEYFRAME_WANTED_MAX = 64  # stamps still waiting for depth/TF before giving up on the oldest
 # A photo inside a depth-stream gap (the D555 stalls under CPU load: 1.8 s in a
 # quiet minute, 7.1 s on 2026-09-27 -- 3 of 15 photo holds failed, so "go near
 # it" had nothing to place the object with). The camera's pose AT THE PHOTO is
@@ -427,6 +444,8 @@ class PixelToGoal(Node):
         self._ring = deque()                 # (stamp_ns, depth array)
         self._snaps = OrderedDict()          # stamp_ns -> {depth, cam_tf, dt_ms}
         self._snap_pending = []              # (stamp_ns, first try, monotonic)
+        self._keyframes = OrderedDict()      # stamp_ns -> {png, cam_tf, dt_ms, scan, kept}
+        self._kf_wanted = OrderedDict()      # keyframe stamps whose snapshot is still being made
         self._scans = deque()                # (stamp_ns, frame_id, N x 3 points in the laser frame)
 
         self.create_subscription(
@@ -437,6 +456,8 @@ class PixelToGoal(Node):
             PointStamped, '/vision/pixel_query', self._on_query, 5)
         self.create_subscription(
             PointStamped, '/vision/pixel_snapshot', self._on_snapshot, 5)
+        self.create_subscription(
+            PointStamped, '/vision/keyframe_snapshot', self._on_keyframe_snapshot, 10)
         self.create_subscription(LaserScan, '/scan', self._on_scan, 2)
         self.create_timer(0.1, self._retry_snapshots)
         self._result_pub = self.create_publisher(String, '/vision/pixel_result', 5)
@@ -509,6 +530,9 @@ class PixelToGoal(Node):
     def _store_snapshot(self, stamp_ns: int, depth, cam_tf, dt_s: float) -> dict:
         snap = {'depth': depth, 'cam_tf': cam_tf, 'dt_ms': round(dt_s * 1000, 1),
                 'scan': self._scan_near(stamp_ns)}
+        if self._kf_wanted.pop(stamp_ns, None) is not None:
+            self._keep_keyframe(stamp_ns, snap)  # a keyframe: its own store, never _snaps
+            return snap
         self._snaps[stamp_ns] = snap
         while len(self._snaps) > SNAPSHOTS:
             self._snaps.popitem(last=False)
@@ -551,13 +575,51 @@ class PixelToGoal(Node):
             return None, f'moved_before_depth:{moved * 100:.0f}cm'
         return self._store_snapshot(stamp_ns, d_depth, gap_tf, (d_ns - stamp_ns) / 1e9), ''
 
-    def _on_snapshot(self, msg: PointStamped) -> None:
+    # ── keyframes (see KEYFRAMES in the docstring) ──────────────────────────
+    def _keep_keyframe(self, stamp_ns: int, snap: dict) -> None:
+        ok, png = cv2.imencode('.png', snap['depth'], [cv2.IMWRITE_PNG_COMPRESSION, KEYFRAME_PNG_LEVEL])
+        if not ok:
+            self.get_logger().warning(f'keyframe {stamp_ns}: depth PNG encode failed')
+            return
+        self._keyframes[stamp_ns] = {'png': png, 'cam_tf': snap['cam_tf'], 'dt_ms': snap['dt_ms'],
+                                     'scan': snap['scan'], 'kept': time.monotonic()}
+        now = time.monotonic()
+        while self._keyframes and (len(self._keyframes) > KEYFRAMES or
+                                   now - next(iter(self._keyframes.values()))['kept'] > KEYFRAME_MAX_S):
+            self._keyframes.popitem(last=False)
+
+    def _keyframe_snap(self, stamp_ns: int):
+        """A kept keyframe as a snapshot dict (depth decoded), or None."""
+        kf = self._keyframes.get(stamp_ns)
+        if kf is None or time.monotonic() - kf['kept'] > KEYFRAME_MAX_S:
+            return None
+        depth = cv2.imdecode(kf['png'], cv2.IMREAD_UNCHANGED)
+        if depth is None:
+            return None
+        return {'depth': depth, 'cam_tf': kf['cam_tf'], 'dt_ms': kf['dt_ms'], 'scan': kf['scan']}
+
+    def _on_keyframe_snapshot(self, msg: PointStamped) -> None:
+        stamp_ns = msg.header.stamp.sec * 1_000_000_000 + msg.header.stamp.nanosec
+        if stamp_ns == 0 or stamp_ns in self._keyframes:
+            return
+        if stamp_ns in self._snaps:                  # the brain held this very frame too
+            self._keep_keyframe(stamp_ns, self._snaps[stamp_ns])
+            return
+        self._kf_wanted[stamp_ns] = True
+        while len(self._kf_wanted) > KEYFRAME_WANTED_MAX:
+            self._kf_wanted.popitem(last=False)
+        self._on_snapshot(msg, quiet=True)           # same making, retries and gap handling
+
+    def _on_snapshot(self, msg: PointStamped, quiet: bool = False) -> None:
         stamp_ns = msg.header.stamp.sec * 1_000_000_000 + msg.header.stamp.nanosec
         if stamp_ns == 0 or stamp_ns in self._snaps:
             return
+        if not quiet:
+            self._kf_wanted.pop(stamp_ns, None)      # the brain's photo: it belongs in _snaps
         snap, why = self._make_snapshot(stamp_ns)
         if snap is not None:
-            self.get_logger().info(f'snapshot {stamp_ns}: depth {snap["dt_ms"]} ms from the photo')
+            if not quiet:
+                self.get_logger().info(f'snapshot {stamp_ns}: depth {snap["dt_ms"]} ms from the photo')
         elif why == 'tf_not_yet':
             self._snap_pending.append((stamp_ns, time.monotonic(), None))
         elif why.startswith('no_depth_near_stamp'):
@@ -664,6 +726,8 @@ class PixelToGoal(Node):
         if stamp_ns:
             # the photo's own depth and camera pose (AT THE MOMENT OF THE PHOTO)
             snap = self._snaps.get(stamp_ns)
+            if snap is None:
+                snap = self._keyframe_snap(stamp_ns)   # a keyframe from the last 10 minutes
             if snap is None:
                 snap, why = self._make_snapshot(stamp_ns)
                 if snap is None:

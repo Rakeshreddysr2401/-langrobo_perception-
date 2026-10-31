@@ -54,3 +54,6 @@ logs/survey_current
 
 # model weights / TensorRT engines: large, downloadable, built per JetPack (./rover engine)
 models/
+
+# frame memory (./rover memory): the reference photos' vectors, rebuilt by keyframe_memory
+logs/embed_reference.npz

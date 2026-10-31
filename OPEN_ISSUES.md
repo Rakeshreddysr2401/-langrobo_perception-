@@ -1,6 +1,19 @@
-# Open issues — where things stand (newest first; last updated 2026-10-25)
+# Open issues — where things stand (newest first; last updated 2026-10-29)
 
 How the rover plans and moves, why it is limited, and the fix order F1-F5: [NAV_GUIDE.md](NAV_GUIDE.md) (2026-10-11).
+
+## 2026-10-29 — frame memory built (Jetson half): open items
+
+The last 10 minutes of what the robot saw, searchable by words ([FRAME_MEMORY.md](FRAME_MEMORY.md),
+`./rover memory`, part of `up`). Tested on the robot standing still: search 33-84 ms, placement from a
+103 s old keyframe, `/odom` 19-20 Hz with it, pose check OK; with the Mac's VLM the whole find took ~5-7 s.
+
+| what | evidence | status |
+|---|---|---|
+| **Not measured while driving.** All load numbers are with the robot still; nvblox and nav2 work harder when it moves | — | next: one supervised drive with `./rover memory` up, watch `/odom`, vo, RAM |
+| **RAM margin.** Available RAM with the model loaded: 1.29-1.38 GB live (1.4-1.7 GB in the benchmark). The guard (600 MB) has not fired | `embedder.sh status`, `logs/embedder.log` (no GUARD lines) | watch |
+| Parked, the only frame aged out after 10 min (174 same-view refreshes were skipped) | live status: `frames 1, oldest_s 599.7` | **fixed** same day: a same-view refresh replaces the frame; 4 tests |
+| **The brain does not use it yet** | — | the Pi 5 half (FRAME_MEMORY.md §6). Rule from the live test: only `strong`/`possible` hits go to the VLM -- for a `weak` "white chair" hidden behind a bag, the VLM boxed the bag |
 
 ## 2026-10-25 — the brain was blind: camera frames stopped reaching the Pi 5 — FIXED (Pi 5 on Lyrical)
 

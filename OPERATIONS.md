@@ -206,6 +206,25 @@ phase4/tools/test_target_lock.py`; the node over ROS: `phase4/tools/sim_target_t
 the goal follows. `--mode oneshot` is today's behaviour, for comparison. It prints
 a JSON line (also appended to `logs/approach.jsonl`).
 
+### Frame memory (keyframes, EmbeddingGemma 2)
+
+`./rover memory` (started by `./rover up`; [FRAME_MEMORY.md](FRAME_MEMORY.md)). Two parts:
+the model server on the **host** (`phase4/tools/embedder.sh status`, log
+`logs/embedder.log`) and `keyframe_memory.py` in the container (`./rover logs memory`).
+Its health, 1 Hz: `ros2 topic echo /vision/keyframes/status`.
+
+| symptom | meaning | do |
+|---|---|---|
+| `"embedder": false`, keyframes not growing | the model server is down | `embedder.sh status`; `logs/embedder.log` says why: `GUARD -- available RAM ... < 600 MB` (it stood down for the robot; free memory, then `./rover memory`) or `container ... is gone` |
+| `embedder.sh start` says `NOT starting: available RAM` | less than ~1.5 GB free | something else is holding RAM; the robot comes first |
+| `frames` stays 1 while parked | correct: a same-view refresh **replaces** the frame (every 30 s), it does not add one | -- |
+| `/odom` under 15 Hz after it starts | the GPU or memory is overloaded | `embedder.sh stop`; never raise `EMBED_TOKENS` above 70 without re-measuring (FRAME_MEMORY.md §2) |
+| every query `weak`, even for things in view | `reference` not ready (status shows `building`) or the words are vague | wait ~70 s on a first start; describe it ("a black backpack", not "bag") |
+| a placement fails `snapshot_expired` for a hit | the keyframe's depth aged out (> 660 s) or the odom origin changed | ask again: the memory itself also forgets after 600 s |
+
+Tests, no robot: `python3 phase4/tools/test_keyframe_memory.py` (23 checks; in the
+container: `docker exec rover python3 /opt/rover4/tools/test_keyframe_memory.py`).
+
 ### The wheels
 
 ```bash

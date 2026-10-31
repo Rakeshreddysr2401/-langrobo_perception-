@@ -25,7 +25,7 @@ cd ~/rover
 > deleted; their record is in git history.
 
 It brings up and checks each layer in order: camera (D555 depth) → LiDAR → pose
-→ fused pose → slam → nvblox map → nav2 → VLM → ESP32 wheels → Pi 5 teleop +
+→ fused pose → slam → nvblox map → nav2 → VLM → follow → track → frame memory → ESP32 wheels → Pi 5 teleop +
 brain → LangGraph Studio → Pi 5 voice + Bluetooth speaker → RViz on the laptop
 → ESP32 again. About 8 minutes. A layer that fails stops it and names itself.
 `--voice` also (re)checks the Pi 5's voice; it starts at boot on its own anyway.
@@ -55,6 +55,7 @@ brain → LangGraph Studio → Pi 5 voice + Bluetooth speaker → RViz on the la
 | **Twin** | the laptop's `kino_sim` simulates the robot's HARDWARE in Isaac Sim and THIS code runs on it unchanged, `TWIN=1 ./rover up`, on ROS domain 42, judged on the true pose -- with the Pi 5 brain too (`fleet.sh twin` on the Pi 5; real-looking `home_real` world) | ✅ Isaac day 2026-10-18: every gate OK; `reach 1.0 -0.6 90` believed vs true 0.4 cm; home_real 4/4 reached through the 80 cm door, over the 1 cm tablet as the robot does ([SYSTEM_OVERVIEW.md](SYSTEM_OVERVIEW.md)) |
 | **Isaac ROS 5** | `orin-nav:2.0` (Isaac ROS 5.0, ROS 2 Lyrical) from `docker/2.0/Dockerfile`; 2.1 adds the Part B packages | ✅ 2026-10-25: twin home_real 4/4 in 159 s (4.6: 271 s), 0 touches in the regression suite; **real robot driven**: reach goals 0.6-3.2 cm, nav2 drives the wheels. Three silent nav2 1.5 breaks found and fixed (Twist!). Checks: `docker/2.0/*.sh` ([ISAAC_ROS_5_UPGRADE.md](ISAAC_ROS_5_UPGRADE.md)) |
 | **Explore** | the rover maps the home by itself: frontiers of the LiDAR map, every goal through `reach` | twin home_real: whole house in 8.9 min, "no frontier left" (`./rover explore`); **not yet run on the real robot** |
+| **Frame memory** | the last 10 min of what it saw, searchable by words: a keyframe per 40 cm / 20° / 30 s still, embedded by EmbeddingGemma 2 on the host GPU; a hit is placed with that frame's own depth (`./rover memory`) | ✅ Jetson half 2026-10-29, robot standing still: search 33-84 ms, "a black backpack" strong and placed from a 103 s old frame (0.53 m ahead), absent things weak; `/odom` 19-20 Hz with it; with the Mac's VLM boxing the hit, the whole find takes ~5-7 s. **Not yet used by the brain, not yet measured while driving** ([FRAME_MEMORY.md](FRAME_MEMORY.md)) |
 
 Numbers and how each was measured: [LOCALIZATION.md](LOCALIZATION.md).
 What is still missing, measured: [LOCALIZATION_GAPS.md](LOCALIZATION_GAPS.md).
@@ -75,7 +76,7 @@ Making the brain use all this (object memory, exact moves, fast detection, learn
 | `lidar/` | the RPLidar C1 driver build and its calibration (yaw by driving, timestamp lag) |
 | `phase2/` | mapping: nvblox (depth → obstacles 5-27 cm), slam_toolbox, RViz |
 | `phase3/` | nav2 (costmaps: nvblox + LiDAR), `./rover drive` exact moves |
-| `phase4/` | the VLM bridge: `image_bridge` (photos for the brain), `pixel_to_goal` (pixel → goal), `detections_3d` (opt-in YOLO) |
+| `phase4/` | the VLM bridge: `image_bridge` (photos for the brain), `pixel_to_goal` (pixel → goal; also keeps keyframes' depth), `detections_3d` (opt-in YOLO), `keyframe_memory` + `tools/embedder.sh` (frame memory, [FRAME_MEMORY.md](FRAME_MEMORY.md)) |
 | `docker/2.0/` | **the image**: Dockerfile (+ `Dockerfile.features` for 2.1) and its checks: `check.sh`, `vo_check.sh`, `nvblox_check.sh`, `nav2_check.sh`, `topic_audit.sh`, `param_audit.sh`, `tf_lag.sh`, `b2_gridloc.sh`, `b3_cuvgl.sh` |
 | `ops/` | `rover_watchdog.py`, `mps.sh` (CUDA MPS, B1) |
 | `docs/archive/` | history: the phase logs, the old TODO and READINESS, the knowledge notes |
@@ -101,6 +102,9 @@ description/build                  # after any measurement change: URDF, CAD, dr
 ./rover navto X Y DEG [--exact]    # nav2 plans the route; --exact: goal_exec finishes to ~1 cm (DRIVES)
 ./rover pass [D] [--dry]           # find the tight gap ahead, crawl straight through, 3 cm margin (DRIVES)
 ./rover explore [minutes]          # map the home by itself, frontier by frontier, via reach (DRIVES; a person watches)
+
+./rover memory                     # frame memory: last 10 min searchable by words (FRAME_MEMORY.md; part of up)
+phase4/tools/embedder.sh status    # its model server on the host GPU (start | stop | status)
 
 docker/2.0/topic_audit.sh          # topics whose publishers and subscribers disagree on the type (stack up)
 docker/2.0/param_audit.sh          # nav2.yaml keys the running nav2 silently ignores (stack up)

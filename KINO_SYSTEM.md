@@ -3,7 +3,7 @@
 > **The same file is in all three repos:** Jetson `~/rover/KINO_SYSTEM.md`, Pi 5
 > `~/ros2_ws/KINO_SYSTEM.md`, laptop `~/kino_sim/KINO_SYSTEM.md`. If you change it,
 > copy it to the other two (`diff` between them must be empty). Last checked
-> 2026-10-19 (night).
+> 2026-10-29.
 
 **KINO** (Knowledge Is Never Out) is a home robot you talk to: "Kino, go near
 the bottle and tell me what's on it". It understands the request, finds the
@@ -16,11 +16,11 @@ navigation and agents are tested there before they reach the real robot.
 
 | machine | address | log in | repo → GitHub, branch | its job |
 |---|---|---|---|---|
-| **Jetson Orin Nano** | 192.168.1.15 · `rakhi-jetson.local` | `ssh rakhi24@192.168.1.15` | `~/rover` → `-langrobo_perception-`, `rover-v1.1.16-review`; also `~/kino_sim` → `main` (the twin's stand-in drivers) | **the body**: camera, lidar, pose, map, nav2, exact moves, photo→goal. All in one Docker container: `rover` (real) or `rover_twin` (twin), image `orin-nav:1.2` (`orin-nav:1.1` = rollback only). Power mode 15 W |
-| **Pi 5** | 192.168.1.16 (fixed) · `rakhi24-desktop.local` | `ssh rakhi24@192.168.1.16` | `~/ros2_ws` → `pi5_ros2_ws`, `dev-1.6.11-review` | **the mind**: LangGraph brain (3 agents), voice, Telegram, teleop page :8091, micro-ROS agent for the ESP32. Services start at boot (systemd) |
+| **Jetson Orin Nano** | 192.168.1.15 · `rakhi-jetson.local` | `ssh rakhi24@192.168.1.15` | `~/rover` → `-langrobo_perception-`, `main`; also `~/kino_sim` → `main` (the twin's stand-in drivers) | **the body**: camera, lidar, pose, map, nav2, exact moves, photo→goal. All in one Docker container: `rover` (real) or `rover_twin` (twin), image `orin-nav:2.0`. Also **frame memory** (2026-10-29): EmbeddingGemma 2 on the host GPU, `./rover memory`. Power mode 15 W |
+| **Pi 5** | 192.168.1.16 (fixed) · `rakhi24-desktop.local` | `ssh rakhi24@192.168.1.16` | `~/ros2_ws` → `pi5_ros2_ws`, `main` | **the mind**: LangGraph brain (3 agents), voice, Telegram, teleop page :8091, micro-ROS agent for the ESP32. Services start at boot (systemd) |
 | **Laptop (Isaac)** | DHCP, 192.168.1.9 on 2026-10-18 · user `chotesh` | at its keyboard only (**no ssh server**) | `~/kino_sim` → `mitra_sim` on GitHub (rename to `kino_sim` pending), `main`; `~/IsaacLab` (release/3.0.0) | **the twin**: Isaac Sim 6.2 + Isaac Lab 3.0 in conda env `kino`, RTX 4050 (driver 580, held), ROS domain 42 |
 | **Old laptop** | DHCP, 192.168.1.8 · user `rakhi24` | through the Jetson: `ssh rakhi24@192.168.1.15`, then `ssh rakhi24@192.168.1.8` | — (files pushed by `./rover view`) | **the RViz station**: `./rover view` (real) / `TWIN=1 ./rover view` (twin) open RViz here |
-| **Mac mini** | DHCP · `singireddys-mac-mini.local:8080` | at the Mac (no ssh set up from the robot machines) | — | llama.cpp: Gemma, LLM + VLM (`--parallel 4`), kino-stt |
+| **Mac mini** | DHCP (192.168.1.10 on 2026-10-29) · `singireddys-mac-mini.local:8080` | at the Mac (no ssh set up from the robot machines) | — | llama.cpp: Gemma 4 12B, LLM + VLM (`--parallel 5`: slots 0-2 agents, 3 photos, 4 free), kino-stt. Start `e12b5` after every power-on |
 
 **Who can ssh to whom** (keys, no passwords; checked 2026-10-18):
 
@@ -101,7 +101,7 @@ cd ~/kino_sim && ./sim up home_real     # ~1 min; add follow=true for an Isaac w
 
 | repo | read first | then |
 |---|---|---|
-| Jetson `~/rover` | `STARTUP.md` (after a power-on: all boxes, in order, what good looks like), `SYSTEM_OVERVIEW.md` (how it all fits, the topic contract), `OPEN_ISSUES.md` (what is open) | `OPERATIONS.md` (the runbook: calibration, diagnosis), `ARCHITECTURE.md`, `NAV_GUIDE.md`, `LOCALIZATION.md`, `ISAAC_ROS_5_UPGRADE.md` (the 5.0 move + Part B features), `docker/2.0/README.md` (the image) |
+| Jetson `~/rover` | `STARTUP.md` (after a power-on: all boxes, in order, what good looks like), `SYSTEM_OVERVIEW.md` (how it all fits, the topic contract), `OPEN_ISSUES.md` (what is open) | `OPERATIONS.md` (the runbook: calibration, diagnosis), `FRAME_MEMORY.md` (the last 10 min searchable by words), `ARCHITECTURE.md`, `NAV_GUIDE.md`, `LOCALIZATION.md`, `ISAAC_ROS_5_UPGRADE.md` (the 5.0 move + Part B features), `docker/2.0/README.md` (the image) |
 | Pi 5 `~/ros2_ws` | `README.md`, `HOW_IT_WORKS.md`, `TODO.md` (open items at the top) | `ARCHITECTURE_LLD.md`, `OPERATIONS.md` (systemd, health API), `NETWORKING.md`, `INTEGRATION_GAPS.md`, `TELEGRAM.md`, `MAC_MINI_TASKS.md`, `docs/voice/` |
 | Laptop `~/kino_sim` | `README.md`, `CLAUDE.md` (rules for the twin), `docs/STATUS.md` (where things stand, sim-real gaps) | `docs/IMPROVEMENT_LOOP.md` (the method), `docs/PLAN_AGENTS_NAV.md` (the plan), `docs/VERSIONS.md` (exact versions) |
 
@@ -130,6 +130,13 @@ cd ~/kino_sim && ./sim up home_real     # ~1 min; add follow=true for an Isaac w
   off at 21:24 on 2026-10-19. Needs a 5 V / 5 A supply (Pi 5 `TODO.md` item 0).
 - The robot drives over a 1 cm tablet on the floor (below the lidar; rover
   `OPEN_ISSUES.md` #3).
+- **Frame memory** (2026-10-29) is tested standing still only, and the brain does not use it
+  yet; with the model loaded the Jetson has ~1.3 GB RAM free (rover `FRAME_MEMORY.md`).
+- **The first question after the Mac has been idle takes 28-48 s** (its cache is cold); the
+  same questions warm: 2-5 s (2026-10-29).
+- **LangSmith rejects the brain's traces** ("Rate limit exceeded", 2026-10-29): recent turns
+  are not recorded there.
+- From the laptop, `.local` names do not resolve: use the IPs (Jetson .15, Pi 5 .16, Mac .10).
 - The twin's cuVSLAM once lost itself in turns (2026-10-19, a degraded twin process);
   not reproduced since: if VO goes wild, `./sim vocheck`, restart the twin (laptop
   `docs/STATUS.md`, gap 1).
