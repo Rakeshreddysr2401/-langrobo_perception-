@@ -238,6 +238,10 @@ controller_server:
       retry_attempt_limit: 1
       regenerate_noises: false         # CPU
       visualize: false                 # true draws the sampled trajectories (CPU)
+      # the chosen trajectory only, ~/optimal_trajectory (nav_msgs/Trajectory): nav2 1.5 stopped
+      # publishing it by default, and without it kino_sim's navrec cannot say why MPPI drove
+      # where it did (twin apt_hard 2026-11-01: a corner pressed 0.3 cm onto a door jamb)
+      publish_optimal_trajectory: true
       critics: [ConstraintCritic, CostCritic, GoalCritic, GoalAngleCritic,
                 PathAlignCritic, PathFollowCritic, PathAngleCritic,
                 PreferForwardCritic]
