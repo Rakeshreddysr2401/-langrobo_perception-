@@ -210,7 +210,7 @@ need_container(){ running || die "no container. Run: ./rover camera"; }
 # still picks the address by hand.
 twin_hw(){
   [ -n "${TWIN_HW:-}" ] && return 0
-  TWIN_HW=$(rexec "timeout 15 ros2 topic echo --once --qos-durability transient_local --qos-reliability reliable --full-length --field data \
+  TWIN_HW=$(rexec "timeout -k 3 15 ros2 topic echo --once --qos-durability transient_local --qos-reliability reliable --full-length --field data \
                    /sim/hardware std_msgs/msg/String" 2>/dev/null | grep -m1 '^{' || true)
   [ -n "$TWIN_HW" ] || die "no twin announcing on domain $DOMAIN (/sim/hardware). On the laptop: ./sim up home_real"
 }
@@ -245,7 +245,7 @@ twin_desc_check(){
 # Put the twin's rover back on its world's start, as you would carry the robot to
 # its mark: a fresh stack's odom and map start where the rover stands (the judge assumes it).
 twin_reset(){
-  rexec "timeout 10 ros2 topic pub --once -w 1 /sim/reset std_msgs/msg/Empty '{}'" >/dev/null 2>&1 \
+  rexec "timeout -k 3 10 ros2 topic pub --once -w 1 /sim/reset std_msgs/msg/Empty '{}'" >/dev/null 2>&1 \
     && { sleep 1; echo "  twin rover back on the start of $(twin_field world)"; } \
     || echo "  ! could not reset the twin's pose (no /sim/reset listener: is ./sim up running?)"
 }
@@ -1200,7 +1200,7 @@ detect)
          printf '      %-26s %5s        (want >= 1)   %s\n' 'target hunt listening' \"\${n:-0}\" \"\$([ \"\${n:-0}\" -ge 1 ] && echo OK || echo FAIL)\""
   echo
   echo "  What it can see right now (8 s sample, empty is not a failure):"
-  rexec "timeout 8 ros2 topic echo /vision/detections_3d --once 2>/dev/null \
+  rexec "timeout -k 3 8 ros2 topic echo /vision/detections_3d --once 2>/dev/null \
          | python3 -c 'import sys,json,re; d=sys.stdin.read(); m=re.search(r\"objects.:\s*(\[.*?\])\", d, re.S); print(\"      \" + (\", \".join(sorted({o[\\\"label\\\"] for o in json.loads(m.group(1))})) if m else \"nothing in view\"))' 2>/dev/null" \
     || echo "      nothing in view"
   echo
@@ -1272,7 +1272,7 @@ view)
   # down there is no map frame and RViz renders an EMPTY WINDOW with an error
   # that reads exactly like a dead publisher -- the same trap the old config
   # avoided by staying in `odom`. Say it here, before the hunt starts.
-  if ! docker exec "$NAME" bash -lc "$ENVSET timeout 6 ros2 run tf2_ros tf2_echo map odom 2>&1 | grep -q Translation" 2>/dev/null; then
+  if ! docker exec "$NAME" bash -lc "$ENVSET timeout -k 3 6 ros2 run tf2_ros tf2_echo map odom 2>&1 | grep -q Translation" 2>/dev/null; then
     echo "  ! no map -> odom transform: ./rover slam is not up."
     echo "    RViz's Fixed Frame is 'map', so the window will be EMPTY until it is."
     echo "    Either run ./rover slam, or set Fixed Frame to 'odom' in the"
@@ -1421,7 +1421,7 @@ PY
   for t in /robot_description /scan /map /fusion/path; do
     c=$(timeout 15 ssh $LSSH "$LAPTOP_USER@$ip" \
         "$LROS; export ROS_DOMAIN_ID=$DOMAIN; unset ROS_DISCOVERY_SERVER; \
-         timeout 6 ros2 topic info $t 2>/dev/null | grep -oP 'Subscription count: \K[0-9]+'" 2>/dev/null || true)
+         timeout -k 3 6 ros2 topic info $t 2>/dev/null | grep -oP 'Subscription count: \K[0-9]+'" 2>/dev/null || true)
     printf "      %-42s %s\n" "$t" "${c:-0}"
   done
   # ...and subscribed is not the same as receiving: on 2026-11-01 a Jazzy laptop was
@@ -1438,7 +1438,7 @@ PY
     t=${tt%%:*}
     got=$(timeout 30 ssh $LSSH "$LAPTOP_USER@$ip" \
         "$LROS; export ROS_DOMAIN_ID=$DOMAIN; unset ROS_DISCOVERY_SERVER; \
-         timeout 20 ros2 topic echo --once --field header.stamp.sec $t ${tt#*:} 2>/dev/null | grep -m1 -oE '[0-9]+'" 2>/dev/null || true)
+         timeout -k 3 20 ros2 topic echo --once --field header.stamp.sec $t ${tt#*:} 2>/dev/null | grep -m1 -oE '[0-9]+'" 2>/dev/null || true)
     printf "      %-42s %s\n" "$t" "$([ -n "$got" ] && echo 'OK (a message arrived)' || echo 'NONE in 20 s')"
   done
   [ "$ldistro" = lyrical ] || echo "  ! the laptop is on ${ldistro:-?}, not lyrical: on the laptop run  sudo bash ~/setup_lyrical_laptop.sh  then ./rover view --restart"
@@ -1731,7 +1731,7 @@ net)
   if running; then
     echo "  biggest ROS streams (what a weak link has to carry):"
     for t in /camera/color/image_raw/compressed /ghost_clear/grid /scan /map; do
-      printf '    %-40s ' "$t"; rexec "timeout 7 ros2 topic bw $t 2>/dev/null | awk '/B\/s/{print \$1,\$2; exit}'" || echo "-"
+      printf '    %-40s ' "$t"; rexec "timeout -k 3 7 ros2 topic bw $t 2>/dev/null | awk '/B\/s/{print \$1,\$2; exit}'" || echo "-"
     done
   fi
   ;;
