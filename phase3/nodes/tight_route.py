@@ -27,7 +27,9 @@ HOW
     plan still fits after a centimetre of slide. Points are those reach and
     goal_exec decide on (LiDAR + the fused camera map), not nav2's costmap.
     Cost: metres driven, reverse x3 (blind for low things behind), and each
-    turn a fixed price plus its angle, so few, small turns win.
+    turn a fixed price plus its angle, so few, small turns win. Steered by the
+    walking distance to the target around the points (_guide), not the
+    straight line, so a dead end beside the goal is not searched first.
 
     Done = within GOAL_TOL of the target. The target is the goal when it is
     within REACH_M, else the farthest point toward it that fits (reach_node).
@@ -62,6 +64,7 @@ KEY_XY, KEY_TH = 0.04, math.radians(15)
 H_WEIGHT = 1.3              # >1: greedier toward the target -- any fitting way, found fast
 CROP = 1.45                   # m: points beyond this from a pose cannot touch any move (1 m drive + body + margin)
 MERGE_MAX = 1.5               # m: goal_exec's MAX_LEG
+GUIDE = True                  # steer by the walking distance (_guide), not the straight line
 
 
 def _local(pts, st):
@@ -126,6 +129,62 @@ def _max_turn(ge, p, k, upto):
     return float(ang[first - 1]) if first > 0 else 0.0
 
 
+GUIDE_RES = 0.02              # m per cell of the walking-distance guide
+GUIDE_CLEAR = 0.16            # m: the body's inner half-width (0.178) less a cell's half-diagonal
+
+
+def _guide(pts, target):
+    """Walking distance to the target for the rover's centre, around obstacles.
+
+    WHY (twin door49, 2026-11-01): nav2 left the rover in the pocket between the
+    open door leaf and the wall. Steered by the straight line, the search filled
+    that pocket first: 14-18k poses to find the way out and round, ~20 s at the
+    Jetson's ~800 poses/s, so it gave up at TIGHT_BUDGET_S every time.
+    Whatever its heading, the outline holds a circle of radius min(FRONT, REAR,
+    SIDE) about base_link, so the centre stays that far from every point: cells
+    nearer than GUIDE_CLEAR are no place for it. The walking distance over the
+    rest leads the search out of dead ends. A cell it cannot reach is a pose no
+    plan can pass through. Returns h(x, y) or None (then the straight line)."""
+    from scipy import ndimage
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import dijkstra
+    half = SEARCH_R + 0.2
+    n = int(2 * half / GUIDE_RES) + 1
+    occ = np.zeros((n, n), bool)
+    ij = np.floor((pts + half) / GUIDE_RES).astype(int)
+    ij = ij[((ij >= 0) & (ij < n)).all(1)]
+    occ[ij[:, 0], ij[:, 1]] = True
+    free = ndimage.distance_transform_edt(~occ) * GUIDE_RES > GUIDE_CLEAR
+    idx = -np.ones((n, n), int)
+    idx[free] = np.arange(int(free.sum()))
+    rows, cols, w = [], [], []
+    for di, dj in ((0, 1), (1, 0), (1, 1), (1, -1)):
+        a = idx[max(0, -di):n - max(0, di), max(0, -dj):n - max(0, dj)]
+        b = idx[max(0, di):n - max(0, -di) or None, max(0, dj):n - max(0, -dj) or None]
+        ok = (a >= 0) & (b >= 0)
+        rows.append(a[ok]); cols.append(b[ok])
+        w.append(np.full(int(ok.sum()), GUIDE_RES * math.hypot(di, dj)))
+    m = int(free.sum())
+    if not m:
+        return None
+    g = coo_matrix((np.concatenate(w), (np.concatenate(rows), np.concatenate(cols))), shape=(m, m)).tocsr()
+    # every free cell within GOAL_TOL of the target is "there"
+    xs = (np.arange(n) * GUIDE_RES - half + GUIDE_RES / 2)
+    gx, gy = np.meshgrid(xs, xs, indexing='ij')
+    src = idx[free & (np.hypot(gx - target[0], gy - target[1]) <= GOAL_TOL)]
+    if not len(src):
+        return None
+    dist = np.full((n, n), np.inf)
+    dist[free] = dijkstra(g, directed=False, indices=src, min_only=True)
+
+    def h(x, y):
+        i, j = int((x + half) / GUIDE_RES), int((y + half) / GUIDE_RES)
+        if 0 <= i < n and 0 <= j < n:
+            return float(dist[i, j])
+        return math.hypot(target[0] - x, target[1] - y)
+    return h
+
+
 def _inside_now(p):
     """Points within goal_exec's own MARGIN of the outline where the rover
     stands: goal_exec would call it touching. (Within PLAN_MARGIN is fine at
@@ -152,8 +211,13 @@ def plan(pts, target, ge, budget_s=BUDGET_S):
     if _inside_now(_local(pts, start)).any():
         return None, {'why': 'start within 1 cm of something', 'ms': 0, 'expanded': 0}
 
+    guide = _guide(pts, (tx, ty)) if GUIDE else None
+    guide_ms = round((time.time() - t0) * 1000)
+
     def h(st):
-        return math.hypot(tx - st[0], ty - st[1])
+        e = math.hypot(tx - st[0], ty - st[1])
+        # the guide measures to the edge of the GOAL_TOL disc: never below the straight line's view of it
+        return max(guide(st[0], st[1]), e - GOAL_TOL) if guide is not None else e
 
     def key(st):
         return (round(st[0] / KEY_XY), round(st[1] / KEY_XY), round(wrap(st[2]) / KEY_TH))
@@ -165,7 +229,8 @@ def plan(pts, target, ge, budget_s=BUDGET_S):
     tie = 0
     while pq:
         if time.time() - t0 > budget_s or n > MAX_EXPAND:
-            return None, {'why': 'no fit found in the time', 'ms': round((time.time() - t0) * 1000), 'expanded': n}
+            return None, {'why': 'no fit found in the time', 'ms': round((time.time() - t0) * 1000), 'expanded': n,
+                          'guide_ms': guide_ms}
         _, cost, _, st, via = heapq.heappop(pq)
         k = key(st)
         if k in seen:
@@ -173,14 +238,14 @@ def plan(pts, target, ge, budget_s=BUDGET_S):
         seen.add(k)
         parent[k] = via
         n += 1
-        if h(st) <= GOAL_TOL:
+        if math.hypot(tx - st[0], ty - st[1]) <= GOAL_TOL:      # arrived: the straight line, not the guide
             steps = []
             while parent[k] is not None:
                 pk, mv = parent[k]
                 steps.append(mv)
                 k = pk
             steps.reverse()
-            return merge(steps), {'ms': round((time.time() - t0) * 1000), 'expanded': n,
+            return merge(steps), {'ms': round((time.time() - t0) * 1000), 'expanded': n, 'guide_ms': guide_ms,
                                   'end': [round(st[0], 3), round(st[1], 3), round(math.degrees(st[2]), 1)]}
         p = _local(pts, st)
         c, s = math.cos(st[2]), math.sin(st[2])
@@ -191,9 +256,12 @@ def plan(pts, target, ge, budget_s=BUDGET_S):
             if math.hypot(nst[0], nst[1]) > SEARCH_R or key(nst) in seen:
                 continue
             if _drive_ok(ge, p, d):
+                hn = h(nst)
+                if hn == math.inf:
+                    continue
                 g = cost + (abs(d) if d > 0 else REVERSE_X * abs(d))
                 tie += 1
-                heapq.heappush(pq, (g + H_WEIGHT * h(nst), g, tie, nst, (k, ('drive', d))))
+                heapq.heappush(pq, (g + H_WEIGHT * hn, g, tie, nst, (k, ('drive', d))))
         free = {k_: _max_turn(ge, p, k_, max(abs(a) for a in TURNS)) for k_ in (1, -1)}
         for a in TURNS:
             sl = R(st[2]) @ ((np.eye(2) - R(a)) @ ge.P[1 if a > 0 else -1])
@@ -201,9 +269,12 @@ def plan(pts, target, ge, budget_s=BUDGET_S):
             if key(nst) in seen:
                 continue
             if abs(a) <= free[1 if a > 0 else -1] + 1e-9:
+                hn = h(nst)
+                if hn == math.inf:
+                    continue
                 g = cost + TURN_COST + TURN_COST_RAD * abs(a)
                 tie += 1
-                heapq.heappush(pq, (g + H_WEIGHT * h(nst), g, tie, nst, (k, ('turn', a))))
+                heapq.heappush(pq, (g + H_WEIGHT * hn, g, tie, nst, (k, ('turn', a))))
     return None, {'why': 'no fit: every way is blocked', 'ms': round((time.time() - t0) * 1000), 'expanded': n}
 
 

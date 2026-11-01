@@ -175,3 +175,20 @@ if __name__ == '__main__':
                 print(f'FAIL {name}: {e}')
     print('all passed' if not fails else f'{fails} failed')
     sys.exit(1 if fails else 0)
+
+
+def test_out_of_the_door_leaf_pocket():
+    # Twin door49, 2026-11-01: nav2 left the rover between the open door leaf and
+    # the wall, facing away from the door. Steered by the straight line, the
+    # search filled the pocket: 14-18k poses, ~20 s at the Jetson's ~800/s, so
+    # it gave up at TIGHT_BUDGET_S every time. The walking-distance guide finds
+    # the way out and round the leaf in ~3k. Counted in poses, not seconds, so
+    # the test means the same on every computer.
+    pts = np.load(HERE / 'fixture_twin_door49_pocket_2026-11-01.npy').astype(float)
+    target = (-2.077, -0.077)
+    steps, info = T.plan(pts, target, ge(), budget_s=60.0)
+    assert steps, info
+    assert info['expanded'] <= 6000, f"{info['expanded']} poses: more than the Jetson searches in 8 s"
+    end = replay(pts, steps, ge())
+    assert math.hypot(end[0] - target[0], end[1] - target[1]) <= T.GOAL_TOL + 0.01, end
+    print(f'  door leaf pocket -> bedroom: {T.describe(steps)} ({info["expanded"]} poses, {info["ms"]} ms)')
