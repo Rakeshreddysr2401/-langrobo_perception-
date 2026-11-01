@@ -192,3 +192,18 @@ def test_out_of_the_door_leaf_pocket():
     end = replay(pts, steps, ge())
     assert math.hypot(end[0] - target[0], end[1] - target[1]) <= T.GOAL_TOL + 0.01, end
     print(f'  door leaf pocket -> bedroom: {T.describe(steps)} ({info["expanded"]} poses, {info["ms"]} ms)')
+
+
+def test_line_up_at_the_mouth_of_a_44cm_way():
+    # Twin chairs44, 2026-11-01: stopped at the mouth of the 44 cm way 3.3 deg
+    # off its line, the chair's splayed feet beside both front corners (a right
+    # turn of more than 3 deg touches). The way needs ~1.5 deg: back out a
+    # little, line up with 5 deg turns, in.
+    pts = np.load(HERE / 'fixture_twin_chairs44_mouth_2026-11-01.npy').astype(float)
+    target = (1.344, -0.1)
+    steps, info = T.plan(pts, target, ge(), budget_s=60.0)
+    assert steps, info
+    assert info['expanded'] <= 6000, f"{info['expanded']} poses: more than the Jetson searches in 8 s"
+    end = replay(pts, steps, ge())
+    assert math.hypot(end[0] - target[0], end[1] - target[1]) <= T.GOAL_TOL + 0.01, end
+    print(f'  chairs44 mouth -> through: {T.describe(steps)} ({info["expanded"]} poses, {info["ms"]} ms)')

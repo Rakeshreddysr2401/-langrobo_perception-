@@ -52,7 +52,11 @@ from goal_exec import FRONT, MARGIN, REAR, SIDE, R, wrap
 PLAN_MARGIN = 0.02            # m: goal_exec drives at 1 cm; the plan keeps 2
 DRIVES = (0.05, 0.10, 0.20, 0.35, 0.50, 1.00, -0.05, -0.10)   # m, + is forward
 BACK_MAX = 0.10               # m: the largest reverse (blind below the LiDAR behind)
-TURNS = tuple(math.radians(a) for a in (15, 30, 45, 90, -15, -30, -45, -90))
+# 5 deg turns and a 5 deg pose key (twin chairs44, 2026-11-01): the 44 cm way leaves
+# 1 cm a side, so the rover must line up to ~1.5 deg. Stopped at its mouth 3.3 deg
+# off, the corners let it turn right only 3 deg; with 15 deg keys the lined-up pose
+# behind it counted as already seen (the start's bucket) and 22k poses found nothing.
+TURNS = tuple(math.radians(a) for a in (5, 15, 30, 45, 90, -5, -15, -30, -45, -90))
 TURN_COST = 0.30              # per turn, in metres of driving: a turn is ~6 s with the settle, and slides
 TURN_COST_RAD = 0.15          # per radian turned
 REVERSE_X = 3.0
@@ -60,7 +64,7 @@ GOAL_TOL = 0.12               # m
 SEARCH_R = 2.6                # m from the start: beyond, nothing has been looked at
 BUDGET_S = 3.0                # s of search, then give up (None)
 MAX_EXPAND = 40000
-KEY_XY, KEY_TH = 0.04, math.radians(15)
+KEY_XY, KEY_TH = 0.04, math.radians(5)
 H_WEIGHT = 1.3              # >1: greedier toward the target -- any fitting way, found fast
 CROP = 1.45                   # m: points beyond this from a pose cannot touch any move (1 m drive + body + margin)
 MERGE_MAX = 1.5               # m: goal_exec's MAX_LEG
