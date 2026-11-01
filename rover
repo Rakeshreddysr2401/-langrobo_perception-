@@ -1415,8 +1415,8 @@ PY
   fi
 
   # Running is not the same as receiving. A blank RViz still shows as running.
-  # The laptop's ROS: the robot's Lyrical when installed (rover_live.sh), else Jazzy.
-  LROS='for d in lyrical jazzy; do [ -f /opt/ros/$d/setup.bash ] && { source /opt/ros/$d/setup.bash; break; }; done'
+  # The laptop's ROS: the robot's Lyrical, the only one there (rover_live.sh).
+  LROS='source /opt/ros/lyrical/setup.bash'
   echo "  subscriptions (0 means it is connected to nothing):"
   for t in /robot_description /scan /map /fusion/path; do
     c=$(timeout 15 ssh $LSSH "$LAPTOP_USER@$ip" \
@@ -1427,7 +1427,7 @@ PY
   # ...and subscribed is not the same as receiving: on 2026-11-01 a Jazzy laptop was
   # subscribed to everything and got 0 Hz of the camera and the global costmap (big
   # messages do not cross Fast DDS 2.14 <-> 3.6). Measure them where RViz runs.
-  ldistro=$(timeout 15 ssh $LSSH "$LAPTOP_USER@$ip" "$LROS; echo \$ROS_DISTRO" 2>/dev/null || true)
+  ldistro=$(timeout 15 ssh $LSSH "$LAPTOP_USER@$ip" "$LROS 2>/dev/null; echo \$ROS_DISTRO" 2>/dev/null || true)
   # ONE message, not a rate: `ros2 topic hz` needs seconds to start on these
   # machines and a 5 Hz topic gave false NONEs in a 10 s window (2026-11-01:
   # 0/8 "fresh readers" while a plain subscriber got its first frame in 0.6 s).

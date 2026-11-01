@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# One-time ROOT setup on the RViz laptop: ROS 2 Lyrical beside Jazzy (2026-11-01).
+# One-time ROOT setup on a laptop: ROS 2 Lyrical, the robot's distro and the only ROS there
+# (2026-11-01; the RViz laptop, then the Isaac laptop).
 #
 # Why: the robot (Jetson + Pi 5) is on Lyrical (Fast DDS 3.6) since 2026-10-25; this
 # laptop was still Jazzy (Fast DDS 2.14). Small topics crossed (scan, pose, maps), the
@@ -10,8 +11,8 @@
 # What: NVIDIA's Lyrical repo (the Jetson image and the Pi 5 use it; plus packages.ros.org
 # when missing, for two of its Python deps), RViz with its
 # default displays (all rover_live.rviz uses), and the Jetson's DDS socket buffers.
-# Jazzy stays installed as the rollback; nothing is removed. rover_live.sh picks
-# Lyrical when it is there.
+# Any ROS 2 Jazzy is then removed (owner, 2026-11-01: one ROS everywhere, as on the Pi 5).
+# rover_live.sh and kino_sim's ./sim use Lyrical only.
 #
 # Run on the laptop:  sudo bash ~/setup_lyrical_laptop.sh
 # Then on the Jetson: ./rover view --restart
@@ -36,6 +37,12 @@ apt-get update
 apt-get install -y --no-install-recommends \
   ros-lyrical-ros-base ros-lyrical-rviz2 ros-lyrical-rviz-default-plugins \
   ros-lyrical-compressed-image-transport   # the camera display: without it RViz takes ".../compressed" for a raw Image topic
+
+if dpkg -l 'ros-jazzy-*' 2>/dev/null | grep -q '^ii'; then
+  echo "      removing ROS 2 Jazzy (Lyrical is the only ROS here)"
+  apt-get purge -y -q 'ros-jazzy-*' > /dev/null
+  apt-get autoremove -y -q --purge > /dev/null
+fi
 
 echo "[2/2] DDS socket buffers as on the Jetson and the Pi 5 (this laptop had 208 KB default)"
 printf "net.core.rmem_max=67108864\nnet.core.rmem_default=8388608\n" > /etc/sysctl.d/60-kino-dds.conf

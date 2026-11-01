@@ -9,13 +9,11 @@
 # while subscribing to nothing. That cost an evening; this script exists so it
 # cannot happen again.
 export DISPLAY="${DISPLAY:-:0}"
-# Lyrical = the robot's distro (2026-10-25). Jazzy RViz saw the scan and maps but
-# never the camera or the global costmap (2026-11-01): big messages do not cross
-# Fast DDS 2.14 <-> 3.6. setup_lyrical_laptop.sh installs it; Jazzy is the fallback.
-for d in lyrical jazzy; do
-  [ -f "/opt/ros/$d/setup.bash" ] && { source "/opt/ros/$d/setup.bash"; break; }
-done
-[ "$ROS_DISTRO" = lyrical ] || echo "rover_live.sh: on $ROS_DISTRO, not lyrical -- no camera or global costmap (sudo bash ~/setup_lyrical_laptop.sh)" >&2
+# Lyrical = the robot's distro, the only ROS on the laptops (2026-11-01). A Jazzy RViz
+# saw the scan and maps but never the camera or the global costmap: big messages do
+# not cross Fast DDS 2.14 <-> 3.6. setup_lyrical_laptop.sh installs it.
+[ -f /opt/ros/lyrical/setup.bash ] || { echo "rover_live.sh: no ROS 2 Lyrical here (sudo bash ~/setup_lyrical_laptop.sh)" >&2; exit 1; }
+source /opt/ros/lyrical/setup.bash
 # must match the rover. `TWIN=1 ./rover view` sets 42 and its own config: the
 # The twin's window, beside the real one.
 export ROS_DOMAIN_ID="${ROVER_RVIZ_DOMAIN:-0}"

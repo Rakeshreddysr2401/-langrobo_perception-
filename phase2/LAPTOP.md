@@ -7,14 +7,15 @@ changes — RViz only subscribes.
 
 ## 1. Requirements
 
-- **ROS 2 Jazzy** on the laptop (Ubuntu 24.04). Other distros will mostly
-  interoperate over DDS but message definitions can differ; Jazzy avoids that.
+- **ROS 2 Lyrical** on the laptop (Ubuntu 24.04), the robot's distro and the only ROS
+  there: `sudo bash ~/setup_lyrical_laptop.sh` (pushed by `./rover view`). A Jazzy laptop
+  got the scan and maps but never the camera or the global costmap (2026-11-01).
 - **Same WiFi** as the rover — `Airtel_Singireddy's`, the `192.168.1.x` network.
 
 ## 2. Every session, on the laptop
 
 ```bash
-source /opt/ros/jazzy/setup.bash
+source /opt/ros/lyrical/setup.bash
 export ROS_DOMAIN_ID=0
 unset ROS_DISCOVERY_SERVER          # a stale one makes nodes silently invisible
 export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
@@ -113,7 +114,7 @@ They are opposite, and both are already set correctly in `rover_live.rviz`.
 
 The 3D mesh needs `nvblox_rviz_plugin`, which is in the rover's container but
 not on the laptop. Everything above uses standard ROS message types that any
-Jazzy install renders, so nothing here depends on that plugin. The 2D map is
+ROS 2 install renders, so nothing here depends on that plugin. The 2D map is
 what nav2 plans on anyway.
 
 ## 5. If the laptop is not available
@@ -130,7 +131,7 @@ equivalent by hand, if you need to vary something:
 ```bash
 xhost +local:docker
 docker exec -it -e DISPLAY=:0 rover bash -lc \
-  'source /opt/ros/jazzy/setup.bash; export ROS_DOMAIN_ID=0; \
+  'source /opt/ros/lyrical/setup.bash; export ROS_DOMAIN_ID=0; \
    unset ROS_DISCOVERY_SERVER; rviz2 -d /opt/rover/../phase2/rviz/rover_live.rviz'
 ```
 
