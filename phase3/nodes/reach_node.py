@@ -105,6 +105,12 @@ LEG_MIN = 1.0
 # seconds of thinking in a doorway is cheaper than giving up; no way at all is
 # still answered when the search runs out of poses to try.
 TIGHT_BUDGET_S = 8.0
+# When this folder exists, every tight-route search that finds nothing saves its
+# exact inputs there (points, target, pose, learned pivot) for an offline replay:
+# phase3/tools/replay_tight.py. Twin corridor_s 2026-11-01: a replay on the
+# world's true shapes found the way in 63 poses, the twin's own points none in
+# 5571 -- only the points the rover had explain a failure.
+TIGHT_DUMP_DIR = Path(os.environ.get('ROVER_STATE_DIR', '/logs')) / 'tight_dumps'
 TIGHT_SETUP_M = 0.10   # m: a tight-route drive this short only sets up the next move (run together)
 LEG_STEP = 0.4
 MAX_LEGS = 12
@@ -248,6 +254,19 @@ class Reach(GP.Pass):
         self.stop_req = True                       # preempt whatever runs
 
     # ── helpers ─────────────────────────────────────────────────────────────
+    def dump_tight(self, mode, every, lidar, camera, tb, ge, info):
+        """Save a failed tight search's inputs when TIGHT_DUMP_DIR exists (see there)."""
+        if not TIGHT_DUMP_DIR.is_dir():
+            return
+        try:
+            f = TIGHT_DUMP_DIR / f"{time.strftime('%Y%m%d-%H%M%S')}_{int(time.time() * 1000) % 1000:03d}_{mode}.npz"
+            np.savez_compressed(f, every=np.asarray(every, np.float32), lidar=np.asarray(lidar, np.float32),
+                                camera=np.asarray(camera, np.float32), target=np.asarray(tb, float),
+                                pose=np.asarray(self.pose[:3], float), pivot=json.dumps(ge.pivot_state()),
+                                info=json.dumps(info), budget_s=TIGHT_BUDGET_S)
+        except Exception as e:                  # a dump must never stop a goal
+            self.get_logger().warning(f'tight dump failed: {e}')
+
     def say(self, **d):
         d['t'] = round(time.time(), 1)
         if self.goal_stamp:
@@ -1188,8 +1207,11 @@ class Reach(GP.Pass):
                 mode = 'all'
                 check = ''
                 if steps is None:
+                    self.dump_tight('all', every, lidar, camera, tb, ge, info)
                     steps, info = TRT.plan(lidar, tb, ge, budget_s=TIGHT_BUDGET_S)
                     mode = 'lidar'
+                    if steps is None:
+                        self.dump_tight('lidar', every, lidar, camera, tb, ge, info)
                     k, hits = TRT.first_blocked(steps, camera, ge) if steps else (None, None)
                     if k is not None and k > 0:
                         # drive the part the camera allows: a new viewpoint on the rest
