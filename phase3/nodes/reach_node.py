@@ -1194,10 +1194,15 @@ class Reach(GP.Pass):
                     why = f'no {RL_GAIN_M * 100:.0f} cm of progress in {RL_STALL_S:.0f} s'
                     return result
                 vel = getattr(self, 'odom_vel', (0.0, 0.0))
-                obs = RD.observe(pts, gb, gobs, vel, last, pack, now - t0)
-                pvx, pwz = RD.to_cmd(pol(obs))
+                # what the costmap remembers beside / behind goes to the policy too, not only the
+                # shield: training shows it every obstacle all round (twin chairs50 2026-11-07: a
+                # chair foot beside, out of the camera's view, unseen by the policy -- it kept
+                # steering at it, the shield kept refusing, 33 s without progress, 0.9 cm)
                 mc = MC.for_checks(self.lcm, self.pose)
-                vx, wz, chg, stp = RD.shield(np.vstack([pts, mc]) if len(mc) else pts, pvx, pwz, vel, pack)
+                seen = np.vstack([pts, mc]) if len(mc) else pts
+                obs = RD.observe(seen, gb, gobs, vel, last, pack, now - t0)
+                pvx, pwz = RD.to_cmd(pol(obs))
+                vx, wz, chg, stp = RD.shield(seen, pvx, pwz, vel, pack)
                 if rec is not None:
                     rec.append((now - t0, np.asarray(self.pose, np.float32), obs, np.float32([pvx, pwz, vx, wz]),
                                 np.asarray(pts, np.float16), np.asarray(mc, np.float16)))
