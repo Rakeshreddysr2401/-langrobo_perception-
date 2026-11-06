@@ -1183,6 +1183,14 @@ class Reach(GP.Pass):
                     h = (TRT._guide(np.asarray(pts, float), gb, half=min(4.0, max(TRT.SEARCH_R + 0.2, d + 0.4)),
                                     res=0.05, clear=0.185) if len(pts) else None)
                     gpose, gt = (x, y, th), now
+                    if steps == 0 and len(pts) and (h is None or not any(
+                            math.isfinite(h(r * math.cos(k * math.pi / 4), r * math.sin(k * math.pi / 4)))
+                            for r in (0.0, 0.05, 0.10) for k in range(8))):    # 5 cm cells: not just its own
+                        # no way for the rover's centre to the goal on what it sees (the goal is ON
+                        # something, or walled off): RL cannot help. Twin ledge_probe 2026-11-07:
+                        # a goal on a 10 cm ledge, 33 s of RL before "no progress".
+                        result, why = 'none', 'the goal is not reachable on the points seen'
+                        return result
                 gx, gy = x - gpose[0], y - gpose[1]
                 cg, sg = math.cos(gpose[2]), math.sin(gpose[2])
                 rx, ry, rth = cg * gx + sg * gy, -sg * gx + cg * gy, math.atan2(math.sin(th - gpose[2]), math.cos(th - gpose[2]))
