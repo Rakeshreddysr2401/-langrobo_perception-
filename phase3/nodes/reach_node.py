@@ -1638,6 +1638,9 @@ class Reach(GP.Pass):
                     continue
                 if out == 'cancelled' or self.stop_req:
                     break
+                # gave up close to something: step off first, or the tight route
+                # refuses to start ("start within 1 cm", twin door49 2026-11-07)
+                self.escape(attempt)
             if jammed and tight_rounds < TIGHT_ROUNDS:
                 tight_rounds += 1
                 out = self.tight_round(attempt, g, t0 + MAX_S)
