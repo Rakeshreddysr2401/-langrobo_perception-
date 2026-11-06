@@ -54,3 +54,9 @@ logs/survey_current
 
 # model weights / TensorRT engines: large, downloadable, built per JetPack (./rover engine)
 models/
+
+# the learned driver: on/off + model (./rover rl), its episode log, failed tight searches
+logs/rl_mode
+logs/rl_model
+logs/rl_episodes.jsonl
+logs/tight_dumps/
