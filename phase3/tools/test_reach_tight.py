@@ -79,6 +79,9 @@ class FakeReach:
     def house_route(self, g):
         return None, "no house map in this test"
 
+    def dump_tight(self, *a):
+        """reach saves failed searches since abfc30c; a test writes no files."""
+
     class sonar:                       # no sonars in this test (as with an old URDF)
         used = 0
 
