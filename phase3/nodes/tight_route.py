@@ -137,7 +137,7 @@ GUIDE_RES = 0.02              # m per cell of the walking-distance guide
 GUIDE_CLEAR = 0.16            # m: the body's inner half-width (0.178) less a cell's half-diagonal
 
 
-def _guide(pts, target):
+def _guide(pts, target, half=None, res=None, clear=None):
     """Walking distance to the target for the rover's centre, around obstacles.
 
     WHY (twin door49, 2026-11-01): nav2 left the rover in the pocket between the
@@ -152,7 +152,10 @@ def _guide(pts, target):
     from scipy import ndimage
     from scipy.sparse import coo_matrix
     from scipy.sparse.csgraph import dijkstra
-    half = SEARCH_R + 0.2
+    # half / res / clear: the learned driver's guide (reach rl_round) covers goals up to
+    # RL_GOAL_M at the training env's 5 cm and clearance; the tight route keeps its own
+    GUIDE_RES, GUIDE_CLEAR = (res or globals()['GUIDE_RES']), (clear or globals()['GUIDE_CLEAR'])
+    half = half or SEARCH_R + 0.2
     n = int(2 * half / GUIDE_RES) + 1
     occ = np.zeros((n, n), bool)
     ij = np.floor((pts + half) / GUIDE_RES).astype(int)

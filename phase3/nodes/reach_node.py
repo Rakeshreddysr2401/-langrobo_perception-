@@ -176,6 +176,11 @@ TIGHT_ROUNDS = 2
 RL_ON = os.environ.get('REACH_RL', '0') == '1'
 RL_MODEL = os.environ.get('REACH_RL_MODEL', '/models/rl/current/policy.npz')
 RL_ROUNDS = 1
+# the policy is aimed at the GOAL itself up to RL_GOAL_M (trained on goals 0.8-3.5 m, with
+# a walking-distance guide that leads round the door leaf); farther, at the tight target.
+# Twin door49 2026-11-07: aimed at reach's tight target 2.5 m along the straight line, it
+# drove into the hall corner beside the door leaf in 11 s -- and nav2 failed again from there.
+RL_GOAL_M = 3.5
 RL_DONE_M = 0.25
 RL_MAX_S = 60.0
 RL_STALL_S, RL_GAIN_M = 15.0, 0.10
@@ -1131,7 +1136,7 @@ class Reach(GP.Pass):
         (rl_drive.py). 'reached' (within RL_DONE_M: goal_exec finishes), 'none' (no
         target or no policy), 'failed' (gave up: the old chain goes on) or 'cancelled'."""
         pol = self.rl_policy()
-        tgt = self.tight_target(g)
+        tgt = (g[0], g[1]) if self.dist(g) <= RL_GOAL_M else self.tight_target(g)
         if pol is None or tgt is None:
             return 'none'
         P = self.pivots()
@@ -1171,7 +1176,8 @@ class Reach(GP.Pass):
                 if len(pts):
                     minclear = min(minclear, float(RD.outline_dist(pts[:, 0], pts[:, 1]).min()))
                 if now - gt > 1.0:                      # the walking-distance guide, once a second
-                    h = TRT._guide(np.asarray(pts, float), gb) if len(pts) else None
+                    h = (TRT._guide(np.asarray(pts, float), gb, half=min(4.0, max(TRT.SEARCH_R + 0.2, d + 0.4)),
+                                    res=0.05, clear=0.185) if len(pts) else None)
                     gpose, gt = (x, y, th), now
                 gx, gy = x - gpose[0], y - gpose[1]
                 cg, sg = math.cos(gpose[2]), math.sin(gpose[2])
