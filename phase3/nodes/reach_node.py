@@ -1679,9 +1679,14 @@ class Reach(GP.Pass):
                     continue
                 if out == 'cancelled' or self.stop_req:
                     break
-                # gave up close to something: step off first, or the tight route
-                # refuses to start ("start within 1 cm", twin door49 2026-11-07)
-                self.escape(attempt)
+                # gave up within 1 cm of something: step off first, or the tight route
+                # refuses to start ("start within 1 cm", twin door49 2026-11-07: 0.5 cm).
+                # Not when more is open: twin chairs50 the same night, 1.4 cm open, the
+                # escape SLID 30 cm along a chair foot down to 0.3 cm, while the tight
+                # route then planned the way in 0.1 s from where it stood.
+                pts_, cells_ = self.near_now(self.scans[-1:])
+                if self.gap_all(pts_, cells_) < 0.012:
+                    self.escape(attempt)
             if jammed and tight_rounds < TIGHT_ROUNDS:
                 tight_rounds += 1
                 out = self.tight_round(attempt, g, t0 + MAX_S)
