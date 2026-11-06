@@ -51,9 +51,9 @@ from pathlib import Path
 import numpy as np
 import rclpy
 from geometry_msgs.msg import PoseStamped, Twist
-from nav_msgs.msg import Odometry
+from nav_msgs.msg import OccupancyGrid, Odometry
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from rclpy.time import Time
 from sensor_msgs.msg import LaserScan, PointCloud2
 from sensor_msgs_py import point_cloud2
@@ -64,6 +64,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from depth_obstacles import MIN_HITS  # noqa: E402
 from fused_obstacles import make_obstacles  # noqa: E402
 from goal_exec import FRONT, REAR, SIDE, GoalExec, wrap  # noqa: E402
+import memory_cells as MC  # noqa: E402
 from sonar_feed import SonarFeed  # noqa: E402
 OWN_PAD = 0.005   # m: LiDAR points this far past the outline still count as the rover
 
@@ -121,6 +122,11 @@ class GoalExecNode(Node):
         self.create_subscription(String, '/goal_exec/pass', self._pass, 10)
         self.create_subscription(PoseStamped, '/goal_exec/turn', self._turn, 10)
         self.create_subscription(Empty, '/goal_exec/cancel', self._cancel, 10)
+        # what the costmap remembers beside / behind (memory_cells.py: twin chairs44 2026-11-06)
+        self.lcm = None
+        self.create_subscription(OccupancyGrid, '/local_costmap/costmap', lambda m: setattr(self, 'lcm', m),
+                                 QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                                            reliability=ReliabilityPolicy.RELIABLE))
         self.buf = Buffer()
         self.tfl = TransformListener(self.buf, self)
         # the front sonars as a witness: an echo close ahead that the LiDAR and the
@@ -296,6 +302,9 @@ class GoalExecNode(Node):
         sp = self.sonar.points(pts)
         if len(sp):
             pts = sp if pts is None else np.vstack([pts, sp])
+        mc = MC.for_checks(self.lcm, self.pose)
+        if len(mc):
+            pts = mc if pts is None else np.vstack([pts, mc])
         # the controller's clock is the POSE's stamp: arrival times on this
         # loaded Jetson bunch up (0.6-441 ms apart for poses stamped 50 ms apart)
         st = m.header.stamp

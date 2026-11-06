@@ -220,13 +220,22 @@ def _ex():
     return GoalExec(prior)
 
 
+def _memory(n):
+    """What the local costmap remembers beside / behind (memory_cells.py), when the node has it (reach)."""
+    lcm = getattr(n, 'lcm', None)
+    if lcm is None:
+        return np.zeros((0, 2))
+    import memory_cells as MC
+    return MC.for_checks(lcm, n.pose)
+
+
 def turn_to(n, heading, ex=None, tol_deg=3.0):
     """Turn in place to `heading` (odom) on the fused heading; the swing is
     checked first against the outline swept about the learned pivot (5 cm).
     Returns '' or why it did not turn."""
     ex = ex or _ex()
     e = wrap(heading - n.pose[2])
-    pts = np.vstack(n.scans[-3:] + [n.dobs.points_base(n.pose)])
+    pts = np.vstack(n.scans[-3:] + [n.dobs.points_base(n.pose), _memory(n)])
     ok, why = ex.turn_clear(pts, e)
     if not ok:
         return why
@@ -238,7 +247,7 @@ def turn_to(n, heading, ex=None, tol_deg=3.0):
             why = 'pose or scan stale: stopped'
             break
         e = wrap(heading - n.pose[2])
-        ok, w_ = ex.turn_clear(np.vstack(n.scans[-1:] + [n.dobs.points_base(n.pose)]), e)
+        ok, w_ = ex.turn_clear(np.vstack(n.scans[-1:] + [n.dobs.points_base(n.pose), _memory(n)]), e)
         blocked = 0 if ok else blocked + 1
         if blocked >= ex.BLOCK_STEPS:
             why = 'blocked mid-turn: ' + w_
