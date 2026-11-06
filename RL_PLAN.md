@@ -59,7 +59,14 @@ Nothing is removed. `REACH_RL=0` gives today's robot exactly.
 | **observation** | 72 LiDAR beams (5°), each as **clearance from the body outline** along that beam (so the policy knows its own shape), clipped 0–3 m, last 2 scans; goal distance + bearing (sin, cos) + final-heading error; measured vx, wz; last action; **the live pivot estimate (px, py) and turn gain k** from goal_exec (§6 L1) |
 | **action** | vx ∈ [-0.12, 0.25] m/s, wz ∈ [-0.9, 0.9] rad/s, 10 Hz |
 | **network** | MLP 256-128-64, ~60 k parameters; < 1 ms on the Orin's CPU (onnxruntime) — no GPU taken from the camera/nvblox |
-| **v2 (later)** | per beam, the min of LiDAR and the camera's low points (nvblox slice) so shoes and chair feet under 25 cm are in the observation too, not only in the shield |
+| **v2** | per beam, the min of LiDAR and the camera's **fresh** low points (`tight_route.Evidence`: seen from two viewpoints, so a glossy-floor speck is not one) so shoes and chair feet under 25 cm are in the observation too; the two front sonars as two more ranges (the nose zone the camera cannot see) |
+| **not raw images** | the depth/colour image straight into the network was considered (owner, 2026-11-06) and left out: GPU cost on the 6 GB laptop and on the Orin, and images transfer sim → real far worse than points. The camera enters as points |
+
+**Why this helps where the map fails (owner's question, 2026-11-06).** The policy acts on what
+the sensors see *now*, 10 times a second, with no search to time out (door49, chairs44) and the
+slide learned (apt_hard jamb). It does not read the remembered map, so stale specks that closed
+corridor_s do not block it. It does **not** fix things no sensor sees (< 3 cm) or replace the map
+for room-to-room routes.
 
 ## 4. Training — Isaac Lab on the laptop
 
@@ -90,6 +97,8 @@ turn `k·(0.52|wz| − 0.21)`, 22 % turn following while driving, 0.2 s lag, 2�
 | lag | 0.1–0.3 s | |
 | LiDAR | ±1 cm noise, 2 % dropped beams, 0–0.1 s latency | C1 |
 | pose | ±1 cm, ±0.5° per step | fusion2 sd 0.6 cm |
+| false points | 0–8 specks near the path, gone on the next look | glossy floor, people walking past (S10, corridor_s) |
+| sonar | floor echoes, silent on soft things | sonar_witness.py rules |
 
 **Reward (per step):** + progress along the **walking distance** to the goal (grid BFS at reset,
 as tight_route's guide); +10 reached (within 5 cm, 10°); **−10 and end on contact**; −0.01 time;
