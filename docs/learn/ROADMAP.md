@@ -2,6 +2,11 @@
 
 Written 2026-11-06 for the owner: *"make a syllabus / roadmap for complete robotics, interviews, RL."*
 
+> **One file, two repos:** Jetson `~/rover/docs/learn/ROADMAP.md` and Pi 5
+> `~/ros2_ws/docs/learn/ROADMAP.md` hold the same text (like KINO_SYSTEM.md). Paths such as
+> `phase3/...` or `RL_PLAN.md` are in the **Jetson's `~/rover`**; Pi 5 paths start with `~/ros2_ws`.
+> Change it in one, copy it to the other.
+
 **The idea:** every topic is something this robot already does. Learn the theory, then open the
 file that does it, then run the command that shows it live. In an interview, "I built and
 debugged this on my own robot, here is the number I measured" beats any textbook answer.
