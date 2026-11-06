@@ -459,7 +459,7 @@ class Reach(GP.Pass):
     PINNED_S = 10.0
     PINNED_MOVE_M = 0.05
     PINNED_TURN = math.radians(10)
-    PINNED_GAP = 0.02                      # = nav2.yaml local footprint_padding
+    PINNED_GAP = 0.03                      # nav2.yaml collision_monitor Approach = body + 2.5 cm: nav2 freezes inside it
 
     def pinned(self, watch):
         now = watch[-1][0]
@@ -633,7 +633,7 @@ class Reach(GP.Pass):
     # a few cm STRAIGHT (a turn sweeps the corners into the wall): forward
     # first, back only a little (blind behind below the LiDAR plane), and
     # only a move whose whole sweep keeps at least today's gap.
-    ESCAPE_NEAR = 0.03                     # m: pinned = something this close to the outline
+    ESCAPE_NEAR = 0.035                    # m: pinned = something this close to the outline (> the monitor's 2.5 cm)
     ESCAPE_STEPS = (0.05, 0.10, -0.05)     # m along the heading
 
     @staticmethod

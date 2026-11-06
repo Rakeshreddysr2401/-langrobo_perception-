@@ -1023,13 +1023,20 @@ collision_monitor:
       # outline give a collision time of 0 and every nav2 command stops.
       # reach's escape then backs off on /cmd_vel directly (its own check).
       type: polygon
-      points: "[[0.192, 0.200], [0.192, -0.200], [-0.188, -0.200], [-0.188, 0.200]]"
+      # 2026-11-07: body + 2.5 cm (was + 1 cm). Twin home_real (RL on, all nav2): the fused
+      # pose jumped 13 cm for ~2 s and MPPI drove the outline 0.9 cm INTO a dining chair; on
+      # the way back MPPI pressed it to 0.1 cm off a wall for 20 s (and gap45: 1.3 cm, the
+      # apt_hard jamb 2026-11-01: -0.3 cm). This polygon reads the raw /scan in base_link,
+      # so a pose jump cannot fool it. nav2 now keeps to open floor; within 2.5 cm reach's
+      # pinned watch (PINNED_GAP 3 cm) hands over to escape / the learned driver / the
+      # tight route, which go closer on their own checks (2 cm / 1 cm).
+      points: "[[0.207, 0.215], [0.207, -0.215], [-0.203, -0.215], [-0.203, 0.215]]"
       action_type: approach
       # 1.0 s: at 0.35 m/s the outline keeps 35 cm of warning; at MPPI's
       # 0.05 m/s pocket crawl, 5 cm -- so it never blocks tight manoeuvring.
       time_before_collision: 1.0
       simulation_time_step: 0.05
-      min_points: 3                     # one stray LiDAR return is not a wall
+      min_points: 2                     # one stray return is not a wall; a 3 cm chair leg at 1 m is 2-3 returns
       visualize: true
       polygon_pub_topic: collision_monitor/approach
       enabled: true
