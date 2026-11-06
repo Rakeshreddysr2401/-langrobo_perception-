@@ -187,6 +187,9 @@ RL_STALL_S, RL_GAIN_M = 15.0, 0.10
 RL_STOPS = 20                  # 2 s of shield stops in a row
 RL_K = float(os.environ.get('REACH_RL_K', '0.85'))   # turn gain told to the policy (config/rover.yaml 'rover' pack)
 RL_LOG = Path(os.environ.get('ROVER_STATE_DIR', '/logs')) / 'rl_episodes.jsonl'
+# when this folder exists, every learned-driver round that does not reach is saved there
+# (points, observation, proposed and sent command per step) for replay and as training rooms
+RL_DUMP_DIR = Path(os.environ.get('ROVER_STATE_DIR', '/logs')) / 'rl_dumps'
 TIGHT_MOVES = 10
 TIGHT_REACH = (2.5, 2.1, 1.7, 1.3)
 TIGHT_SETTLE_S = 1.5
@@ -1149,6 +1152,7 @@ class Reach(GP.Pass):
         h, gpose, gt = None, None, 0.0
         minclear = math.inf
         result, why = 'failed', ''
+        rec = [] if RL_DUMP_DIR.is_dir() else None
         self.say(attempt=attempt, phase='rl', target=[round(tgt[0], 2), round(tgt[1], 2)], policy=RL_MODEL)
         try:
             while True:
@@ -1191,9 +1195,12 @@ class Reach(GP.Pass):
                     return result
                 vel = getattr(self, 'odom_vel', (0.0, 0.0))
                 obs = RD.observe(pts, gb, gobs, vel, last, pack, now - t0)
-                vx, wz = RD.to_cmd(pol(obs))
+                pvx, pwz = RD.to_cmd(pol(obs))
                 mc = MC.for_checks(self.lcm, self.pose)
-                vx, wz, chg, stp = RD.shield(np.vstack([pts, mc]) if len(mc) else pts, vx, wz, vel, pack)
+                vx, wz, chg, stp = RD.shield(np.vstack([pts, mc]) if len(mc) else pts, pvx, pwz, vel, pack)
+                if rec is not None:
+                    rec.append((now - t0, np.asarray(self.pose, np.float32), obs, np.float32([pvx, pwz, vx, wz]),
+                                np.asarray(pts, np.float16), np.asarray(mc, np.float16)))
                 changed += chg
                 stops = stops + 1 if stp else 0
                 if stops >= RL_STOPS:
@@ -1208,6 +1215,16 @@ class Reach(GP.Pass):
         finally:
             self.stop()
             secs = time.time() - t0
+            if rec and result != 'reached':
+                try:
+                    f = RL_DUMP_DIR / f"{time.strftime('%Y%m%d-%H%M%S')}_{result}.npz"
+                    np.savez_compressed(
+                        f, t=np.float32([r[0] for r in rec]), pose=np.stack([r[1] for r in rec]),
+                        obs=np.stack([r[2] for r in rec]), cmd=np.stack([r[3] for r in rec]),
+                        pts=np.array([r[4] for r in rec], dtype=object), mem=np.array([r[5] for r in rec], dtype=object),
+                        goal=np.float32(g[:3]), target=np.float32(tgt), why=why, policy=RL_MODEL)
+                except Exception as e:
+                    self.get_logger().warning(f'rl dump failed: {e}')
             self.say(attempt=attempt, phase='rl', outcome=result, why=why, secs=round(secs, 1), steps=steps,
                      shield_changed=changed, min_clear_cm=round(minclear * 100, 1) if math.isfinite(minclear) else None)
             try:
