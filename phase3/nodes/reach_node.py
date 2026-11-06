@@ -870,6 +870,11 @@ class Reach(GP.Pass):
     # has not seen yet is found by going to where it can be seen.
     APPROACH_BACK = (0.5, 0.9, 1.3, 1.8, 2.4)   # m short of the goal, nearest first
     APPROACH_GAIN = 0.30                       # m closer each round, or stop
+    # an approach is nav2's: its target must stand in OPEN floor, not in the tight bit.
+    # Twin chairs44 2026-11-07 (final code): the target 1.3 m short of the goal fell inside
+    # the 44 cm passage (gap 3+ cm passed SNAP_GAP); MPPI pressed the outline 1.5 cm into a
+    # 10 cm chair foot (below the LiDAR: the collision monitor cannot see it) for 30 s.
+    APPROACH_OPEN = 0.08
     LOOK_S = 2.5                               # s facing the goal for nvblox
 
     def planner_says_no(self, g):
@@ -923,7 +928,7 @@ class Reach(GP.Pass):
             if back > d0 - self.APPROACH_GAIN:
                 break
             cand, _, gap = self.fit((g[0] - back * ux, g[1] - back * uy, bearing))
-            if gap == gap and gap < self.SNAP_GAP:   # (nan = unseen floor: let the planner judge)
+            if gap == gap and gap < self.APPROACH_OPEN:   # (nan = unseen floor: let the planner judge)
                 continue
             if self.plan_ok(cand):
                 target = (cand, back)
