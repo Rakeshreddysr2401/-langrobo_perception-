@@ -29,7 +29,7 @@ world files are boxes and cylinders with heights (`build/worlds/*.json`, 3040 bo
 11. [Files and repos](#11-files-and-repos)
 12. [Phases, tasks, effort](#12-phases-tasks-effort)
 13. [Risks and what we do about them](#13-risks-and-what-we-do-about-them)
-14. [Decisions for the owner](#14-decisions-for-the-owner)
+14. [Decisions for the owner](#14-decisions-for-the-owner) · 14a. [Other architectures considered](#14a-other-architectures-considered-owners-question-2026-11-06-vlas-or-other-ways)
 15. [Words used here](#15-words-used-here)
 
 ---
@@ -163,7 +163,9 @@ lower because the rear is blind below 25 cm.
 
 ### 4.3 Network
 
-MLP 256 → 128 → 64, ELU, ~70 k weights. Forward pass in **numpy** on the Jetson (< 1 ms; no
+MLP 256 → 128 → 64, ELU, ~70 k weights. **Memory option:** if rung 1–2 show it re-trying the same
+move in dead ends (it sees only the last 0.2 s), a GRU of 64 units goes before the MLP (RSL-RL
+supports recurrent policies); still well under 1 ms. Forward pass in **numpy** on the Jetson (< 1 ms; no
 onnxruntime in the container, and none needed for a matrix multiply). Exported as `policy.npz`
 (weights + observation normaliser) alongside `policy.onnx` for inspection.
 
@@ -219,6 +221,7 @@ torch, batched over all envs. Isaac Sim's full rendering is used where it matter
 | pinned start | start 1–3 cm from a wall / sofa along one side | 10 % | pinned_side |
 | clutter | 6–20 boxes and legs in 3 × 3 m, one ≥ 44 cm way through | 15 % | clutter, chairs44 |
 | impossible | the only way < 40 cm | 5 % | gap36 — the right answer is to stop, not touch |
+| **moving obstacles** (added to every generator from curriculum level 2) | 0–2 "people" (30 cm cylinders, 0.3–1.0 m/s, walk across or along the way, pause) and a "pet" (20 cm, erratic) | in 30 % of episodes | follow_node's people; the corridor specks people left (S10) — the right answer is wait or go round, never cut in |
 
 Goals: 0.8–3.5 m away, through the hard part, reachable by construction (except "impossible").
 
@@ -406,8 +409,9 @@ Effort = working sessions with Claude on the laptop/Jetson; owner time noted sep
 | phase | tasks | done when | effort |
 |---|---|---|---|
 | **R0** plan | this document; owner answers §14 | owner OK | done |
+| **R0.5** demonstrations (parallel to R1) | `./rover demo`: record the owner's phone-teleop drives through tight spots — the same observation as §4.1 + the commands — into `logs/rl_demos/`; 20–50 drives | demos recorded | 1 session + **owner ~1 h driving** |
 | **R1** environment | world + ray casts; generators (doorway, S-gap first); motion_torch + parity test; DirectRLEnv; reward; 50-iteration smoke | trains, reward rises, export works, parity tests pass | 2–3 sessions |
-| **R2** full training | all generators, curriculum, randomisation, shield in the loop; tune | rung 1 | 2–4 sessions, GPU hours overnight |
+| **R2** full training | **behaviour cloning on the R0.5 demos first** (the policy starts by copying the owner), then RL from there (demo-augmented: a small imitation term in the loss for the first iterations); all generators, curriculum, randomisation, shield in the loop; tune | rung 1 | 2–4 sessions, GPU hours overnight |
 | **R3** offline real worlds | load twin worlds in 2D; compare with tight_route | rung 2 | 1 session |
 | **R4** on the Jetson | rl_policy, rl_shield (+ parity with torch), reach `run_rl`, logs, markers; twin suite | rung 3 | 2–3 sessions |
 | **R5** real robot | charged pack, D555 power-cycled, owner on the floor | rung 4 | 1 session + **owner ~1 h** |
@@ -441,6 +445,20 @@ load 13–17 is not tested — §14 Q4).
 | Q4 | During R4, stop the real `rover` container while the twin stack runs on the Jetson? | yes |
 | Q5 | Nightly retrain (L4): automatic, or a new version waits for your OK? | your OK until 3 versions in a row pass rung 4 |
 | Q6 | Real-floor tests (R5): which places in the house, and when is the pack charged? | the bedroom door, the chairs, a box gap; after a full charge |
+
+## 14a. Other architectures considered (owner's question, 2026-11-06: "VLAs, or other ways?")
+
+| approach | examples | fits this rover? | decision |
+|---|---|---|---|
+| classical stack + RL policy + shield | warehouse AMRs; RL locomotion (Spot, Unitree) | yes: tiny policy, proven pattern | **this plan** |
+| **VLA** (vision-language-action: camera + text → motor commands, one large model) | RT-2, OpenVLA, π0, GR00T N1 | no, not for driving: billions of weights, cannot run at control rate on the Orin Nano, needs thousands of hours of demos; built for manipulation | **later, for the arm** ("pick up the bottle"), on a bigger computer, behind the same kind of shield |
+| navigation foundation models (pretrained on many robots, go to a goal photo, explore) | ViNT, NoMaD | small enough for a Jetson, but camera-only: weaker than the LiDAR in tight spaces | optional experiment for exploration after R5 |
+| vision-language navigation + 3D semantic memory | VLMaps, OK-Robot, ConceptGraphs | yes, on the Pi 5 brain | brain side, partly built (INTELLIGENCE_PLAN.md); decides *where*, this plan does *how* |
+| **imitation learning** (copy the owner's driving) | behaviour cloning, Diffusion Policy | yes | **added: R0.5 demos + cloning before RL in R2** |
+| world models (learn to predict, plan inside the prediction) | DreamerV3, Cosmos | research-heavy, GPU-heavy | not now |
+
+Also added after this review: **moving obstacles** (people, a pet) in training (§6.3), and a
+**memory (GRU) option** for dead ends (§4.3).
 
 ## 15. Words used here
 
