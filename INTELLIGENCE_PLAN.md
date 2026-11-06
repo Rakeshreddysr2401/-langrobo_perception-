@@ -69,6 +69,13 @@ Robotics call this System 2 / System 1.
 
 ### 1.3 Should this rover use RL?
 
+> **Revised 2026-11-06 (owner's call): yes, for the tight-space driving only — see
+> [RL_PLAN.md](RL_PLAN.md).** What changed since this section: the 2026-11-01 twin baseline
+> showed the rule-based tight-space tools failing on time (door49, chairs44, corridor_s) and
+> MPPI touching a jamb, and Isaac Lab 3.0 with RSL-RL is now installed on the laptop. The
+> reasoning below still holds for on-robot RL from scratch: RL_PLAN trains in simulation,
+> keeps a safety shield, and learns from real drives only through nightly retraining.
+
 **Not for driving, not now.** A wheeled base with a closed-loop controller that
 already reaches 1.4 cm has little left for RL to win, and on-robot RL needs
 thousands of trials, a reward, automatic resets and a safe way to fail. Nobody

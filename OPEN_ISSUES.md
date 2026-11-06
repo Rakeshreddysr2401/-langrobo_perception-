@@ -1,6 +1,25 @@
-# Open issues — where things stand (newest first; last updated 2026-11-01)
+# Open issues — where things stand (newest first; last updated 2026-11-06)
 
 How the rover plans and moves, why it is limited, and the fix order F1-F5: [NAV_GUIDE.md](NAV_GUIDE.md) (2026-10-11).
+
+## 2026-11-06 — RL for tight-space driving: PLANNED, waiting on the owner
+
+[RL_PLAN.md](RL_PLAN.md): a learned policy for the hard last metres (doors, 42-60 cm gaps,
+corners), trained in Isaac Lab on the laptop with the measured motion model, behind a shield,
+imitation from the owner's teleop drives first, retrained nightly from real failures.
+**Next:** the owner answers RL_PLAN §14 (Q1-Q6), then R1 (the training env in `~/kino_sim/rl/`)
+and, in parallel, R0.5 (record ~1 h of the owner's tight-spot teleop drives).
+
+Seen during today's bring-up (`./rover up --voice`, everything else green):
+
+| what | status |
+|---|---|
+| Mac mini LLM/VLM: on the network (now **192.168.1.20**) but :8080 closed after power-on — FileVault: nothing starts until someone logs in at the Mac and runs `e12b4` | owner, at the Mac |
+| boAt Stone speaker: `br-connection-page-timeout` (off / out of range) | owner |
+| `follow` failed its first gate (fused odom read 13 Hz for one sample), passed on retry | watch |
+| Studio not started by `up` (no `/tmp/langgraph_dev.log`): `up`'s Pi 5 ssh timed out first; started by hand, OK | watch |
+| Jetson load **17 on 6 cores** with the full stack; PyCharm's remote-dev server on the Jetson took 1.7 GB and bursts to 200 % CPU | close it during drive tests |
+| laptop `kino` moved **.9 -> .8** (DHCP); `kino.local` resolves; same host key | docs updated |
 
 ## 2026-11-01 — RViz laptop: no camera, no global costmap — FIXED (laptop on Lyrical)
 

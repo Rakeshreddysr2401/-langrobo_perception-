@@ -253,6 +253,9 @@ the course CSV, as NAV_PLAN N5 asks.
 
 ## 7. Where small intelligent models fit
 
+> **2026-11-06:** the first learned piece is planned in [RL_PLAN.md](RL_PLAN.md): an RL policy
+> (trained in Isaac Lab) for the tight last metres, called by reach, behind a shield.
+
 The rule every working product follows (vacuums, warehouse AMRs, Astro): **a
 model never sits inside the 10 Hz motion loop.** Models choose *what*, *where*
 and *which strategy*; the classical stack moves. That keeps it safe and
