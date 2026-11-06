@@ -163,6 +163,13 @@ ENVSET="unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE; export FASTDD
 dexec(){ docker exec -d "$NAME" bash -lc "$ENVSET $1"; }
 rexec(){ docker exec    "$NAME" bash -lc "$ENVSET $1"; }
 running(){ [ "$(docker inspect -f '{{.State.Running}}' "$NAME" 2>/dev/null)" = "true" ]; }
+# The learned tight-space driver (RL_PLAN.md): REACH_RL / REACH_RL_MODEL from the
+# environment, else what `./rover rl on|off` saved in logs/ (off by default).
+rl_env(){
+  local on="${REACH_RL:-$(cat "$REPO/logs/rl_mode" 2>/dev/null || echo 0)}"
+  local model="${REACH_RL_MODEL:-$(cat "$REPO/logs/rl_model" 2>/dev/null || echo /models/rl/current/policy.npz)}"
+  echo "REACH_RL=$on REACH_RL_MODEL=$model"
+}
 die(){ echo "  ✗ $*" >&2; exit 1; }
 # Stop what matches, GENTLY first (2026-10-10): SIGINT, up to 3 s to exit,
 # then -9 for whatever is left. Straight -9 killed nodes mid-write to FastDDS
@@ -926,7 +933,7 @@ nav)
   # goal_exec (exact moves) and reach (RViz goals: retry until there) ride on nav2
   kill_match 'goal_exec_node[.]py|reach_node[.]py'
   dexec "python3 $SRC3/nodes/goal_exec_node.py > /tmp/goal_exec.log 2>&1"
-  dexec "python3 $SRC3/nodes/reach_node.py > /tmp/reach.log 2>&1"
+  dexec "$(rl_env) python3 $SRC3/nodes/reach_node.py > /tmp/reach.log 2>&1"
   # display only: walls red, the 5 cm body margin violet, floor clear (RViz)
   kill_match 'wall_margin_view[.]py'
   dexec "python3 $SRC3/nodes/wall_margin_view.py > /tmp/wall_margin_view.log 2>&1"
@@ -1455,6 +1462,28 @@ reach)
   docker exec "$NAME" pgrep -f '[r]each_node.py' >/dev/null 2>&1 || die "reach_node not running — ./rover nav"
   ttyflag=""; [ -t 0 ] && ttyflag="-it"
   docker exec $ttyflag "$NAME" bash -lc "$ENVSET python3 -u $SRC3/tools/reach.py $(printf '%q ' "$@")"
+  ;;
+
+# ── rl ──────────────────────────────────────────────────────────────────────
+# The learned tight-space driver inside reach (RL_PLAN.md, phase3/nodes/rl_drive.py).
+#   ./rover rl on [/models/rl/vNNN/policy.npz]   ./rover rl off   ./rover rl [status]
+# on/off is saved in logs/ (./rover nav and up keep it) and restarts reach only.
+rl)
+  need_container
+  case "${2:-status}" in
+    on)  echo 1 > "$REPO/logs/rl_mode"; [ -n "${3:-}" ] && echo "$3" > "$REPO/logs/rl_model" ;;
+    off) echo 0 > "$REPO/logs/rl_mode" ;;
+    status) ;;
+    *) die "usage: ./rover rl on [model.npz] | off | status" ;;
+  esac
+  if [ "${2:-status}" != status ]; then
+    kill_match 'reach_node[.]py'
+    dexec "$(rl_env) python3 $SRC3/nodes/reach_node.py > /tmp/reach.log 2>&1"
+    sleep 3
+  fi
+  echo "  learned driver: $(rl_env)"
+  docker exec "$NAME" pgrep -f '[r]each_node.py' >/dev/null 2>&1 && echo "  reach running" || echo "  ! reach NOT running -- ./rover nav"
+  docker exec "$NAME" bash -lc "grep -h 'rl: ' /tmp/reach.log | tail -1" 2>/dev/null
   ;;
 
 # ── pass ────────────────────────────────────────────────────────────────────

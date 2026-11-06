@@ -68,6 +68,8 @@ import widest as WD  # noqa: E402
 import trail as TR  # noqa: E402
 import escape_moves as EM  # noqa: E402
 import house_route as HR  # noqa: E402
+import rl_drive as RD  # noqa: E402
+import memory_cells as MC  # noqa: E402
 from goal_exec import FRONT as GE_FRONT, REAR as GE_REAR, SIDE, GoalExec, wrap  # noqa: E402
 from sonar_feed import SonarFeed  # noqa: E402
 
@@ -165,6 +167,21 @@ NAV_LOG = Path('/tmp/nav.log')
 # before the map shows what the turn brought into view -- that is how the
 # glossy-floor speck in the door gap went away (2026-10-10).
 TIGHT_ROUNDS = 2
+# THE LEARNED DRIVER (RL_PLAN.md, rl_drive.py). REACH_RL=1: where the tight route
+# would take over (nav2 "no path", narrower than nav2 plans, dithering, pinned),
+# the policy drives first, 10 Hz, every command through rl_drive.shield; it hands
+# back to goal_exec within RL_DONE_M, and gives up (the old chain goes on,
+# unchanged) after RL_STALL_S without RL_GAIN_M of progress, RL_STOPS shield stops
+# in a row, or RL_MAX_S. REACH_RL=0 (default) is the rover without it.
+RL_ON = os.environ.get('REACH_RL', '0') == '1'
+RL_MODEL = os.environ.get('REACH_RL_MODEL', '/models/rl/current/policy.npz')
+RL_ROUNDS = 1
+RL_DONE_M = 0.25
+RL_MAX_S = 60.0
+RL_STALL_S, RL_GAIN_M = 15.0, 0.10
+RL_STOPS = 20                  # 2 s of shield stops in a row
+RL_K = float(os.environ.get('REACH_RL_K', '0.85'))   # turn gain told to the policy (config/rover.yaml 'rover' pack)
+RL_LOG = Path(os.environ.get('ROVER_STATE_DIR', '/logs')) / 'rl_episodes.jsonl'
 TIGHT_MOVES = 10
 TIGHT_REACH = (2.5, 2.1, 1.7, 1.3)
 TIGHT_SETTLE_S = 1.5
@@ -246,6 +263,7 @@ class Reach(GP.Pass):
 
     def _odom(self, m):
         super()._odom(m)
+        self.odom_vel = (m.twist.twist.linear.x, m.twist.twist.angular.z)
         if self.pursuing:
             self.trail.add(self.pose[0], self.pose[1])
 
@@ -1097,6 +1115,105 @@ class Reach(GP.Pass):
         return (math.hypot(self.pose[0] - expect[0], self.pose[1] - expect[1]) <= self.TIGHT_FOLLOW_M
                 and abs(math.degrees(wrap(self.pose[2] - expect[2]))) <= self.TIGHT_FOLLOW_DEG)
 
+    def rl_policy(self):
+        """The learned driver's policy (loaded once), or None (logged)."""
+        if getattr(self, '_rl_pol', None) is None:
+            try:
+                self._rl_pol = RD.Policy(RL_MODEL)
+                self.get_logger().info(f'rl: policy {RL_MODEL} {self._rl_pol.meta}')
+            except Exception as e:                  # no policy: the rover as without it
+                self.get_logger().warning(f'rl: no policy ({e})')
+                self._rl_pol = False
+        return self._rl_pol or None
+
+    def rl_round(self, attempt, g, deadline):
+        """The learned driver toward the tight target, 10 Hz, every command shielded
+        (rl_drive.py). 'reached' (within RL_DONE_M: goal_exec finishes), 'none' (no
+        target or no policy), 'failed' (gave up: the old chain goes on) or 'cancelled'."""
+        pol = self.rl_policy()
+        tgt = self.tight_target(g)
+        if pol is None or tgt is None:
+            return 'none'
+        P = self.pivots()
+        pack = (P[+1], P[-1], RL_K)
+        self.dobs.set_active(True)
+        t0 = time.time()
+        last = (0.0, 0.0)
+        stops = steps = changed = 0
+        best, best_t = math.inf, t0
+        h, gpose, gt = None, None, 0.0
+        minclear = math.inf
+        result, why = 'failed', ''
+        self.say(attempt=attempt, phase='rl', target=[round(tgt[0], 2), round(tgt[1], 2)], policy=RL_MODEL)
+        try:
+            while True:
+                now = time.time()
+                if self.stop_req:
+                    result, why = 'cancelled', ''
+                    return result
+                if now > deadline or now - t0 > RL_MAX_S:
+                    why = f'{now - t0:.0f} s'
+                    return result
+                x, y, th = self.pose
+                c, s = math.cos(th), math.sin(th)
+                dx, dy = tgt[0] - x, tgt[1] - y
+                gb = (c * dx + s * dy, -s * dx + c * dy)
+                d = math.hypot(*gb)
+                if d < RL_DONE_M:
+                    result, why = 'reached', f'{d * 100:.0f} cm from the target'
+                    return result
+                if now - self.scan_t > 0.25 or now - self.pose_t > 0.3:
+                    self.stop()                        # stale eyes: stand still this tick
+                    self.spin_for(0.05)
+                    continue
+                pts, _ = self.near_now(self.scans[-1:])
+                pts = np.zeros((0, 2)) if pts is None else pts
+                if len(pts):
+                    minclear = min(minclear, float(RD.outline_dist(pts[:, 0], pts[:, 1]).min()))
+                if now - gt > 1.0:                      # the walking-distance guide, once a second
+                    h = TRT._guide(np.asarray(pts, float), gb) if len(pts) else None
+                    gpose, gt = (x, y, th), now
+                gx, gy = x - gpose[0], y - gpose[1]
+                cg, sg = math.cos(gpose[2]), math.sin(gpose[2])
+                rx, ry, rth = cg * gx + sg * gy, -sg * gx + cg * gy, math.atan2(math.sin(th - gpose[2]), math.cos(th - gpose[2]))
+                gobs = RD.guide_obs(h, rx, ry, rth, gb)
+                prog = gobs[0] if math.isfinite(gobs[0]) else d
+                if prog < best - RL_GAIN_M:
+                    best, best_t = prog, now
+                if now - best_t > RL_STALL_S:
+                    why = f'no {RL_GAIN_M * 100:.0f} cm of progress in {RL_STALL_S:.0f} s'
+                    return result
+                vel = getattr(self, 'odom_vel', (0.0, 0.0))
+                obs = RD.observe(pts, gb, gobs, vel, last, pack, now - t0)
+                vx, wz = RD.to_cmd(pol(obs))
+                mc = MC.for_checks(self.lcm, self.pose)
+                vx, wz, chg, stp = RD.shield(np.vstack([pts, mc]) if len(mc) else pts, vx, wz, vel, pack)
+                changed += chg
+                stops = stops + 1 if stp else 0
+                if stops >= RL_STOPS:
+                    why = f'the shield stopped it {RL_STOPS} times in a row'
+                    return result
+                cmd = Twist()
+                cmd.linear.x, cmd.angular.z = vx, wz
+                self.cmd.publish(cmd)
+                last = (vx, wz)
+                steps += 1
+                self.spin_for(max(0.0, 0.1 - (time.time() - now)))
+        finally:
+            self.stop()
+            secs = time.time() - t0
+            self.say(attempt=attempt, phase='rl', outcome=result, why=why, secs=round(secs, 1), steps=steps,
+                     shield_changed=changed, min_clear_cm=round(minclear * 100, 1) if math.isfinite(minclear) else None)
+            try:
+                with RL_LOG.open('a') as f:
+                    f.write(json.dumps({'t': time.strftime('%Y-%m-%dT%H:%M:%S'), 'policy': RL_MODEL,
+                                        'policy_meta': getattr(self._rl_pol, 'meta', {}), 'goal': list(g),
+                                        'target': list(tgt), 'result': result, 'why': why, 's': round(secs, 1),
+                                        'steps': steps, 'shield_changed': changed,
+                                        'min_clear_cm': round(minclear * 100, 1) if math.isfinite(minclear) else None}) + '\n')
+            except OSError:
+                pass
+
     def tight_should_lead(self, g):
         """True when the widest way to g fits the rover but not nav2's planner."""
         w = self.widest_way(g)
@@ -1346,6 +1463,7 @@ class Reach(GP.Pass):
         prev_fail, same = None, 1   # last failed attempt (why, (x, y)); how many alike in a row
         way_backs, way_note = 0, ''
         tight_rounds = 0
+        rl_rounds = 0
         widest_done = False
         tight_led = False
         for attempt in range(1, MAX_ATTEMPTS + 1):
@@ -1513,6 +1631,13 @@ class Reach(GP.Pass):
             # 2026-10-10 the way back ran twice, nav2 failed after each, and
             # the goal ended "3 times from the same spot" without one move
             # through the door the rover had just driven out of.
+            if jammed and RL_ON and rl_rounds < RL_ROUNDS:
+                rl_rounds += 1
+                out = self.rl_round(attempt, g, t0 + MAX_S)
+                if out == 'reached':
+                    continue
+                if out == 'cancelled' or self.stop_req:
+                    break
             if jammed and tight_rounds < TIGHT_ROUNDS:
                 tight_rounds += 1
                 out = self.tight_round(attempt, g, t0 + MAX_S)
