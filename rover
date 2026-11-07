@@ -1471,6 +1471,43 @@ reach)
   docker exec $ttyflag "$NAME" bash -lc "$ENVSET python3 -u $SRC3/tools/reach.py $(printf '%q ' "$@")"
   ;;
 
+# ── demo ────────────────────────────────────────────────────────────────────
+# The owner's teleop drives for the learned driver (RL_PLAN.md R0.5): records what the
+# policy sees + the wheel commands -- no images, so a drive is small -- into
+# logs/rl_demos/<stamp>/ (a rosbag; kino_sim rl/ turns it into training data).
+#   ./rover demo start [name]   ./rover demo stop   ./rover demo [status]
+# Recording never moves the rover: drive with the phone teleop (MANUAL).
+demo)
+  need_container
+  case "${2:-status}" in
+    start)
+      if docker exec "$NAME" pgrep -f '[r]osbag2.*rl_demos|[b]ag record.*rl_demos' >/dev/null 2>&1; then
+        die "a demo is already recording: ./rover demo stop"
+      fi
+      d="$(date +%Y%m%d-%H%M%S)${3:+_$3}"
+      dexec "mkdir -p /logs/rl_demos && cd /logs/rl_demos && ros2 bag record -o $d \
+        /scan /odom /cmd_vel /tf /tf_static /wheel_state /sonar/left /sonar/right \
+        /goal_exec/obstacles /local_costmap/costmap /fusion/status /teleop/mode \
+        > /tmp/demo.log 2>&1"
+      sleep 4
+      docker exec "$NAME" pgrep -f '[b]ag record.*rl_demos|ros2 bag record' >/dev/null 2>&1 \
+        && echo "  recording logs/rl_demos/$d -- drive with the phone teleop; ./rover demo stop when done" \
+        || { rexec "tail -5 /tmp/demo.log"; die "the recorder did not start"; }
+      ;;
+    stop)
+      kill_match 'ros2 bag record'
+      sleep 2
+      echo "  demos:"; ls -1t "$HOSTLOGS/rl_demos" 2>/dev/null | head -5 | while read -r x; do
+        echo "    $x  $(du -sh "$HOSTLOGS/rl_demos/$x" | cut -f1)"; done
+      ;;
+    status)
+      docker exec "$NAME" pgrep -f 'ros2 bag record' >/dev/null 2>&1 && echo "  recording" || echo "  not recording"
+      ls -1t "$HOSTLOGS/rl_demos" 2>/dev/null | head -5 | sed 's/^/    /'
+      ;;
+    *) die "usage: ./rover demo start [name] | stop | status" ;;
+  esac
+  ;;
+
 # ── rl ──────────────────────────────────────────────────────────────────────
 # The learned tight-space driver inside reach (RL_PLAN.md, phase3/nodes/rl_drive.py).
 #   ./rover rl on [/models/rl/vNNN/policy.npz]   ./rover rl off   ./rover rl [status]

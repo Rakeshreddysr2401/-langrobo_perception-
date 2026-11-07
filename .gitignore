@@ -61,3 +61,4 @@ logs/rl_model
 logs/rl_episodes.jsonl
 logs/tight_dumps/
 logs/rl_dumps/
+logs/rl_demos/
