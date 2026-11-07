@@ -4,7 +4,11 @@ Written 2026-11-06 for the owner: *"I want my robot to move more intelligently โ
 reinforcement learning with Isaac Lab and Sim, so that once it moves it learns?"* and *"keep a
 complete plan ready and document it; I will see."*
 
-**Status: PLAN, for the owner's review. Nothing is built.** The open decisions are in ยง14.
+**Status 2026-11-07: R1-R4 BUILT** (training: `~/kino_sim/rl/`; robot: `phase3/nodes/rl_drive.py`,
+`reach_node.rl_round`, `./rover rl on|off`, `./rover demo start|stop`; policy `models/rl/current` -> v002),
+twin-validated, first real tries done. **Where it stands and what to do next: `~/kino_sim/docs/NAV_NEXT.md`
+section 13** (real findings, sim-to-real gaps for v003, platform blockers, real data, order of work).
+The rest of this file is the original plan.
 
 Checked 2026-11-06 before writing: the laptop (`kino`, now 192.168.1.8 on DHCP, same host key as
 .9) has Isaac Lab 3.0.0 + RSL-RL 5.5.1, smoke-tested (`~/kino_sim/docs/VERSIONS.md`), RTX 4050
