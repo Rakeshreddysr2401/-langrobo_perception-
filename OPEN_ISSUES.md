@@ -1,4 +1,8 @@
-# Open issues — where things stand (newest first; last updated 2026-11-06)
+# Open issues — where things stand (newest first; last updated 2026-11-07)
+
+## 2026-11-07 — Voice/navigation audit and current RL state
+
+See [VOICE_NAV_AUDIT_2026-11-07.md](docs/VOICE_NAV_AUDIT_2026-11-07.md): RL R1-R4 are built and enabled, the live recovery is recorded, 24 offline follow tests passed, and the Pi5 integration fixes are tracked. The November 6 RL planning entry below is historical.
 
 How the rover plans and moves, why it is limited, and the fix order F1-F5: [NAV_GUIDE.md](NAV_GUIDE.md) (2026-10-11).
 
