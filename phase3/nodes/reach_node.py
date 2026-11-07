@@ -1185,9 +1185,15 @@ class Reach(GP.Pass):
                 pts = np.zeros((0, 2)) if pts is None else pts
                 if len(pts):
                     minclear = min(minclear, float(RD.outline_dist(pts[:, 0], pts[:, 1]).min()))
-                if now - gt > 1.0:                      # the walking-distance guide, once a second
-                    h = (TRT._guide(np.asarray(pts, float), gb, half=min(4.0, max(TRT.SEARCH_R + 0.2, d + 0.4)),
-                                    res=0.05, clear=0.185) if len(pts) else None)
+                if now - gt > 1.5:                      # the walking-distance guide, every 1.5 s
+                    # The tight route's fine grid (2 cm, centre 16 cm clear), not the training env's
+                    # 5 cm / 18.5: on REAL points (camera noise makes every gap 1-2 cm narrower) the
+                    # coarse grid closed a 52 cm way -- real robot 2026-11-07: the hint pointed BACK
+                    # (+180 deg, a detour), the policy reversed 40 cm, then "not reachable" ended the
+                    # round after 12 s while the tight route found a plan through. Fine grid on the
+                    # same points: walking 2.66 m, hint +90 deg (through). ~15-20 ms laptop.
+                    h = (TRT._guide(np.asarray(pts, float), gb, half=min(3.4, max(TRT.SEARCH_R + 0.2, d + 0.4)),
+                                    res=0.02, clear=0.16) if len(pts) else None)
                     gpose, gt = (x, y, th), now
                     blocked = len(pts) and (h is None or not any(
                         math.isfinite(h(r * math.cos(k * math.pi / 4), r * math.sin(k * math.pi / 4)))
