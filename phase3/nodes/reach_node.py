@@ -1502,8 +1502,16 @@ class Reach(GP.Pass):
         self.stop_req = False
         t0 = time.time()
         g = self.goal_odom(m)
+        # map -> odom can be missing for a few seconds: slam_toolbox stops publishing it
+        # while it serializes a big room (map_autosave; 22 MB on the real robot), and under
+        # load a fresh /tf reader matches late. Real robot 2026-11-07: an RViz goal failed
+        # at once, "no transform map -> odom", while tf2_echo got it a second later.
+        t_tf = time.time()
+        while g is None and time.time() - t_tf < 5.0 and not self.stop_req:
+            self.spin_for(0.1)
+            g = self.goal_odom(m)
         if g is None:
-            self.say(result='failed', why=f'no transform {m.header.frame_id} -> odom')
+            self.say(result='failed', why=f'no transform {m.header.frame_id} -> odom (waited 5 s)')
             return
         self.approach_best = float('inf')
         self.tight_ev = None                    # the camera evidence is per goal
