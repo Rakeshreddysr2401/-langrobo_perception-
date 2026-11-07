@@ -849,7 +849,14 @@ slam)
   sleep 8
   echo
   echo "  GATE slam:"
-  assert_rate /map 0.3 "lidar map" || { rexec "grep -iE 'error|fail' /tmp/slam.log | tail -3"; die "no /map — see ./rover logs slam"; }
+  # A RESUMED room loads its whole pose graph first: 22 MB (house, 2026-11-07) kept
+  # /map silent past one rate sample and the gate failed a healthy slam_toolbox, which
+  # published 0.5 Hz a minute later. Up to 4 samples, 10 s apart, before giving up.
+  for _try in 1 2 3 4; do
+    assert_rate /map 0.3 "lidar map" && break
+    [ "$_try" = 4 ] && { rexec "grep -iE 'error|fail' /tmp/slam.log | tail -3"; die "no /map — see ./rover logs slam"; }
+    echo "      (the saved room is still loading -- again in 10 s)"; sleep 10
+  done
   rexec "python3 $SRC2/config/slam_check.py" || true
   echo
   echo "  The correction row is what the lidar changed. Drive a zig-zag and a"
