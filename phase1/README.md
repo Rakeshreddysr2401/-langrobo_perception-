@@ -52,6 +52,14 @@ answers ping perfectly while completely dead, so ping is not a health check —
 a live publisher on `infra1/image_rect_raw` is. If it goes offline, only a
 physical PoE power-cycle recovers it.
 
+**Start the driver RIGHT AFTER the power-cycle** (2026-11-07, three bring-ups in one
+morning): driver started ~1 min after the camera powered up -> streaming; 2+ min and
+~4 min after -> "No RealSense devices were found!", its DDS server offline although it
+answered ping and the Ethernet link was up. A camera left alone for minutes seems to
+drop into that state. What worked: watch `ping 192.168.11.55` go away (unplugged) and
+come back, and run `./rover up` that same second -- the camera gate retries for 40 s,
+which covers the camera's ~20 s boot.
+
 ## `infra2/camera_info` has the opposite sign to REP-104
 
 REP-104 says a rectified right camera carries `P[3] = -fx · baseline`. This
