@@ -1192,10 +1192,16 @@ class Reach(GP.Pass):
                     # (+180 deg, a detour), the policy reversed 40 cm, then "not reachable" ended the
                     # round after 12 s while the tight route found a plan through. Fine grid on the
                     # same points: walking 2.66 m, hint +90 deg (through). ~15-20 ms laptop.
-                    h = (TRT._guide(np.asarray(pts, float), gb, half=min(3.4, max(TRT.SEARCH_R + 0.2, d + 0.4)),
-                                    res=0.02, clear=0.16) if len(pts) else None)
+                    # On the LiDAR only: it measures a way's width to ~1 cm; the camera's points
+                    # smear door frames and chair edges by a few cm and closed a 55 cm doorway
+                    # (real robot 2026-11-07, logs/rl_dumps 20261107-020733: the hint flipped to
+                    # "go back round" as the camera came near the frame, then "unreachable").
+                    # The SHIELD still checks every command on all points (+ camera, sonar, memory).
+                    lid = self.outside_body(np.vstack(self.scans[-3:])) if self.scans else np.zeros((0, 2))
+                    h = (TRT._guide(np.asarray(lid, float), gb, half=min(3.4, max(TRT.SEARCH_R + 0.2, d + 0.4)),
+                                    res=0.02, clear=0.16) if len(lid) else None)
                     gpose, gt = (x, y, th), now
-                    blocked = len(pts) and (h is None or not any(
+                    blocked = len(lid) and (h is None or not any(
                         math.isfinite(h(r * math.cos(k * math.pi / 4), r * math.sin(k * math.pi / 4)))
                         for r in (0.0, 0.05, 0.10) for k in range(8)))    # 5 cm cells: not just its own
                     unreachable = unreachable + 1 if blocked else 0
@@ -1228,7 +1234,8 @@ class Reach(GP.Pass):
                 vx, wz, chg, stp = RD.shield(seen, pvx, pwz, vel, pack)
                 if rec is not None:
                     rec.append((now - t0, np.asarray(self.pose, np.float32), obs, np.float32([pvx, pwz, vx, wz]),
-                                np.asarray(pts, np.float16), np.asarray(mc, np.float16)))
+                                np.asarray(pts, np.float16), np.asarray(mc, np.float16),
+                                np.asarray(self.scans[-1] if self.scans else np.zeros((0, 2)), np.float16)))
                 changed += chg
                 stops = stops + 1 if stp else 0
                 if stops >= RL_STOPS:
@@ -1250,6 +1257,7 @@ class Reach(GP.Pass):
                         f, t=np.float32([r[0] for r in rec]), pose=np.stack([r[1] for r in rec]),
                         obs=np.stack([r[2] for r in rec]), cmd=np.stack([r[3] for r in rec]),
                         pts=np.array([r[4] for r in rec], dtype=object), mem=np.array([r[5] for r in rec], dtype=object),
+                        lidar=np.array([r[6] for r in rec], dtype=object),
                         goal=np.float32(g[:3]), target=np.float32(tgt), why=why, policy=RL_MODEL)
                 except Exception as e:
                     self.get_logger().warning(f'rl dump failed: {e}')
