@@ -38,7 +38,7 @@ def main():
     n.create_subscription(String, '/reach/status', lambda m: got.append(json.loads(m.data)), 10)
     pub = n.create_publisher(PoseStamped, '/reach/goal', 10)
     cancel = n.create_publisher(Empty, '/reach/cancel', 10)
-    end = time.time() + 10
+    end = time.time() + 30          # discovery under the real robot's load took > 10 s (2026-11-07)
     while time.time() < end and ('o' not in st or pub.get_subscription_count() == 0):
         rclpy.spin_once(n, timeout_sec=0.1)
     if 'o' not in st:
