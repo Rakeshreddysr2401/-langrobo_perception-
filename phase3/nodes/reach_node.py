@@ -69,7 +69,6 @@ import trail as TR  # noqa: E402
 import escape_moves as EM  # noqa: E402
 import house_route as HR  # noqa: E402
 import rl_drive as RD  # noqa: E402
-import rl_reentry as RRE  # noqa: E402
 import memory_cells as MC  # noqa: E402
 from goal_exec import FRONT as GE_FRONT, REAR as GE_REAR, SIDE, GoalExec, wrap  # noqa: E402
 from sonar_feed import SonarFeed  # noqa: E402
@@ -177,8 +176,7 @@ TIGHT_ROUNDS = 2
 RL_ON = os.environ.get('REACH_RL', '0') == '1'
 CAMERA_HANDOVER = os.environ.get('REACH_CAMERA_HANDOVER', '0') == '1'
 RL_MODEL = os.environ.get('REACH_RL_MODEL', '/models/rl/current/policy.npz')
-RL_REENTRY = os.environ.get('REACH_RL_REENTRY', '0') == '1'
-RL_ROUNDS = 3 if RL_REENTRY else 1
+RL_ROUNDS = 1
 # the policy is aimed at the GOAL itself up to RL_GOAL_M (trained on goals 0.8-3.5 m, with
 # a walking-distance guide that leads round the door leaf); farther, at the tight target.
 # Twin door49 2026-11-07: aimed at reach's tight target 2.5 m along the straight line, it
@@ -1569,7 +1567,6 @@ class Reach(GP.Pass):
         way_backs, way_note = 0, ''
         tight_rounds = 0
         rl_rounds = 0
-        rl_stops = []
         widest_done = False
         tight_led = False
         for attempt in range(1, MAX_ATTEMPTS + 1):
@@ -1737,14 +1734,9 @@ class Reach(GP.Pass):
             # 2026-10-10 the way back ran twice, nav2 failed after each, and
             # the goal ended "3 times from the same spot" without one move
             # through the door the rover had just driven out of.
-            if jammed and RL_ON and RRE.allowed(rl_rounds, rl_stops, self.pose,
-                                                   time.monotonic(), max_rounds=RL_ROUNDS):
-                if rl_rounds:
-                    moved = min(math.hypot(self.pose[0]-x, self.pose[1]-y) for x, y, _ in rl_stops)
-                    self.say(attempt=attempt, phase='rl_reentry', round=rl_rounds+1, moved_m=round(moved, 3))
+            if jammed and RL_ON and rl_rounds < RL_ROUNDS:
                 rl_rounds += 1
                 out = self.rl_round(attempt, g, t0 + MAX_S)
-                rl_stops.append((float(self.pose[0]), float(self.pose[1]), time.monotonic()))
                 if out == 'reached':
                     continue
                 if out == 'cancelled' or self.stop_req:

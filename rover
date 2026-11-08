@@ -168,7 +168,7 @@ running(){ [ "$(docker inspect -f '{{.State.Running}}' "$NAME" 2>/dev/null)" = "
 rl_env(){
   local on="${REACH_RL:-$(cat "$REPO/logs/rl_mode" 2>/dev/null || echo 0)}"
   local model="${REACH_RL_MODEL:-$(cat "$REPO/logs/rl_model" 2>/dev/null || echo /models/rl/current/policy.npz)}"
-  echo "REACH_RL=$on REACH_RL_MODEL=$model REACH_CAMERA_HANDOVER=${REACH_CAMERA_HANDOVER:-0} REACH_RL_REENTRY=${REACH_RL_REENTRY:-0}"
+  echo "REACH_RL=$on REACH_RL_MODEL=$model REACH_CAMERA_HANDOVER=${REACH_CAMERA_HANDOVER:-0}"
 }
 die(){ echo "  ✗ $*" >&2; exit 1; }
 # Stop what matches, GENTLY first (2026-10-10): SIGINT, up to 3 s to exit,
