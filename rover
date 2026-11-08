@@ -907,7 +907,7 @@ map)
   assert_rate /depth_gate/passed 5 "depth to the map" || true
   echo
   echo "  How much is mapped:"
-  rexec "python3 $SRC2/tools/map_stats.py" 2>/dev/null | sed -n "/grid/,/occupied/p" | sed "s/^/    /"
+  rexec "PYTHONFAULTHANDLER=1 python3 $SRC2/tools/map_stats.py" | sed -n "/grid/,/occupied/p" | sed "s/^/    /"
   echo
   echo "  Drive it and the map grows. In RViz: nvblox mesh, nvblox 2D slice."
   echo "  Log: ./rover logs map"
@@ -1658,7 +1658,7 @@ status)
   # `wheels` cannot answer "what is alive", which is the only thing it is for.
   # ONE pass over every topic at once (health_probe.py, raw, ~12 s), not 14
   # sequential 12 s `ros2 topic hz` runs (2+ min).
-  rates=$(rexec "python3 $SRC3/tools/health_probe.py 10" 2>/dev/null | tail -1)
+  rates=$(rexec "PYTHONFAULTHANDLER=1 python3 $SRC3/tools/health_probe.py 10" | tail -1)
   for row in \
       "camera:$CAM_NS/infra1/image_rect_raw:15" \
       "camera:$CAM_NS/depth/image_rect_raw:10" \
