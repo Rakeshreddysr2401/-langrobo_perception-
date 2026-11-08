@@ -26,7 +26,7 @@ import glob
 import os
 
 from launch import LaunchDescription
-from launch.actions import Shutdown
+from launch.actions import ExecuteProcess, Shutdown
 from launch_ros.actions import Node
 
 CONFIG = '/opt/rover3/config/nav2.yaml'
@@ -103,8 +103,16 @@ def generate_launch_description():
         # cannot make the rover fast into something the LiDAR can see.
         # goal_exec and reach's escape publish /cmd_vel directly and keep
         # their own swept checks.
+        # Installed Nav2 1.5 rejects REP117 +inf and keeps an older sonar echo.
+        # Its private inputs conservatively map no echo to the sensor maximum;
+        # raw /sonar/*, timestamps and all obstacle margins remain unchanged.
+        # If the bridge exits, the same supervisor restarts the whole stack.
+        ExecuteProcess(cmd=['python3', '/opt/rover3/nodes/sonar_nav2_compat.py'],
+                       output='screen', **STOP_ALL),
         Node(package='nav2_collision_monitor', executable='collision_monitor',
-             name='collision_monitor', output='screen', **STOP_ALL, parameters=[CONFIG]),
+             name='collision_monitor', output='screen', **STOP_ALL, parameters=[CONFIG],
+             remappings=[('/sonar/left', '/nav2_sonar/left'),
+                         ('/sonar/right', '/nav2_sonar/right')]),
         Node(package='nav2_lifecycle_manager', executable='lifecycle_manager',
              name='lifecycle_manager_navigation', output='screen', **STOP_ALL,
              parameters=[{'use_sim_time': False,

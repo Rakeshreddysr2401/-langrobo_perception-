@@ -640,3 +640,14 @@ goal_exec are re-read at the layer's start):
 Logs that tell which one acted: the reach status lines (`/reach/status`, logs/reach_*.jsonl):
 `phase: widest`, `check: ...`, `mode: look`, `way_back ... route_m`.
 
+
+
+## 2026-11-08: stationary restoration and sonar no-return compatibility
+
+Installed Nav2 rejected valid sonar +inf and retained older finite echoes.
+The private finite-Range bridge preserves raw topics and capture metadata; it
+normalizes valid no-return to the sensor maximum conservatively. Margins and
+models are unchanged. Three unit tests and an actual Nav2 domain42/private-output
+regression passed; real lifecycle and paired-sonar checks passed without motion.
+See docs/SONAR_NAV2_COMPAT_2026-11-08.md for evidence and remaining test limits.
+Real current remains v002; the new actors failed qualification.
