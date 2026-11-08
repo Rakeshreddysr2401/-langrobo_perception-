@@ -156,10 +156,9 @@ def _kind(why):
 def way_back_note(why):
     """For the brain's report: why the way the rover came did not work."""
     if 'no path' in why:
-        # nothing the LiDAR or a fresh look confirmed: depth-map leftovers
+        # The failed route does not identify what caused the mapped blockage.
         return ('the way I came is marked blocked on my map, and looking at it did not '
-                'clear it -- likely marks left by people walking through (my depth map '
-                'keeps what it saw); a person may need to check')
+                'clear it; I cannot confirm that route is clear, so a person may need to check')
     if why.startswith('narrow') or 'stuck' in why:
         return f'the way I came is too tight to drive back right now ({why})'
     return f'I could not drive back the way I came ({why})'

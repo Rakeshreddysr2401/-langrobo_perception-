@@ -78,8 +78,10 @@ def test_same_failure_from_the_same_spot():
     assert not T.same_failure(None, 'no path: planner found none', (0.81, -1.97))
 
 
-def test_way_back_note_blames_ghosts_only_for_no_path():
-    assert 'marks left by people' in T.way_back_note('no path: planner found none')
+def test_way_back_note_does_not_invent_the_cause_of_a_blockage():
+    note = T.way_back_note('no path: planner found none')
+    assert 'marked blocked' in note and 'cannot confirm' in note
+    assert 'people' not in note and 'likely' not in note
     tight = T.way_back_note('narrow: nav2 controller found no motion that fits')
     assert 'too tight' in tight and 'people' not in tight
     assert 'could not drive back' in T.way_back_note('out of time for this goal')
