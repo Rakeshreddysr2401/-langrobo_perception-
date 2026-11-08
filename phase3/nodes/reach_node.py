@@ -423,21 +423,26 @@ class Reach(GP.Pass):
             self.spin_for(0.1)
             if self.pose is not None:
                 if done_within is not None and self.dist(g) <= done_within:
+                    self.stop()
                     gh.cancel_goal_async()          # a waypoint: near is enough
                     self.spin_for(0.3)
+                    self.stop()
                     self.nav_gh = None
                     return 'reached', f'waypoint within {done_within * 100:.0f} cm'
                 watch.append((time.time(),) + tuple(self.pose[:3]))
                 why = self.dithering(watch, g) or self.pinned(watch)
                 if why:
+                    self.stop()
                     gh.cancel_goal_async()
                     self.spin_for(0.5)
                     self.nav_gh = None
                     self.stop()
                     return 'failed', why
             if self.stop_req or time.time() - t0 > timeout:
+                self.stop()
                 gh.cancel_goal_async()
                 self.spin_for(0.5)
+                self.stop()
                 # say WHY it ran out of time: a far goal whose route kept
                 # closing timed out as "nav2 timed out", which hid the "no
                 # path" that approach-and-look answers (2026-09-28)
