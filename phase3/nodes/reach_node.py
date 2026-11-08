@@ -174,6 +174,7 @@ TIGHT_ROUNDS = 2
 # unchanged) after RL_STALL_S without RL_GAIN_M of progress, RL_STOPS shield stops
 # in a row, or RL_MAX_S. REACH_RL=0 (default) is the rover without it.
 RL_ON = os.environ.get('REACH_RL', '0') == '1'
+CAMERA_HANDOVER = os.environ.get('REACH_CAMERA_HANDOVER', '0') == '1'
 RL_MODEL = os.environ.get('REACH_RL_MODEL', '/models/rl/current/policy.npz')
 RL_ROUNDS = 1
 # the policy is aimed at the GOAL itself up to RL_GOAL_M (trained on goals 0.8-3.5 m, with
@@ -1279,9 +1280,39 @@ class Reach(GP.Pass):
                 pass
 
     def tight_should_lead(self, g):
-        """True when the widest way to g fits the rover but not nav2's planner."""
+        """Use fresh lethal camera-map cells as a handover hint, never a refusal.
+
+        gap45: LiDAR sees no bottleneck; low obstacles show a 55 cm way,
+        below Nav2's 56 cm planning width. Keep impossible-route decisions
+        LiDAR-only; every RL/tight move still uses its existing shield.
+        """
         w = self.widest_way(g)
-        return w is not None and NEED_W <= w < NAV2_W
+        if w is not None and NEED_W <= w < NAV2_W:
+            return True
+        if not CAMERA_HANDOVER:
+            return False
+        if (w is not None and w < NEED_W) or not self.scans or self.dist(g) > WIDEST_MAX_M:
+            return False
+        m = self.lcm
+        if m is None or self.pose is None:
+            return False
+        age = time.time() - (m.header.stamp.sec + m.header.stamp.nanosec * 1e-9)
+        if not 0 <= age <= 2.0:
+            return False
+        cells = MC.lethal_cells(m, self.pose, r_max=min(3.4, self.dist(g) + 0.4))
+        cells = self.outside_body(cells)
+        if not len(cells):
+            return False
+        c, s = math.cos(self.pose[2]), math.sin(self.pose[2])
+        dx, dy = g[0] - self.pose[0], g[1] - self.pose[1]
+        target = (c * dx + s * dy, -s * dx + c * dy)
+        pts = np.vstack([np.vstack(self.scans[-3:]), cells])
+        narrow, info = WD.widest(pts, target)
+        lead = narrow is not None and NEED_W <= narrow < NAV2_W
+        self.say(phase='handover_hint', source='fresh_lethal_map', age_s=round(age, 2),
+                 width_cm=None if narrow is None else round(narrow * 100, 1),
+                 tight_first=lead, ms=info.get('ms'))
+        return lead
 
     def widest_way(self, g):
         """The widest way to g (odom) on the recent LiDAR scans (widest.py), in
