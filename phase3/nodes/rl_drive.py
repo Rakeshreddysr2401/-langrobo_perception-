@@ -9,7 +9,7 @@ env.py -- kino_sim rl/tests check it on random cases.
 
 THE SHIELD decides, not the policy: every command is rolled 0.8 s ahead with
 the measured motion model (lag, deadband, the learned pivot slide) and sent
-only if the outline + 1 cm (goal_exec's MARGIN) meets no point on the way. Else
+only if the outline + 2 cm (SHIELD_MARGIN) meets no point on the way. Else
 the same turn at half speed, else the turn alone, else stop. The policy can be
 clumsy; it cannot drive into what the rover sees.
 """
@@ -127,7 +127,7 @@ def _targets(vx, wz, k):
 
 
 def sweep_hits(pts, vx, wz, vel, pack, lag=LAG_S):
-    """Does command (vx, wz), held 0.8 s from the measured (v, w), bring the outline + 1 cm
+    """Does command (vx, wz), held 0.8 s from the measured (v, w), bring the outline + 2 cm
     onto any base_link point?"""
     if pts is None or not len(pts):
         return False
