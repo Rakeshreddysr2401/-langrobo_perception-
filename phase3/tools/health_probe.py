@@ -20,6 +20,7 @@ import time
 
 import rclpy
 from rclpy.qos import qos_profile_sensor_data
+from rclpy.executors import SingleThreadedExecutor
 from rosidl_runtime_py.utilities import get_message
 
 CAM = '/camera/camera0'
@@ -78,20 +79,29 @@ def main():
     t0 = time.time()
     # spin_once handles ONE callback per call and under-counts the 100+ Hz
     # topics; spin in a thread and only look for new topics here.
-    threading.Thread(target=rclpy.spin, args=(node,), daemon=True).start()
-    while time.time() - t0 < window + 2.0:
-        attach()
-        time.sleep(0.2)
-    # Each topic's rate is counted from the moment IT was subscribed. The first
-    # message of a topic is dropped from the count only by discovery timing, so
-    # the slowest topics (a 0.5 Hz map) read a little low in a short window.
-    now = time.time()
-    out = {'window': round(window, 1),
-           'hz': {t: round(count[t] / max(now - t_sub[t], 1.0), 2) if t in t_sub else 0.0 for t in TOPICS},
-           'moving': moving['v']}
-    print(json.dumps(out))
-    node.destroy_node()
-    rclpy.shutdown()
+    executor = SingleThreadedExecutor()
+    executor.add_node(node)
+    spin_thread = threading.Thread(target=executor.spin)
+    spin_thread.start()
+    try:
+        while time.time() - t0 < window + 2.0:
+            attach()
+            time.sleep(0.2)
+        # Each topic's rate is counted from the moment IT was subscribed. The first
+        # message of a topic is dropped from the count only by discovery timing, so
+        # the slowest topics (a 0.5 Hz map) read a little low in a short window.
+        now = time.time()
+        out = {'window': round(window, 1),
+               'hz': {t: round(count[t] / max(now - t_sub[t], 1.0), 2) if t in t_sub else 0.0 for t in TOPICS},
+               'moving': moving['v']}
+    finally:
+        # Stop callbacks before destroying their subscriptions/native handles.
+        executor.shutdown()
+        spin_thread.join()
+        node.destroy_node()
+        rclpy.shutdown()
+    print(json.dumps(out), flush=True)
+
 
 
 if __name__ == '__main__':
