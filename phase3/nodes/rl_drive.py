@@ -126,6 +126,9 @@ def _targets(vx, wz, k):
     return vx, math.copysign(max(0.0, k * (TURN_GAIN * abs(wz) - TURN_OFF)), wz)
 
 
+CREEP_TOL = 0.001             # m: how much nearer an already-close point may come (rounding)
+
+
 def sweep_hits(pts, vx, wz, vel, pack, lag=LAG_S):
     """Does command (vx, wz), held 0.8 s from the measured (v, w), bring the outline + 2 cm
     onto any base_link point?"""
@@ -137,6 +140,11 @@ def sweep_hits(pts, vx, wz, vel, pack, lag=LAG_S):
     x = y = th = 0.0
     a = SHIELD_DT / (lag + SHIELD_DT)
     m = SHIELD_MARGIN
+    # a point ALREADY within the margin (crept in: raster cells, noise) blocks only motion that
+    # brings the outline nearer to it; else every command, backing away too, is refused and the
+    # rover is pinned (rl2 r002, 2026-11-09: 1 in 3 stalls ended 0-0.2 cm from a thing, frozen)
+    d0 = outline_dist(pts[:, 0], pts[:, 1])
+    near0 = ((pts[:, 0] < FRONT + m) & (pts[:, 0] > -REAR - m) & (np.abs(pts[:, 1]) < SIDE + m))
     for _ in range(SHIELD_T):
         v += a * (vt - v)
         w += a * (wt - w)
@@ -147,8 +155,11 @@ def sweep_hits(pts, vx, wz, vel, pack, lag=LAG_S):
         c, s = math.cos(th), math.sin(th)
         qx, qy = pts[:, 0] - x, pts[:, 1] - y
         bx, by = c * qx + s * qy, -s * qx + c * qy
-        if ((bx < FRONT + m) & (bx > -REAR - m) & (np.abs(by) < SIDE + m)).any():
-            return True
+        inb = (bx < FRONT + m) & (bx > -REAR - m) & (np.abs(by) < SIDE + m)
+        if inb.any():
+            inb &= ~(near0 & (outline_dist(bx, by) >= d0 - CREEP_TOL))
+            if inb.any():
+                return True
     return False
 
 
