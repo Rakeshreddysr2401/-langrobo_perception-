@@ -126,14 +126,22 @@ def _targets(vx, wz, k):
     return vx, math.copysign(max(0.0, k * (TURN_GAIN * abs(wz) - TURN_OFF)), wz)
 
 
+_m = SHIELD_MARGIN
+_ru = np.arange(-REAR - _m, FRONT + _m + 1e-6, 0.02)
+_rv = np.arange(-SIDE - _m, SIDE + _m + 1e-6, 0.02)
+RING_U = np.concatenate([_ru, _ru, np.full_like(_rv, -REAR - _m), np.full_like(_rv, FRONT + _m)])
+RING_V = np.concatenate([np.full_like(_ru, -SIDE - _m), np.full_like(_ru, SIDE + _m), _rv, _rv])
 CREEP_TOL = 0.001             # m: how much nearer an already-close point may come (rounding)
 
 
-def sweep_hits(pts, vx, wz, vel, pack, lag=LAG_S):
+def sweep_hits(pts, vx, wz, vel, pack, lag=LAG_S, known=None):
     """Does command (vx, wz), held 0.8 s from the measured (v, w), bring the outline + 2 cm
     onto any base_link point?"""
-    if pts is None or not len(pts):
+    back = known is not None and vx < 0
+    if (pts is None or not len(pts)) and not back:
         return False
+    if pts is None:
+        pts = np.zeros((0, 2))
     pl, pr, k = pack
     vt, wt = _targets(vx, wz, k)
     v, w = vel
@@ -160,14 +168,22 @@ def sweep_hits(pts, vx, wz, vel, pack, lag=LAG_S):
             inb &= ~(near0 & (outline_dist(bx, by) >= d0 - CREEP_TOL))
             if inb.any():
                 return True
+        if back:
+            # backing up: the outline + margin must stay over KNOWN floor (known_floor.py: seen by
+            # the camera or driven over) -- nothing on the rover looks back (rl2 r003, 2026-11-09)
+            ru, rv = RING_U, RING_V
+            if not known(x + c * ru - s * rv, y + s * ru + c * rv).all():
+                return True
     return False
 
 
-def shield(pts, vx, wz, vel, pack):
-    """-> (vx, wz) to send, changed, stopped -- the order env.py uses."""
+def shield(pts, vx, wz, vel, pack, known=None):
+    """-> (vx, wz) to send, changed, stopped -- the order env.py uses. known: f(bx, by) -> bool,
+    is the floor at these base_link points known (known_floor.KnownFloor.known_base); with it a
+    reverse may move the outline only over known floor (as kino_sim rl2/env.py REVERSE_KNOWN)."""
     if pts is not None and len(pts):
         pts = pts[np.hypot(pts[:, 0], pts[:, 1]) < SHIELD_NEAR_M]
     for i, (cv, cw) in enumerate(((vx, wz), (0.5 * vx, wz), (0.0, wz))):
-        if not sweep_hits(pts, cv, cw, vel, pack):
+        if not sweep_hits(pts, cv, cw, vel, pack, known=known):
             return cv, cw, i > 0, False
     return 0.0, 0.0, True, True

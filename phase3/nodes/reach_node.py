@@ -71,6 +71,7 @@ import house_route as HR  # noqa: E402
 import rl_drive as RD  # noqa: E402
 import rl2_drive as R2  # noqa: E402
 import rl2_policy as R2P  # noqa: E402
+import known_floor as KF  # noqa: E402
 import memory_cells as MC  # noqa: E402
 from goal_exec import FRONT as GE_FRONT, REAR as GE_REAR, SIDE, GoalExec, wrap  # noqa: E402
 from sonar_feed import SonarFeed  # noqa: E402
@@ -269,12 +270,18 @@ class Reach(GP.Pass):
         self.create_subscription(Empty, '/reach/cancel', lambda _: setattr(self, 'stop_req', True), 10)
         # where reach has driven: its own drives only, so a carry is not a road
         self.trail = TR.Trail()
+        self.known = KF.KnownFloor()             # what the camera has seen + where the body stood (rl2 shield)
+        self._known_t = 0.0
         self.pursuing = False
         self.get_logger().info('reach up: /reach/goal (RViz 2D Goal Pose)')
 
     def _odom(self, m):
         super()._odom(m)
         self.odom_vel = (m.twist.twist.linear.x, m.twist.twist.angular.z)
+        now = time.time()
+        if self.pose is not None and now - self._known_t >= 0.1:
+            self._known_t = now
+            self.known.mark(self.pose)
         if self.pursuing:
             self.trail.add(self.pose[0], self.pose[1])
 
@@ -1256,7 +1263,8 @@ class Reach(GP.Pass):
                 else:
                     obs = RD.observe(seen, gb, gobs, vel, last, pack, now - t0)
                     pvx, pwz = RD.to_cmd(pol(obs))
-                vx, wz, chg, stp = RD.shield(seen, pvx, pwz, vel, pack)
+                vx, wz, chg, stp = RD.shield(seen, pvx, pwz, vel, pack,
+                                             known=self.known.known_base(self.pose) if pol.rl2 else None)
                 if rec is not None:
                     rec.append((now - t0, np.asarray(self.pose, np.float32), obs, np.float32([pvx, pwz, vx, wz]),
                                 np.asarray(pts, np.float16), np.asarray(mc, np.float16),

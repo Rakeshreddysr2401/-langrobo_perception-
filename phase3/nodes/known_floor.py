@@ -1,0 +1,63 @@
+"""known_floor.py -- the floor the rover KNOWS: what its camera has looked at, and where its body has
+stood. No ROS. kino_0.1.0.
+
+WHY (kino_sim rl2 r003, 2026-11-09): nothing on the rover looks back -- the LiDAR's plane is above
+low things, the camera and the sonars face forward. Once the camera-channel bugs in training were
+fixed, every contact left was the rover BACKING into a low object it had never seen. The shield
+(rl_drive.sweep_hits, known=...) now lets a reverse move the outline only over known floor; the
+training env (kino_sim rl2/env.py, REVERSE_KNOWN) does the same with the same geometry.
+
+A 4 cm grid in odom, 40 x 40 m about where reach started. Marked from each pose (mark(), ~10 Hz):
+the camera's floor fan (+-43.5 deg, 0.25-3.0 m, as rl2/env.py CAM_*) and the body's cells.
+"""
+import math
+
+import numpy as np
+
+RES = 0.04
+HALF = 20.0
+N = int(2 * HALF / RES)
+CAM_HALF, CAM_NEAR, CAM_FAR = math.radians(43.5), 0.25, 3.0
+FRONT, REAR, SIDE = 0.182, 0.178, 0.19          # rl2/env.py (goal_exec's outline)
+_fa, _fr = np.meshgrid(np.linspace(-CAM_HALF, CAM_HALF, 24), np.arange(CAM_NEAR, CAM_FAR, 0.06), indexing='ij')
+FAN_A, FAN_R = _fa.ravel(), _fr.ravel()
+_bu, _bv = np.meshgrid(np.arange(-REAR + 0.01, FRONT, 0.02), np.arange(-SIDE + 0.01, SIDE, 0.02), indexing='ij')
+BODY_U, BODY_V = _bu.ravel(), _bv.ravel()
+
+
+class KnownFloor:
+    def __init__(self):
+        self.grid = np.zeros((N, N), bool)
+        self.origin = None                           # odom (x, y) of the grid's centre
+
+    def _ij(self, x, y):
+        i = np.floor((np.asarray(x) - self.origin[0] + HALF) / RES).astype(int)
+        j = np.floor((np.asarray(y) - self.origin[1] + HALF) / RES).astype(int)
+        return i, j
+
+    def mark(self, pose):
+        """The camera fan and the body's cells at pose (x, y, th) in odom."""
+        x, y, th = pose[:3]
+        if self.origin is None:
+            self.origin = (x, y)
+        a = th + FAN_A
+        px = np.concatenate([x + np.cos(a) * FAN_R, x + math.cos(th) * BODY_U - math.sin(th) * BODY_V])
+        py = np.concatenate([y + np.sin(a) * FAN_R, y + math.sin(th) * BODY_U + math.cos(th) * BODY_V])
+        i, j = self._ij(px, py)
+        ok = (i >= 0) & (i < N) & (j >= 0) & (j < N)
+        self.grid[i[ok], j[ok]] = True
+
+    def known_base(self, pose):
+        """f(bx, by) -> bool array: are these base_link points (at pose) over known floor?"""
+        x, y, th = pose[:3]
+        c, s = math.cos(th), math.sin(th)
+
+        def f(bx, by):
+            if self.origin is None:
+                return np.zeros(np.shape(bx), bool)
+            i, j = self._ij(x + c * bx - s * by, y + s * bx + c * by)
+            ok = (i >= 0) & (i < N) & (j >= 0) & (j < N)
+            out = np.zeros(np.shape(bx), bool)
+            out[ok] = self.grid[i[ok], j[ok]]
+            return out
+        return f
