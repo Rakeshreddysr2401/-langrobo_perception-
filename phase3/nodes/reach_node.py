@@ -186,6 +186,10 @@ RL_ROUNDS = 1
 # drove into the hall corner beside the door leaf in 11 s -- and nav2 failed again from there.
 RL_GOAL_M = 3.5
 RL_DONE_M = 0.25
+# rl2's route passes only where the rover FITS (kino_sim rl2/world.py CENTRE_CLEAR 0.21: half width
+# 0.19 + the shield's 2 cm; +1 cm here: the guide's 2 cm cells hold LiDAR points up to a cell off).
+# 0.16 led its routes through 36 cm gaps (kino_sim r006, 2026-11-10). v002 keeps 0.16.
+RL2_GUIDE_CLEAR = 0.22
 RL_MAX_S = 60.0
 RL_STALL_S, RL_GAIN_M = 15.0, 0.10
 RL_STOPS = 20                  # 2 s of shield stops in a row
@@ -1218,11 +1222,12 @@ class Reach(GP.Pass):
                     # The SHIELD still checks every command on all points (+ camera, sonar, memory).
                     lid = self.outside_body(np.vstack(self.scans[-3:])) if self.scans else np.zeros((0, 2))
                     h = (TRT._guide(np.asarray(lid, float), gb, half=min(3.4, max(TRT.SEARCH_R + 0.2, d + 0.4)),
-                                    res=0.02, clear=0.16) if len(lid) else None)
+                                    res=0.02, clear=RL2_GUIDE_CLEAR if pol.rl2 else 0.16) if len(lid) else None)
                     gpose, gt = (x, y, th), now
                     blocked = len(lid) and (h is None or not any(
                         math.isfinite(h(r * math.cos(k * math.pi / 4), r * math.sin(k * math.pi / 4)))
-                        for r in (0.0, 0.05, 0.10) for k in range(8)))    # 5 cm cells: not just its own
+                        for r in ((0.0, 0.05, 0.10, 0.15, 0.20) if pol.rl2 else (0.0, 0.05, 0.10))
+                        for k in range(8)))    # 5 cm cells: not just its own; rl2's 22 cm guide: a wider look
                     unreachable = unreachable + 1 if blocked else 0
                     if unreachable >= 2:
                         # no way for the rover's centre to the goal on what it sees, 2 guides in a row
