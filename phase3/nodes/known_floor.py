@@ -19,7 +19,9 @@ HALF = 20.0
 N = int(2 * HALF / RES)
 CAM_HALF, CAM_NEAR, CAM_FAR = math.radians(43.5), 0.25, 3.0
 FRONT, REAR, SIDE = 0.182, 0.178, 0.19          # rl2/env.py (goal_exec's outline)
-_fa, _fr = np.meshgrid(np.linspace(-CAM_HALF, CAM_HALF, 24), np.arange(CAM_NEAR, CAM_FAR, 0.06), indexing='ij')
+# 48 rays x 3 cm (kino_sim rl2/env.py FAN_N, FAN_DR): 24 x 6 cm left holes in the 4 cm grid, beside the
+# rover's own way in too -- the reverse rule then refused backing out of dead ends (r008, 2026-11-10)
+_fa, _fr = np.meshgrid(np.linspace(-CAM_HALF, CAM_HALF, 48), np.arange(CAM_NEAR, CAM_FAR, 0.03), indexing='ij')
 FAN_A, FAN_R = _fa.ravel(), _fr.ravel()
 _bu, _bv = np.meshgrid(np.arange(-REAR + 0.01, FRONT, 0.02), np.arange(-SIDE + 0.01, SIDE, 0.02), indexing='ij')
 BODY_U, BODY_V = _bu.ravel(), _bv.ravel()
