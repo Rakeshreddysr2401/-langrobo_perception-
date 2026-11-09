@@ -137,7 +137,7 @@ GUIDE_RES = 0.02              # m per cell of the walking-distance guide
 GUIDE_CLEAR = 0.16            # m: the body's inner half-width (0.178) less a cell's half-diagonal
 
 
-def _guide(pts, target, half=None, res=None, clear=None):
+def _guide(pts, target, half=None, res=None, clear=None, extend=False):
     """Walking distance to the target for the rover's centre, around obstacles.
 
     WHY (twin door49, 2026-11-01): nav2 left the rover in the pocket between the
@@ -183,6 +183,13 @@ def _guide(pts, target, half=None, res=None, clear=None):
         return None
     dist = np.full((n, n), np.inf)
     dist[free] = dijkstra(g, directed=False, indices=src, min_only=True)
+    if extend:
+        # rl2 (kino_sim rl2/world.py field): nearer than `clear` to a thing -- the shield lets the
+        # rover get to 2 cm -- the way out to the nearest route cell + its length, not inf
+        near = ~free & ~occ
+        if near.any():
+            dd, (ii, jj) = ndimage.distance_transform_edt(~free, return_indices=True)
+            dist[near] = dist[ii[near], jj[near]] + dd[near] * GUIDE_RES
 
     def h(x, y):
         i, j = int((x + half) / GUIDE_RES), int((y + half) / GUIDE_RES)

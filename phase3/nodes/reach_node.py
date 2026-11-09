@@ -1222,7 +1222,7 @@ class Reach(GP.Pass):
                     # The SHIELD still checks every command on all points (+ camera, sonar, memory).
                     lid = self.outside_body(np.vstack(self.scans[-3:])) if self.scans else np.zeros((0, 2))
                     h = (TRT._guide(np.asarray(lid, float), gb, half=min(3.4, max(TRT.SEARCH_R + 0.2, d + 0.4)),
-                                    res=0.02, clear=RL2_GUIDE_CLEAR if pol.rl2 else 0.16) if len(lid) else None)
+                                    res=0.02, clear=RL2_GUIDE_CLEAR if pol.rl2 else 0.16, extend=pol.rl2) if len(lid) else None)
                     gpose, gt = (x, y, th), now
                     blocked = len(lid) and (h is None or not any(
                         math.isfinite(h(r * math.cos(k * math.pi / 4), r * math.sin(k * math.pi / 4)))
