@@ -69,6 +69,8 @@ import trail as TR  # noqa: E402
 import escape_moves as EM  # noqa: E402
 import house_route as HR  # noqa: E402
 import rl_drive as RD  # noqa: E402
+import rl2_drive as R2  # noqa: E402
+import rl2_policy as R2P  # noqa: E402
 import memory_cells as MC  # noqa: E402
 from goal_exec import FRONT as GE_FRONT, REAR as GE_REAR, SIDE, GoalExec, wrap  # noqa: E402
 from sonar_feed import SonarFeed  # noqa: E402
@@ -1138,7 +1140,11 @@ class Reach(GP.Pass):
         """The learned driver's policy (loaded once), or None (logged)."""
         if getattr(self, '_rl_pol', None) is None:
             try:
-                self._rl_pol = RD.Policy(RL_MODEL)
+                # kino_0.1.0: an rl2 policy (CNN over a 2 x 64 x 64 patch, rl2_drive.py) or the v002 MLP
+                with np.load(RL_MODEL) as z:
+                    rl2 = 'conv0_W' in z.files
+                self._rl_pol = R2P.Policy(RL_MODEL) if rl2 else RD.Policy(RL_MODEL)
+                self._rl_pol.rl2 = rl2
                 self.get_logger().info(f'rl: policy {RL_MODEL} {self._rl_pol.meta}')
             except Exception as e:                  # no policy: the rover as without it
                 self.get_logger().warning(f'rl: no policy ({e})')
@@ -1235,8 +1241,21 @@ class Reach(GP.Pass):
                 # steering at it, the shield kept refusing, 33 s without progress, 0.9 cm)
                 mc = MC.for_checks(self.lcm, self.pose)
                 seen = np.vstack([pts, mc]) if len(mc) else pts
-                obs = RD.observe(seen, gb, gobs, vel, last, pack, now - t0)
-                pvx, pwz = RD.to_cmd(pol(obs))
+                if pol.rl2:
+                    # rl2: ch0 the LiDAR scan alone (the env's ray hits), ch1 the camera + memory points;
+                    # the guide (built in its own frame at gpose) is read in the rover's frame now
+                    lid1 = self.outside_body(self.scans[-1]) if self.scans else np.zeros((0, 2))
+                    cam = np.vstack([pts, mc]) if len(mc) else pts
+                    def h_now(bx, by, _c=c, _s=s):
+                        ox, oy = x + _c * bx - _s * by - gpose[0], y + _s * bx + _c * by - gpose[1]
+                        return h(cg * ox + sg * oy, -sg * ox + cg * oy)
+                    st, patch = R2.observe(lid1, cam, h_now if h is not None else None, gb, vel,
+                                           last, pack, now - t0, now - best_t, th)
+                    obs = st
+                    pvx, pwz = R2.to_cmd(pol(st, patch))
+                else:
+                    obs = RD.observe(seen, gb, gobs, vel, last, pack, now - t0)
+                    pvx, pwz = RD.to_cmd(pol(obs))
                 vx, wz, chg, stp = RD.shield(seen, pvx, pwz, vel, pack)
                 if rec is not None:
                     rec.append((now - t0, np.asarray(self.pose, np.float32), obs, np.float32([pvx, pwz, vx, wz]),
