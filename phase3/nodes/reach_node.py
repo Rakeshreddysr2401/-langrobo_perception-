@@ -1256,10 +1256,11 @@ class Reach(GP.Pass):
                     def h_now(bx, by, _c=c, _s=s):
                         ox, oy = x + _c * bx - _s * by - gpose[0], y + _s * bx + _c * by - gpose[1]
                         return h(cg * ox + sg * oy, -sg * ox + cg * oy)
+                    kb = self.known.known_base(self.pose)
                     st, patch = R2.observe(lid1, cam, h_now if h is not None else None, gb, vel,
-                                           last, pack, now - t0, now - best_t, th)
+                                           last, pack, now - t0, now - best_t, th, known=kb)
                     obs = st
-                    pvx, pwz = R2.to_cmd(pol(st, patch))
+                    pvx, pwz = R2.to_cmd(pol(st, patch[:pol.patch_shape[0]]))
                 else:
                     obs = RD.observe(seen, gb, gobs, vel, last, pack, now - t0)
                     pvx, pwz = RD.to_cmd(pol(obs))

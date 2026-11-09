@@ -6,6 +6,7 @@ builds -- kino_sim rl2/tests/test_parity_rl2.py checks it on the training env's 
 Inputs reach already has (base_link at the rover now):
   scan    the latest LiDAR scan's points            -> patch ch0 (as the env's ray-cast hits)
   cam     the camera obstacle memory (dobs) points    -> patch ch1 (the env's seen camera-band edges)
+  known   known_floor.KnownFloor.known_base(pose)       -> patch ch2 (floor not known)
   guide   tight_route._guide on the LiDAR (h(x, y) -> walking distance, base frame at its own pose)
   target  the leg's end or the goal (base frame), vel (v, w), last command (m/s, rad/s),
           pack (pivot left, pivot right, k), t in this drive (s), s since the last 10 cm of progress
@@ -21,6 +22,9 @@ MAX_S, STALL_S = 90.0, 25.0
 VX_MAX, VX_MIN, WZ_MAX = 0.20, -0.10, 1.5
 STATE_DIM = 31
 DIRS = [k * 2 * math.pi / 16 for k in range(16)]
+_u = (np.arange(P) - P_BACK + 0.5) * PRES
+_v = (np.arange(P) - P / 2 + 0.5) * PRES
+PU, PV = np.meshgrid(_u, _v, indexing='ij')         # patch cell centres, base_link (as env pu, pv)
 
 
 def raster(pts):
@@ -54,8 +58,8 @@ def route_points(h, target, th=0.0):
     return pts
 
 
-def observe(scan, cam, h, target, vel, last, pack, t, stall_s, th=0.0):
-    """(state (31,), patch (2, P, P)) exactly as rl2/env.py builds them."""
+def observe(scan, cam, h, target, vel, last, pack, t, stall_s, th=0.0, known=None):
+    """(state (31,), patch (3, P, P)) exactly as rl2/env.py builds them (a 2-channel policy: patch[:2])."""
     gx, gy = target
     gd = math.hypot(gx, gy)
     ga = math.atan2(gy, gx)
@@ -71,7 +75,10 @@ def observe(scan, cam, h, target, vel, last, pack, t, stall_s, th=0.0):
                         last[0] / VX_MAX, last[1] / WZ_MAX,
                         pl[0] / 0.1, pl[1] / 0.1, pr[0] / 0.1, pr[1] / 0.1, k,
                         min(t, MAX_S) / MAX_S, stall_s / STALL_S], np.float32)
-    patch = np.stack([raster(scan), raster(cam)])
+    # ch2 (policies from r005): floor NOT known -- not seen, not driven over (known_floor.py), at
+    # each cell's centre; where the shield will not let it back up. known None: all unknown.
+    unk = np.ones((P, P), np.float32) if known is None else (~known(PU, PV)).astype(np.float32)
+    patch = np.stack([raster(scan), raster(cam), unk])
     return state, patch
 
 

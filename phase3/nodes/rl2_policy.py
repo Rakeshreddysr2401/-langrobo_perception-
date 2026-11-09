@@ -60,7 +60,7 @@ class Policy:
         self.patch_shape = tuple(int(v) for v in d['patch_shape'])
 
     def __call__(self, state, patch):
-        """state (STATE_DIM,), patch (2, 64, 64) -> action (2,) in [-1, 1] after the caller's clip."""
+        """state (STATE_DIM,), patch (C, 64, 64) -> action (2,) in [-1, 1] after the caller's clip."""
         s = (np.asarray(state, np.float32) - self.mean) / (self.std + self.eps)
         x = np.asarray(patch, np.float32)
         for W, b, st, pad, pool in self.conv:
