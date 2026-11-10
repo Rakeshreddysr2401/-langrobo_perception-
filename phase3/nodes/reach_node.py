@@ -192,6 +192,7 @@ RL_DONE_M = 0.25
 # 0.19 + the shield's 2 cm; +1 cm here: the guide's 2 cm cells hold LiDAR points up to a cell off).
 # 0.16 led its routes through 36 cm gaps (kino_sim r006, 2026-11-10). v002 keeps 0.16.
 RL2_GUIDE_CLEAR = 0.22
+RL2_PRECISE_R = 2.4          # m: rl2's route uses the precise points this near, the costmap beyond
 RL2_GUIDE_HALF = 3.9          # m: the global costmap rolls 8 x 8 m round the rover (config/nav2.yaml)
 RL_MAX_S = 60.0
 RL_STALL_S, RL_GAIN_M = 15.0, 0.10
@@ -1266,7 +1267,15 @@ class Reach(GP.Pass):
                         # 2026-11-10: robot route 2.6-4.2 m vs the true 8-10 m way round). The global
                         # costmap holds the camera's low things (nvblox) + the LiDAR for 4 m round.
                         gl = self.outside_body(MC.lethal_cells(self.gcm, self.pose, r_max=RL2_GUIDE_HALF))
-                        every = np.vstack([lid, gl]) if len(gl) else lid
+                        # ... but near the rover the PRECISE points (camera 1 cm memory + LiDAR), as the
+                        # training field's true geometry: nvblox's cells thicken edges, and a 55 cm door
+                        # read too narrow for the 44 cm the route needs -- rl2 quit in 1.8 s, the rover
+                        # crawled through in goal_exec hops (real robot 2026-11-10 21:57)
+                        if len(gl):
+                            gl = gl[np.hypot(gl[:, 0], gl[:, 1]) > RL2_PRECISE_R]
+                        cam = self.dobs.points_base(self.pose)
+                        cam = cam[np.hypot(cam[:, 0], cam[:, 1]) <= RL2_PRECISE_R] if len(cam) else np.zeros((0, 2))
+                        every = np.vstack([p for p in (lid, gl, self.outside_body(cam)) if len(p)]) if (len(lid) or len(gl) or len(cam)) else lid
                         h = (TRT._guide(np.asarray(every, float), gb, half=min(RL2_GUIDE_HALF, max(TRT.SEARCH_R + 0.2, d + 1.0)),
                                         res=0.04, clear=RL2_GUIDE_CLEAR, extend=True) if len(every) else None)
                     else:
