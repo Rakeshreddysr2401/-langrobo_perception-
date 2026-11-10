@@ -101,8 +101,8 @@ cd ~/kino_sim && ./sim up home_real     # ~1 min; add follow=true for an Isaac w
 
 | repo | read first | then |
 |---|---|---|
-| Jetson `~/rover` | `STARTUP.md` (after a power-on: all boxes, in order, what good looks like), `SYSTEM_OVERVIEW.md` (how it all fits, the topic contract), `OPEN_ISSUES.md` (what is open) | `OPERATIONS.md` (the runbook: calibration, diagnosis), `ARCHITECTURE.md`, `NAV_GUIDE.md`, `LOCALIZATION.md`, `ISAAC_ROS_5_UPGRADE.md` (the 5.0 move + Part B features), `docker/2.0/README.md` (the image) |
-| Pi 5 `~/ros2_ws` | `README.md`, `HOW_IT_WORKS.md`, `TODO.md` (open items at the top) | `ARCHITECTURE_LLD.md`, `OPERATIONS.md` (systemd, health API), `NETWORKING.md`, `INTEGRATION_GAPS.md`, `TELEGRAM.md`, `MAC_MINI_TASKS.md`, `docs/voice/` |
+| Jetson `~/rover` (documents in `docs/`, index `docs/README.md`; code in `pose/ mapping/ nav/ perception/`) | `STARTUP.md` (after a power-on: all boxes, in order, what good looks like), `SYSTEM_OVERVIEW.md` (how it all fits, the topic contract), `OPEN_ISSUES.md` (what is open) | `OPERATIONS.md` (the runbook: calibration, diagnosis), `ARCHITECTURE.md`, `NAV_GUIDE.md`, `LOCALIZATION.md`, `ISAAC_ROS_5_UPGRADE.md` (the 5.0 move + Part B features), `docker/2.0/README.md` (the image) |
+| Pi 5 `~/ros2_ws` (documents in `docs/`, index `docs/README.md`; scripts by purpose `scripts/README.md`) | `README.md`, `HOW_IT_WORKS.md`, `TODO.md` (open items at the top) | `ARCHITECTURE_LLD.md`, `OPERATIONS.md` (systemd, health API), `NETWORKING.md`, `INTEGRATION_GAPS.md`, `TELEGRAM.md`, `MAC_MINI_TASKS.md`, `docs/voice/` |
 | Laptop `~/kino_sim` | `README.md`, `CLAUDE.md` (rules for the twin), `docs/STATUS.md` (where things stand, sim-real gaps) | `docs/IMPROVEMENT_LOOP.md` (the method), `docs/PLAN_AGENTS_NAV.md` (the plan), `docs/VERSIONS.md` (exact versions) |
 
 ## 6. Versions (2026-10-25)
