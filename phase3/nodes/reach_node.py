@@ -190,6 +190,7 @@ RL_DONE_M = 0.25
 # 0.19 + the shield's 2 cm; +1 cm here: the guide's 2 cm cells hold LiDAR points up to a cell off).
 # 0.16 led its routes through 36 cm gaps (kino_sim r006, 2026-11-10). v002 keeps 0.16.
 RL2_GUIDE_CLEAR = 0.22
+RL2_GUIDE_HALF = 3.9          # m: the global costmap rolls 8 x 8 m round the rover (config/nav2.yaml)
 RL_MAX_S = 60.0
 RL_STALL_S, RL_GAIN_M = 15.0, 0.10
 RL_STOPS = 20                  # 2 s of shield stops in a row
@@ -1221,8 +1222,19 @@ class Reach(GP.Pass):
                     # "go back round" as the camera came near the frame, then "unreachable").
                     # The SHIELD still checks every command on all points (+ camera, sonar, memory).
                     lid = self.outside_body(np.vstack(self.scans[-3:])) if self.scans else np.zeros((0, 2))
-                    h = (TRT._guide(np.asarray(lid, float), gb, half=min(3.4, max(TRT.SEARCH_R + 0.2, d + 0.4)),
-                                    res=0.02, clear=RL2_GUIDE_CLEAR if pol.rl2 else 0.16, extend=pol.rl2) if len(lid) else None)
+                    if pol.rl2:
+                        # rl2 was trained on a route over the WHOLE flat with the low furniture in it
+                        # (kino_sim rl2/world.py field). LiDAR alone, 3.4 m round, led it into a bed
+                        # frame / chair feet it then saw on ch1 and it circled (twin in2bhk_s1,
+                        # 2026-11-10: robot route 2.6-4.2 m vs the true 8-10 m way round). The global
+                        # costmap holds the camera's low things (nvblox) + the LiDAR for 4 m round.
+                        gl = self.outside_body(MC.lethal_cells(self.gcm, self.pose, r_max=RL2_GUIDE_HALF))
+                        every = np.vstack([lid, gl]) if len(gl) else lid
+                        h = (TRT._guide(np.asarray(every, float), gb, half=min(RL2_GUIDE_HALF, max(TRT.SEARCH_R + 0.2, d + 1.0)),
+                                        res=0.04, clear=RL2_GUIDE_CLEAR, extend=True) if len(every) else None)
+                    else:
+                        h = (TRT._guide(np.asarray(lid, float), gb, half=min(3.4, max(TRT.SEARCH_R + 0.2, d + 0.4)),
+                                        res=0.02, clear=0.16) if len(lid) else None)
                     gpose, gt = (x, y, th), now
                     blocked = len(lid) and (h is None or not any(
                         math.isfinite(h(r * math.cos(k * math.pi / 4), r * math.sin(k * math.pi / 4)))
