@@ -1,8 +1,12 @@
 import copy
 import math
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 import unittest
-from sonar_nav2_compat import finite_no_echo
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'nodes'))
+from sonar_nav2_compat import finite_no_echo  # noqa: E402
 
 
 def observation(value):
