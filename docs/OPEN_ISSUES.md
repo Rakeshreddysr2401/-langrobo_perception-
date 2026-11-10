@@ -1,6 +1,6 @@
 # Open issues — where things stand (newest first; last updated 2026-11-10)
 
-## 2026-11-10 — Repo audit and restructure (branch `restructure`, from `kino_0.1.0` @ 0f6fcf1)
+## 2026-11-10 — Repo audit and restructure (branch `kino_0.1.0_fable-5.2`, from `kino_0.1.0` @ 0f6fcf1)
 
 **Done** (no behaviour change, only places): folders by function (`pose/ mapping/ nav/ perception/`,
 were `phase1-4`; container `/opt/rover/<folder>`), tests in `<folder>/tests/`, hand probes in `tools/`,
