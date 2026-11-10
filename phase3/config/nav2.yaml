@@ -1050,7 +1050,22 @@ collision_monitor:
     # unplugged, rebooting) is NOT a reason to stop -- nav2 stops on any stale
     # source otherwise; the LiDAR keeps its 1 s timeout. The sonar node publishes
     # +inf (no echo) while its board is missing, so its last reading never lingers.
-    observation_sources: [scan, sonar_left, sonar_right]
+    # + the depth camera's LOW things (2026-11-10): twin in2bhk_s1 goal 6, MPPI drove the outline
+    # onto a study chair's star base (a few cm tall) and held it < 1 cm for 16 s -- the LiDAR's
+    # 25 cm plane and the front sonars never see such things; the costmap had them but this last
+    # check did not. /goal_exec/obstacles = depth_obstacles.py: the camera's points at the rover's
+    # height (2-31 cm, floor noise and edge ghosts filtered), 1 cm voxels remembered in odom (the
+    # camera cannot see its own sides or its first ~30 cm), 2 Hz. source_timeout 0.0: goal_exec
+    # silent is not a reason to stop (as the sonars); the points are odom-fixed, so an older
+    # cloud is still in the right place.
+    observation_sources: [scan, sonar_left, sonar_right, camera_low]
+    camera_low:
+      type: pointcloud
+      topic: /goal_exec/obstacles
+      min_height: 0.015
+      max_height: 0.30
+      source_timeout: 0.0
+      enabled: true
     scan:
       type: scan
       topic: /scan
