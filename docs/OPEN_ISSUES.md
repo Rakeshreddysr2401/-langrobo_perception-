@@ -1,4 +1,28 @@
-# Open issues — where things stand (newest first; last updated 2026-11-07)
+# Open issues — where things stand (newest first; last updated 2026-11-10)
+
+## 2026-11-10 — Repo audit and restructure (branch `restructure`, from `kino_0.1.0` @ 0f6fcf1)
+
+**Done** (no behaviour change, only places): folders by function (`pose/ mapping/ nav/ perception/`,
+were `phase1-4`; container `/opt/rover/<folder>`), tests in `<folder>/tests/`, hand probes in `tools/`,
+documents in `docs/` ([index](README.md)), `./rover test`. Checked: pyflakes 0 warnings on 125 files;
+`./rover test` 23/23 files; a real `./rover up` with the motors unpowered: every gate OK (IR 29.9, depth 30.0, scan 10.0, VO 30.0, gyro 200, /odom 20.0, /map 0.5, nvblox grid 4.9, costmaps 0.8 / 1.7, JPEG at the Pi 5 4.2, /wheel_state 19.9 Hz), relocalized in the saved house (fit 0.89), 0 nav2 restarts, no traceback in any of the 24 node logs.
+Roll back: `git checkout kino_0.1.0 && nav/plugins/build.sh` is NOT enough -- on the old branch the
+plugin lives in `phase3/plugins`: run `phase3/plugins/build.sh` there.
+
+**Found, not yet changed** (each needs a measured change, twin first -- IMPROVEMENT_LOOP):
+
+| # | what was found | why it matters | proposed |
+|---|---|---|---|
+| A1 | **`/cmd_vel` has many writers and no referee.** nav2's command passes the collision monitor (`cmd_vel_smoothed -> cmd_vel_turn -> turn_shaper -> /cmd_vel`); `goal_exec_node`, `follow_node`, `gap_pass`, `pivot_goto`, the Pi 5's teleop and the brain publish `/cmd_vel` directly, each with its own checks. | two sources at once interleave (already seen: Studio + agent_node; teleop MANUAL streaming zeros); a new driver (RL) must re-implement the stop rules | one `twist_mux` (priorities: teleop > safety stop > exact moves > nav2, each with a timeout) and ONE last gate before the wheels |
+| A2 | Only nav2 is restarted when it dies (`nav2_supervise.sh`). Every other node is a `docker exec -d python3 ...`: a crash of `fusion2_node`, `reach_node` or `goal_exec_node` stays down until a person notices; the watchdog only observes unless started with `act`. | a dead `fusion2` = no `/odom`; the robot stops being a robot silently | a small supervisor per layer (restart + count + reason in `./rover status`), or `ros2 launch` with `respawn` |
+| A3 | `orin-nav:2.0` has no PyTorch/ultralytics: the `.pt` fallback that `./rover detect` promises cannot run (`test_yolo_backend` now says so and skips). | after a JetPack/TensorRT update the engine will not load and detect has no fallback | make `./rover detect` say it plainly and refuse; rebuild the engine in `./rover up` when the TensorRT tag changed |
+| A4 | Disk 85 % full (34 GB free): `logs/bags` 69 GB. | a full disk stops slam autosave and bag recording mid-run | owner: which bags to keep; then a size cap in `./rover record` |
+| A5 | `kino_0.1.0` is 67 commits ahead of GitHub `main` and was never pushed; 8 local branches. | the only copy of 3 weeks of work is this Jetson's NVMe | push; delete merged branches (owner decides) |
+| A6 | `/etc/systemd/system/langrobo-perception.service` (disabled) points at `~/workspaces/isaac_ros-dev/...`, which no longer exists. | confusing leftover | owner: `sudo rm` it + `systemctl daemon-reload` |
+| A7 | `pose/nodes/vo_node.py` (775 lines, the old pyCuVSLAM node) is kept alive by 4 constants `vo_isaac.py` imports and `./rover selftest`. | dead code that reads as live | move the 4 constants + the frame self-test into `vo_isaac.py`, delete the rest |
+| A8 | `rover` is one 1,830-line bash file; layer logic, gates and help text in one place. | hard to change one layer safely; no test covers a layer's start | split per layer (`rover.d/<layer>.sh`) behind the same commands |
+| A9 | nav2 plans in `odom` (8 m rolling window), not `map`; far goals are handed over by `reach`/`house_route`. | works, but global re-planning across rooms is ours, not nav2's | keep; revisit when the map frame is trusted for a whole house |
+| A10 | Jetson runs at 15 W with load 17-30 under the full stack (measured 2026-11-07). | late TF and DDS discovery are behind most real failures | owner's call: MAXN_SUPER with the 19 V supply |
 
 ## 2026-11-07 — Voice/navigation audit and current RL state
 
