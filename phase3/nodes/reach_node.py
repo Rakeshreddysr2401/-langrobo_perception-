@@ -77,6 +77,8 @@ from goal_exec import FRONT as GE_FRONT, REAR as GE_REAR, SIDE, GoalExec, wrap  
 from sonar_feed import SonarFeed  # noqa: E402
 
 EXACT_RANGE = 1.2      # m: closer than this, goal_exec alone (its MAX_LEG is 1.5)
+FIT_PRECISE_R = 2.4    # m: goals this near get the precise-points second opinion (depth memory RANGE 2.5)
+FIT_SMEAR = 0.06       # m: how far the costmap may overlap a goal the precise points clear (its rounding)
 MAX_ATTEMPTS = 8
 MAX_S = 300.0
 WAIT_S = 3.0
@@ -635,6 +637,24 @@ class Reach(GP.Pass):
         n = int(self.SNAP_R / r)
         offs = sorted(((di * r, dj * r) for di in range(-n, n + 1) for dj in range(-n, n + 1)
                        if 0 < math.hypot(di, dj) * r <= self.SNAP_R), key=lambda o: math.hypot(*o))
+        # A second opinion from the PRECISE points before refusing (real robot 2026-11-10: a goal
+        # in a 49.7 cm way -- LiDAR -- read "4 cm inside something" on the costmap: nvblox's
+        # 2.5 cm cells mark a cell an edge touches + CELL_SLACK + camera smear made the way look
+        # ~42-45 cm). Within the depth memory's reach, the camera's 1 cm points + the LiDAR decide,
+        # as goal_exec does; the costmap may overlap by at most FIT_SMEAR (its rounding), no more.
+        P = self.precise_odom() if math.hypot(g[0] - self.pose[0], g[1] - self.pose[1]) <= FIT_PRECISE_R else None
+        if P is not None and len(P):
+            def gap_p(x, y):
+                d = P - (x, y)
+                b = np.stack([c * d[:, 0] + s_ * d[:, 1], -s_ * d[:, 0] + c * d[:, 1]], 1)
+                return self.body_gap(b)
+            for dx, dy in [(0.0, 0.0)] + offs:
+                x, y = g[0] + dx, g[1] + dy
+                gp = gap_p(x, y)
+                if gp >= self.SNAP_GAP and gap_at(x, y) >= -FIT_SMEAR:
+                    self.say(phase='fit', source='precise', moved_cm=round(math.hypot(dx, dy) * 100),
+                             gap_cm=round(gp * 100, 1), costmap_gap_cm=round(gap_at(x, y) * 100, 1))
+                    return (x, y, g[2]), math.hypot(dx, dy), gp
         for dx, dy in offs:
             x, y = g[0] + dx, g[1] + dy
             i, j = int((x - ox) / r), int((y - oy) / r)
@@ -671,6 +691,23 @@ class Reach(GP.Pass):
         return float(np.min(np.where(inside, -depth, out)))
 
     CELL_SLACK = 0.018                     # m: a cell's edge is up to half a diagonal from its centre
+
+    def precise_odom(self):
+        """The camera's 1 cm obstacle points (depth memory) + the latest LiDAR scans, in odom,
+        body excluded -- what goal_exec decides on. None without a pose."""
+        if self.pose is None:
+            return None
+        cam = self.dobs.points_base(self.pose)
+        parts = [cam] if len(cam) else []
+        if self.scans:
+            parts += list(self.scans[-3:])
+        if not parts:
+            return np.zeros((0, 2))
+        b = self.outside_body(np.vstack(parts))
+        if b is None or not len(b):
+            return np.zeros((0, 2))
+        c, s = math.cos(self.pose[2]), math.sin(self.pose[2])
+        return np.stack([self.pose[0] + c * b[:, 0] - s * b[:, 1], self.pose[1] + s * b[:, 0] + c * b[:, 1]], 1)
 
     def costmap_cells(self):
         """LETHAL cells of the local costmap within 0.8 m, base_link, N x 2."""
