@@ -1,0 +1,233 @@
+# System overview: the whole robot, every machine, and how clean it is (2026-10-03)
+
+> **2026-10-18:** the twin runs in **Isaac Sim** on a NEW laptop (user `chotesh`, RTX 4050);
+> RViz stays on the old laptop (192.168.1.8). §2, §3's twin part and §4's laptop table are
+> updated for it; the health check (§5) is the 2026-10-03 snapshot.
+
+The one page for "where are we and how does it all fit". It covers the four
+repos on three computers, how they connect, the goal, and an honest check of
+how tidy each one is. For what is open and what to do next, see
+[OPEN_ISSUES.md](OPEN_ISSUES.md). For the numbers, see
+[LOCALIZATION.md](LOCALIZATION.md).
+
+Everything below was checked live on 2026-10-03: all three machines reached
+over ssh, git state read, the Pi 5 tests run, and the laptop's copies diffed
+against this repo.
+
+---
+
+## 1. The goal
+
+**Kino**: a home robot you talk to ("Kino, go near the bottle and tell me
+what's on it"). It understands the request, finds the thing from its photos,
+drives there exactly (to within about 1 cm) without touching anything, and
+reports back by voice or Telegram.
+
+The order it is being built in, from the README and INTELLIGENCE_PLAN.md:
+
+1. **Body + pose** (M1–M4): know where it is to about 1 cm. ✅ Done and live.
+2. **Safe navigation** (M5): nav2 plus an exact finish, tight gaps. 🟡 Works down to a ~50 cm gap. 45 cm is open.
+3. **Brain uses the body** (B1–B3): moves, photo grounding, memory. ✅ Floor-tested. Memory is now the photo log (2026-10-02).
+4. **Fast eyes / smart search / learning** (B4–B6): ⬜ next.
+5. Later: a parking assistant, then an arm.
+
+## 2. The machines and the repos
+
+| machine | address | repo (path → remote, branch) | its job |
+|---|---|---|---|
+| **Jetson Orin Nano** | 192.168.1.15 | `~/rover` → `-langrobo_perception-`, `rover-v1.1.16-review` | **the body's brain**: sensors, pose, map, nav2, exact moves, pixel→goal. Everything runs in one Docker container (`rover`, image `orin-nav:1.2`; `orin-nav:1.1` kept only as the rollback) |
+| **Pi 5** | 192.168.1.16 | `~/ros2_ws` → `pi5_ros2_ws`, `dev-1.4.1` | **the mind**: LangGraph brain (3 agents), voice (STT/TTS/wake word), Telegram, teleop web page, micro-ROS agent for the ESP32 |
+| **Laptop** | DHCP (192.168.1.9 on 2026-10-18, **.8 on 2026-11-06**; find it as `kino.local`), user `chotesh` | `~/kino_sim` → `kino_sim`, `main` | **a window and a twin**: the robot's hardware in Isaac Sim 6.2 (domain 42), and RViz (`./sim rviz [real]`); ROS 2 Lyrical (2026-11-01) |
+| **Old laptop** | 192.168.1.8 (DHCP), user `rakhi24` | — (`~/rover_live.sh`, `~/rover_live.rviz`, `~/rover_twin.rviz`, pushed by `./rover view`) | **the RViz station**: `./rover view` (real robot, domain 0) and `TWIN=1 ./rover view` (the twin, domain 42) open RViz here; ROS 2 Lyrical (2026-11-01) |
+| Mac mini | DHCP, `singireddys-mac-mini.local:8080` | (none) | llama.cpp: Gemma 4 12B, LLM + VLM, `--jinja --parallel 4` |
+| ESP32 | micro-ROS over USB serial to the Pi 5 (`/dev/ttyUSB0`) | firmware in `~/rover/firmware/` | 4-wheel PID, encoders, 500 ms cmd_vel watchdog |
+| D555 camera | 192.168.11.55 (PoE, own subnet) | (none) | stereo IR, depth, colour, **and the gyro** (OPEN_ISSUES #2) |
+| RPLidar C1 | USB on the Jetson | driver built by `lidar/build.sh` | 360° scans at 10 Hz. The pose reference |
+
+## 3. How they connect
+
+```
+            voice / Telegram / phone
+                     │
+   ┌─────────────────▼──────────────────┐      HTTP (OpenAI API)     ┌──────────────┐
+   │ Pi 5  ~/ros2_ws                    │ ─────────────────────────► │ Mac mini     │
+   │  agent_node ─ LangGraph:           │   chat / local_agent /     │ llama.cpp    │
+   │   chat · local_agent · navigate    │   navigate + vision slot 3 │ Gemma (VLM)  │
+   │  stt_node · tts_node (voice)       │ ◄───────────────────────── └──────────────┘
+   │  teleop_web.py :8091 (MANUAL/AUTO) │
+   │  micro-ROS agent ◄─────────────────┼──── USB serial ──────── ESP32 (wheels)
+   └───────────────┬────────────────────┘                          ▲ /cmd_vel
+                   │ ROS 2 DDS, domain 0, plain multicast            │ /wheel_state
+   ┌───────────────▼────────────────────────────────────────────────┴───┐
+   │ Jetson  ~/rover  (container "rover")                               │
+   │  D555 ─► vo_node (cuVSLAM)  gyro_node   RPLidar ─► lidar_odom      │
+   │                 └────────► fusion2 ─► /odom + TF ◄────┘            │
+   │  slam_toolbox (map→odom)   depth_gate/turn_gate ─► nvblox (map)    │
+   │  nav2 (Smac lattice + MPPI) ─► reach ─► goal_exec ─► turn_shaper   │
+   │  image_bridge (JPEG for look())   pixel_to_goal (photo px → goal)  │
+   └───────────────┬────────────────────────────────────────────────────┘
+                   │ DDS (subscribe only)              ssh: ./rover view pushes the config
+   ┌───────────────▼─────────────────────────────┐
+   │ Laptop  RViz (./sim rviz [real])          │
+   │         kino_sim twin (Isaac Sim) = simulated D555/C1/ESP32, DOMAIN 42 ──► TWIN=1 ./rover up (rover_twin)
+   │                                        ◄─── a 2nd Pi 5 brain, twin_brain.sh (domain 42)
+   └─────────────────────────────────────────────┘
+```
+
+**The wire between the Pi 5 brain and the Jetson body** is a short list of
+topics. The full contract is in the Pi 5's INTEGRATION_GAPS.md §7:
+
+| topic | from → to | meaning |
+|---|---|---|
+| `/camera/color/image_raw/compressed` | Jetson → Pi 5 | the photo `look()` takes. Its stamp is the key for everything below |
+| `/vision/pixel_snapshot` | Pi 5 → Jetson | "hold this photo's depth + pose" (24 held) |
+| `/vision/pixel_query` → `/vision/pixel_result` | Pi 5 ↔ Jetson | the VLM's pixel/box on that photo → object x,y,z + a standoff goal (+ the photo's camera pose) |
+| `/target/lock` → `/target/state` | Pi 5 ↔ Jetson | **built, not yet used by the brain** (CLOSED_LOOP_PLAN.md stage 5): lock that photo's box, then the object's point is refined every frame while driving |
+| `/reach/goal`, `/goal_exec/turn`, `/goal_exec/goal` (+ `/status`, `/cancel`) | Pi 5 → Jetson | go there: nav2 + exact finish, or one exact move |
+| `/cmd_vel` | Jetson or teleop → ESP32 | the wheels (via the Pi 5's micro-ROS agent) |
+| `/teleop/mode` (MANUAL cancels reach + goal_exec) | Pi 5 → all | the human override |
+
+**Who starts whom:** `./rover up` on the Jetson brings up every layer, each
+gated on the one below. It then checks the ESP32 and the Pi 5, starts Studio,
+and runs `./rover view`, which finds the laptop by scanning for the host with
+`~/rover_live.sh`, pushes the RViz config, and starts RViz. From the Pi 5,
+`scripts/fleet.sh rover` runs the same `./rover up` if the stack is not up.
+The Pi 5's own services (brain, voice, micro-ROS, teleop) start at boot from
+systemd.
+
+**What one request goes through:** "go near the bottle" → STT on the Pi 5 →
+`chat` hands off to `navigate` → `ask_photos` (the VLM picks a photo + box) →
+`/vision/pixel_query` → `pixel_to_goal` uses *that photo's* depth and pose →
+goal → `/reach/goal` → nav2 route + `goal_exec` exact finish → arrival photo
+check → spoken report.
+
+### The twin, end to end (Isaac Sim, 2026-10-18)
+
+The simulator is the robot's HARDWARE only; everything else is the robot's own,
+on ROS domain 42 beside the real robot on domain 0:
+
+| piece | where | what |
+|---|---|---|
+| the hardware + world | laptop, `./sim up <world>` | Isaac Sim 5.1 (RTX, headless; `follow=true` opens a window chasing the rover): rooms (2.4 m walls, textured, live shadows), the body from THIS repo's `description/` (a synced copy), and the D555 (IR pair + depth 448x252 @30, colour @15, IMU 200 Hz), the C1 (720 beams, clockwise sweeps), the ESP32 (firmware v2's topics, encoders on the calibrated effective track, the measured wheel response and slide). `home_real` is furnished with household models |
+| the cables | laptop -> Jetson TCP :7555 / :7556 | the D555's and C1's frames (JPEG/PNG, ~2 MB/s); on the Jetson `~/kino_sim/jetson/{d555,c1}_driver.py` publish realsense2_camera's and sllidar_node's own topics |
+| the stack | Jetson, `TWIN=1 ./rover up` | THIS repo's layers unchanged: camera, lidar, pose (cuVSLAM, gyro), fused (lidar_odom, fusion2), slam, map (nvblox), nav (nav2, reach, goal_exec), vlm; container `rover_twin`, state `~/.rover_twin`. Any layer alone: `TWIN=1 ./rover <layer>` |
+| the mind | Pi 5, `scripts/twin_brain.sh up` (started by `TWIN=1 ./rover up`) | a second agent_node: own state dir (`~/.langrobo_twin`), no Telegram, no voice, own teleop switch; talk with `twin_brain.sh say "..."` |
+| finding it | `/sim/hardware` (latched, domain 42) | the laptop's address, the cable ports, the world, the params sha1 the body was built from: `TWIN=1 ./rover camera`/`lidar` find the cables and check the body over DDS, and reset the rover with `/sim/reset` -- no ssh into the laptop |
+| the view | laptop, `./sim rviz` | this repo's `rover_live.rviz` (fetched from here every time) + the true world + the rover's true outline (the gap to the RobotModel is the pose error) |
+| all at once | laptop `./sim up home_real`, then Pi 5 `scripts/fleet.sh twin up\|down\|status` | the Pi 5 checks /sim/hardware, then runs `TWIN=1 ./rover up` here and the twin brain |
+
+**The real robot stays the default**: the twin runs only when started, and its
+domain cannot reach the real wheels. The Jetson runs one stack at a time.
+First Isaac day (2026-10-18): every layer passed its real gate on simulated
+hardware (cuVSLAM 159-168 landmarks, fusion "LiDAR-anchored, sd 0.6 cm");
+`./rover reach 1.0 -0.6 90` believed (1.006, -0.562, 90.6 deg) where the
+truth was (1.003, -0.560, 90.7 deg); the home_real tour reached all 4 goals
+through the 80 cm door and back (pose error <= 9.3 cm) and drove over the 1 cm
+tablet, as the robot would. A twin run starts slam with an empty map
+(`SLAM_FRESH` defaults to 1 under `TWIN=1`: the twin's rover always starts on
+its world's start). Details and decisions: kino_sim `docs/STATUS.md`.
+
+## 4. How each repo is organised
+
+### Jetson `~/rover` (this repo): 132 tracked files
+
+| where | what |
+|---|---|
+| `rover` | the 1,134-line launcher. Every layer and every drive command (`up`, `status`, `goto`, `navto`, `reach`, `pass`, `record`, `grade`, `view` …) |
+| `description/` | the one source of the rover's measurements → URDF + STEP CAD, with a drift check |
+| `pose/` | the pose: vo_node, gyro, lidar_odom, fusion2, health, calibration; test harness (record/grade); ESP32 firmware; teleop page (deployed to the Pi 5 by copy) |
+| `lidar/` | RPLidar driver build + yaw/lag calibration |
+| `mapping/` | mapping: nvblox launch, slam_toolbox config, turn/depth gates, RViz config + laptop docs |
+| `nav/` | nav2 config + BT, goal_exec, reach, pivot_goto, obstacle sources, a C++ costmap plugin, simulators (`sim_goal_exec`, `sim_gap_pass`) |
+| `perception/` | VLM bridge: image_bridge, pixel_to_goal, detections_3d |
+| top-level `.md` | README, STARTUP, OPERATIONS, ARCHITECTURE, OPEN_ISSUES, LOCALIZATION(+_GAPS), SENSOR_FUSION_PLAN, NAV_PLAN, INTELLIGENCE_PLAN, ROVER_BUILD_PLAN |
+| `docs/archive/` | the history (phase logs, old TODO/READINESS) |
+
+### Pi 5 `~/ros2_ws`: 185 tracked files
+
+| where | what |
+|---|---|
+| `src/langrobo_core/` | **pure Python brain, no rclpy**: `registry.py` (one AgentSpec per agent), `prompts.py`, `graph/`, `agents/`, `tools/` (look, movement, approach, photos, photo_recall, survey, locate, telegram, web), `services/` (llm, config, telegram, permissions, health, object_memory …), 434 tests |
+| `src/langrobo_ros/` | the ROS shim: `agent_node.py`, `ros2_bridge.py`, launch, systemd; wake-word models |
+| `src/pi5_voice_pkg/` | STT, TTS, Bluetooth audio owner |
+| `scripts/` | `fleet.sh` (whole robot), `run_*.sh` (systemd entry points), voice/wake-word tools |
+| 12 top-level `.md` + `docs/voice/` | CLAUDE, README, HOW_IT_WORKS, ARCHITECTURE_LLD, FIND_AND_GO, INTEGRATION_GAPS, OPERATIONS, TODO, TELEGRAM, NETWORKING, MAC_MINI_TASKS, INTENT_ROUTING_PLAN; voice ×4 in `docs/voice/` |
+
+### Laptop
+
+| where | what | source of truth |
+|---|---|---|
+| `~/kino_sim` (also cloned on the Jetson at `~/kino_sim`, mounted into `rover_twin` at `/opt/twin`) | the twin: Isaac Sim world + the simulated hardware (`./sim up/status/selftest/scenario/test/parity/rviz`), the body from a synced copy of this repo's `description/`, `jetson/{d555,c1}_driver.py` (the stand-ins `TWIN=1 ./rover` starts), tests, `docs/STATUS.md`, `CLAUDE.md` | its own repo |
+| `~/.kino_sim/rviz/` | the RViz configs `./sim rviz` writes | **this repo**, `mapping/rviz/rover_live.rviz`, fetched every time |
+| `~/IsaacLab` (v2.3.2) | Isaac Lab, RL training (arm pick-and-place, later) | upstream |
+| `~/langrobo_perception` (`main`, July) | an old clone of this repo | stale: this repo is the Jetson's `~/rover` |
+
+## 5. Is it clean? The health check
+
+### What is good
+
+- **All three git trees are clean.** Jetson and Pi 5 are in sync with their
+  remotes, and kino_sim is clean on `main`.
+- **Pi 5 tests: 434 passed in 18 s.** pyflakes is clean apart from one deliberate `noqa` probe.
+- **Nothing has drifted between copies:** the deployed teleop
+  (`~/langrobo_teleop/teleop_web.py`) matches `teleop/`, the laptop's
+  RViz files match `mapping/rviz/`, and `~/kino_sim` on the Jetson is now a
+  clone of the twin repo.
+- **Clear boundaries:** `langrobo_core` imports no rclpy (it is testable
+  anywhere), the measurements have one source (`description/params.yaml`),
+  and the laptop holds no source of truth for the real robot.
+- **The `.gitignore` files are well kept.** Bags, CSVs, weights and build
+  output are excluded, with the reason written down. No broken links between
+  the top-level docs here.
+- **The twin is a real step forward.** It runs the Jetson's *unchanged* code on
+  domain 42 and judges every run on the true pose. On its first night it found
+  two real bugs (far goals failing, a turn ending 0.2 cm from a box), both
+  fixed in 302de1b.
+
+### What was not clean, and what was done (all 13 resolved 2026-10-03)
+
+| # | where | issue | done |
+|---|---|---|---|
+| C1 | Jetson `ARCHITECTURE.md` | stale: `fusion.py`, NavFn + RPP, "not an EKF" (contradicting its own §5), none of goal_exec / reach / pixel_to_goal / gates / the twin, open faults pointed at the archived TODO | ✅ §0 stack, §1 diagram, §2 topics, §4 node table refreshed; points at OPEN_ISSUES.md and here |
+| C2 | Jetson `OPEN_ISSUES.md`, kino_sim `docs/STATUS.md` | headed 2026-10-04, work done 2026-10-03 | ✅ both say 2026-10-03 (commit 53c3a99's message still says 10-04; history is not rewritten) |
+| C3 | Jetson `README.md` | status table dated 2026-09-26 | ✅ dated 2026-10-03; close quarters, the brain (B1–B3) and the twin added |
+| C4-C5 | the laptop's older simulator | unpushed commits; two sims side by side | ✅ resolved; that simulator is retired (2026-10-18) |
+| C6 | `~/kino_sim` on the Jetson | hand copy of the twin's `jetson/` | ✅ now a git clone (kino_sim f74337a); the old hand copy was deleted 2026-10-18 |
+| C7 | Pi 5 repo root | stray screenshot, `ESP_32_frimware/` lock-file dir, `.env*` world-readable (644) with live keys | ✅ screenshot removed (it was an empty Studio page); dir moved to Pi 5 `~/old/`; `.env` and both backups `chmod 600` (kept, not deleted) |
+| C8 | Pi 5 `TODO.md` | header said `dev-1.3.8` | ✅ `dev-1.4.1` |
+| C9 | Pi 5 `object_memory.py` / `survey.py` | looked dead | ✅ **not dead**: the survey is an opt-in feature (`LANGROBO_PHOTO_SURVEY=1`, default off), `survey.py` also owns the vision-tool slot every photo prompt uses, and approach uses object_memory's helpers. The comments in `look.py` / `approach.py` that said every photo feeds memory now say it is opt-in |
+| C10 | Pi 5 `INTEGRATION_GAPS.md` §1 | listed `/vision/detections_3d` etc. as unanswered | ✅ marked closed by removal: the brain no longer reads detections_3d, target or music (tools gone); the Jetson publisher is opt-in (`./rover detect`) and returns with B4 |
+| C11 | Pi 5 `tools/approach.py:566` | "unused" `Twist` import | ✅ **false finding**: it is a deliberate availability probe marked `# noqa: F401`; pyflakes ignores noqa. Left as is |
+| C12 | Laptop home | leftovers | ✅ moved to `~/old/` with a README.txt (nothing deleted; `~/LAPTOP.md` was a stale copy that differed from `mapping/LAPTOP.md`) |
+| C13 | doc sprawl | 16 top-level docs on the Pi 5 | ✅ the four voice docs moved to Pi 5 `docs/voice/`; all 31 files referencing them follow. 12 top-level docs remain there |
+
+Commits: Jetson (this one), Pi 5 0cd4503, kino_sim f74337a. Pi 5 tests 434/434 after.
+
+### What is clean in code but open in behaviour
+
+Unchanged from [OPEN_ISSUES.md](OPEN_ISSUES.md), most damaging first:
+
+1. The Jetson is CPU-bound. EventsExecutor helped; fusion2 + lidar_odom are
+   not yet graded on it.
+2. The gyro rides the camera link: a camera stall freezes the pose.
+3. Things under 3 cm (slippers, a laptop) are invisible, so the rover drives
+   over them. Found by the twin.
+4. Tight gaps pass 1–4 cm from the obstacle. 45 cm cannot be promised at a
+   2.5 cm map resolution.
+5. The VLM is slow (~9 tok/s) and loose. Mac access is needed for `--swa-full`
+   and speculative decoding.
+6. Power: the turn slide moves with the battery, and the PoE injector shares
+   a socket with the ESP32.
+
+## 6. Where we are, in one paragraph
+
+The body is precise and works: the pose is good to about 1 cm, exact moves are
+live, and nav2 plus an exact finish reach goals to about 1 cm. The brain can
+already be asked by voice or Telegram to find an object from its photos and go
+to it, with an arrival check. The work has moved from "does it work" to
+"is it safe in clutter and fast enough to talk to". The open problems are
+physical (low objects, tight gaps, CPU load, a gyro on a fragile link, power)
+and the VLM's speed. The new twin is the tool for testing the first two
+without risking the robot. The code is in good shape, and the tidying found
+on 2026-10-03 (C1–C13) is done. What is left is behaviour, not housekeeping:
+the list above and OPEN_ISSUES.md.

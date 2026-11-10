@@ -16,7 +16,7 @@ between furniture. Trained and tested in kino_sim (`~/kino_sim/rl2/README.md`,
 `logs/rl_episodes.jsonl` (result, min_clear_cm, shield_changed); failed rounds dump to
 `logs/rl_dumps/` when that directory exists.
 
-## Files (phase3/nodes)
+## Files (nav/nodes)
 | file | role |
 |---|---|
 | `rl2_drive.py` | the observation, exactly as training builds it: state 31 numbers (target, 8 route points, motion, pack, time) + patch 3 x 64 x 64 at 4 cm: ch0 the latest LiDAR scan, ch1 camera + costmap-memory points, ch2 floor not known |

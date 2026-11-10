@@ -13,7 +13,7 @@ process has died [pid 122494, exit code -11
 [planner_server-2] #1    Object "/opt/ros/jazzy/lib/libnvblox_nav2.so", at 0xffff66f7844b, in nvblox::nav2::NvbloxCostmapLayer::updateCosts(nav2_costmap_2d::Costmap2D&, int, int, int, int)
 [planner_server-2] #0    Object "/opt/ros/jazzy/lib/libnvblox_nav2.so", at 0xffff66f77500, in nvblox::nav2::NvbloxCostmapLayer::lookupInSlice(Eigen::Matrix<float, 2, 1, 0, 2, 1> const&, float*)
 [planner_server-2] Segmentation fault (Address not mapped to object [0xaaab0ecc9f9c])
-[ERROR] [planner_server-2]: process has died [pid 122494, exit code -11, cmd '/opt/ros/jazzy/lib/nav2_planner/planner_server --ros-args -r __node:=planner_server --params-file /opt/rover3/config/nav2.yaml'].
+[ERROR] [planner_server-2]: process has died [pid 122494, exit code -11, cmd '/opt/ros/jazzy/lib/nav2_planner/planner_server --ros-args -r __node:=planner_server --params-file /opt/rover/nav/config/nav2.yaml'].
 [INFO] [launch]: process[planner_server-2] was required: shutting down launched system
 [INFO] [lifecycle_manager-7]: sending signal 'SIGINT' to process[lifecycle_manager-7]
 [INFO] [collision_monitor-6]: sending signal 'SIGINT' to process[collision_monitor-6]

@@ -5,8 +5,8 @@
 #   cd ~/rover/docker/2.0 && docker build -t orin-nav:2.0 .
 # Only what the rover runs goes in. Built from source on top: librealsense with DDS (the
 # D555 is a PoE/DDS camera; apt's librealsense2 is not built with DDS) and realsense-ros.
-# Our own C++ bits (sllidar_ros2, phase3/plugins) stay host-mounted workspaces built by
-# lidar/build.sh and phase3/plugins/build.sh, as before.
+# Our own C++ bits (sllidar_ros2, nav/plugins) stay host-mounted workspaces built by
+# lidar/build.sh and nav/plugins/build.sh, as before.
 # Repos and base image follow isaac-ros-cli 2.6.0's Dockerfile.isaac_ros (release-5.0).
 FROM nvcr.io/nvidia/base/ubuntu:noble-20251013
 

@@ -116,8 +116,8 @@ camera:
   # x sits 1.1 cm behind the front glass (the optical centre; not in the
   # datasheet). y is 5.6 mm short of half the baseline: the case is ~5 mm
   # off-centre, or the fit's noise; the fit wins because it is what VO sees.
-  vo_lever_x:  {value: 0.1623, status: calibrated, source: "VO vs LiDAR truth, 26 checkpoints, phase1/harness", date: 2026-09-25}
-  vo_lever_y:  {value: 0.0419, status: calibrated, source: "VO vs LiDAR truth, 26 checkpoints, phase1/harness", date: 2026-09-25}
+  vo_lever_x:  {value: 0.1623, status: calibrated, source: "VO vs LiDAR truth, 26 checkpoints, pose/harness", date: 2026-09-25}
+  vo_lever_y:  {value: 0.0419, status: calibrated, source: "VO vs LiDAR truth, 26 checkpoints, pose/harness", date: 2026-09-25}
 
 # The RPLidar C1. Base 55.6 x 55.6, 41.3 tall, laser plane 29.8 above its base.
 lidar:
@@ -131,7 +131,7 @@ lidar:
   yaw:           {value: 1.5463, status: calibrated, source: "./rover lidar --calibrate, +88.60 deg, 5 legs, spread 0.76 deg", date: 2026-09-22}
 
 # Two front ultrasonic sensors (HC-SR04 type, run at 3.3 V) at the front corners, on
-# their own ESP32 (phase1/firmware/HARDWARE.md section 2b), owner 2026-10-19: each
+# their own ESP32 (firmware/HARDWARE.md section 2b), owner 2026-10-19: each
 # centre 6.5 cm above the floor (just above the frame's bottom, 6 cm), the two 28 cm
 # apart (the frame's width), set a little outside the frame. Bench: both read a flat
 # target 15 cm away at 14.4-15.5 / 15.0 cm. Frames: sonar_left / sonar_right, x along

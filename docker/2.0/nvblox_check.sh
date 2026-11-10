@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# nvblox_check.sh -- the rover's nvblox (phase2/launch/nvblox.launch.py) on a synthetic depth
+# nvblox_check.sh -- the rover's nvblox (mapping/launch/nvblox.launch.py) on a synthetic depth
 # image: a flat wall 1.5 m in front of the camera. Offline: --network none, ROS domain 99.
 #   ~/rover/docker/2.0/nvblox_check.sh [image]     (default orin-nav:2.0)
 # Reports: seconds from start to the first map slice (4.6's sm_75-only nvblox JIT-compiled
@@ -14,7 +14,7 @@ MPSARGS=(); [ "${MPS:-0}" = 1 ] && MPSARGS=(--ipc=host -v /tmp/nvidia-mps:/tmp/n
 docker run --rm --runtime nvidia --network none "${MPSARGS[@]}" --entrypoint bash \
   -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all -e NVIDIA_DISABLE_REQUIRE=1 \
   -e ROS_DOMAIN_ID=99 -e FASTDDS_BUILTIN_TRANSPORTS=UDPv4 \
-  -v "$REPO/phase2":/opt/rover2:ro "$IMAGE" -c '
+  -v "$REPO/mapping":/opt/rover/mapping:ro "$IMAGE" -c '
 for f in /opt/ros/*/setup.bash; do source $f; done
 echo "ROS_DISTRO=$ROS_DISTRO"
 ros2 run tf2_ros static_transform_publisher --frame-id odom --child-frame-id base_link >/dev/null 2>&1 &
@@ -39,7 +39,7 @@ def tick():
 n.create_timer(1 / 15, tick); rclpy.spin(n)
 PY
 t0=$(date +%s.%N)
-ros2 launch /opt/rover2/launch/nvblox.launch.py > /tmp/nvblox.log 2>&1 &
+ros2 launch /opt/rover/mapping/launch/nvblox.launch.py > /tmp/nvblox.log 2>&1 &
 python3 - <<PY
 import time, rclpy
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy

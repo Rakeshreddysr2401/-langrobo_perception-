@@ -43,10 +43,10 @@ print('   truth: x=%.3f y=%.3f yaw=%.1f deg' % (p.position.x, p.position.y, math
 PY" 2>&1 | grep -v XMLPARSER
 }
 [ "$TWIN" = 1 ] && truth before
-echo "-- ours: phase2/tools/relocalize.py"
+echo "-- ours: mapping/tools/relocalize.py"
 for i in $(seq "$RUNS"); do
   t0=$(date +%s.%N)
-  out=$(docker exec $CT bash -lc "$ENVSET python3 /opt/rover2/tools/relocalize.py /maps/$MAP.yaml 2>/dev/null" | grep '^{' | tail -1)
+  out=$(docker exec $CT bash -lc "$ENVSET python3 /opt/rover/mapping/tools/relocalize.py /maps/$MAP.yaml 2>/dev/null" | grep '^{' | tail -1)
   echo "   run $i: $(python3 -c 'import json,sys,math; d=json.loads(sys.argv[1]); p=d.get("pose"); print(d["verdict"], ("x=%.3f y=%.3f yaw=%.1f deg" % (p[0], p[1], math.degrees(p[2]))) if p else "", "--", d.get("why",""))' "$out" 2>/dev/null || echo "$out")  ($(python3 -c "print(round($(date +%s.%N)-$t0,1))") s)"
 done
 

@@ -28,11 +28,11 @@ its plan step starts, after the layer below passes its tests.
 | GPU sharing (YOLO next to cuVSLAM) | `isaac_ros_gpu_partitioning` (CUDA MPS) | Isaac apt |
 | navigation | nav2 1.5.0, slam_toolbox 2.10.0 | NVIDIA's Lyrical buildfarm (`isaac-ros/ubuntu/main noble`) |
 | D555 camera (PoE / DDS) | librealsense v2.58.2 `BUILD_WITH_DDS=ON` → `/opt/librealsense`; realsense-ros 4.58.2 + NVIDIA's Lyrical patch → `/opt/realsense_ws` | source, in the Dockerfile |
-| YOLO | our TensorRT runner (`phase4/nodes/yolo_backend.py`) on TensorRT 10.16 | Jetson / CUDA apt |
+| YOLO | our TensorRT runner (`perception/nodes/yolo_backend.py`) on TensorRT 10.16 | Jetson / CUDA apt |
 | python | numpy, scipy, OpenCV, lz4, yaml | Ubuntu apt |
 
 Not in the image (host-mounted workspaces, built with the image): `sllidar_ros2`
-(`lidar/build.sh`) and the rover's costmap plugin (`phase3/plugins/build.sh`).
+(`lidar/build.sh`) and the rover's costmap plugin (`nav/plugins/build.sh`).
 Not in the image at all: torch/ultralytics (only the `.pt` fallback used them).
 
 ## Apt sources and why
@@ -52,14 +52,14 @@ docker build -t orin-nav:2.0 .                      # ~1 h, mostly librealsense
 docker build -f Dockerfile.arm -t orin-arm:2.0 .    # later, for the arm
 ```
 Then rebuild the host-mounted workspaces against it:
-`IMAGE=orin-nav:2.0 ~/rover/lidar/build.sh` and `IMAGE=orin-nav:2.0 ~/rover/phase3/plugins/build.sh`.
+`IMAGE=orin-nav:2.0 ~/rover/lidar/build.sh` and `IMAGE=orin-nav:2.0 ~/rover/nav/plugins/build.sh`.
 
 ## Checks (run after every build; each prints PASS/FAIL)
 
 | script | what |
 |---|---|
 | `check.sh [image]` | packages, composable plugins, ldd, sm_87 GPU code, DDS librealsense, TensorRT, python deps |
-| `vo_check.sh [image]` | cuVSLAM on `phase1/harness/fake_stereo.py`: rate + error vs known motion |
+| `vo_check.sh [image]` | cuVSLAM on `pose/harness/fake_stereo.py`: rate + error vs known motion |
 | `nvblox_check.sh [image]` | nvblox on a synthetic wall: time to first map, rate, CPU/RAM, errors |
 | `nav2_check.sh [image]` | the rover's nav2 (launch + yaml + BT + plugin) offline: all nodes active, 0 errors |
 

@@ -9,7 +9,7 @@ set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 if [ "${TWIN:-0}" = 1 ]; then D=42; CT=rover_twin; else D=0; CT=rover; fi
 E="unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE; export FASTDDS_BUILTIN_TRANSPORTS=UDPv4; export ROS_DOMAIN_ID=$D; for f in /opt/ros/*/setup.bash; do source \$f; done;"
-docker exec -i "$CT" bash -lc "$E python3 - /opt/rover3/config/nav2.yaml" <<'PY' 2>&1 | grep -v XMLPARSER
+docker exec -i "$CT" bash -lc "$E python3 - /opt/rover/nav/config/nav2.yaml" <<'PY' 2>&1 | grep -v XMLPARSER
 import sys, yaml, rclpy
 from rcl_interfaces.srv import ListParameters
 rclpy.init(); n = rclpy.create_node('param_audit')

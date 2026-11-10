@@ -53,7 +53,7 @@ from `params.yaml` at that moment. So a new measurement reaches the live TF on
 the next layer start, with no copy to update. `LIDAR_YAW=<rad> ./rover lidar`
 still overrides the yaw for one run.
 
-RViz (`phase2/rviz/rover_live.rviz`) draws the URDF from `/robot_description`.
+RViz (`mapping/rviz/rover_live.rviz`) draws the URDF from `/robot_description`.
 
 `vo_node` reads its camera offset from TF (`base_link -> camera0_link`) at
 start; its constants are only the fallback, and it logs an ERROR if it uses them.

@@ -6,7 +6,7 @@
 # Models and maps are NOT baked in: they live on the host in ~/rover/models/isaac/ (mounted).
 FROM orin-nav:2.0
 
-# B2 lidar start-up localization  (baseline to beat: phase2/tools/relocalize.py, 1-3 s, ~2 cm).
+# B2 lidar start-up localization  (baseline to beat: mapping/tools/relocalize.py, 1-3 s, ~2 cm).
 #    Depends on nav2_bringup, which drags in Gazebo/Qt bits we never run -- NVIDIA's declared
 #    dependency, kept rather than forced around.
 # B3 camera mapping + global localization: cuVGL (visual_global_localization), visual_mapping,

@@ -2,7 +2,7 @@
 """scan_tools.py — scan helpers shared by the LiDAR tools that still run.
 
 Kept from lidar/pivot_test.py when that test was retired (2026-09-26; the
-harness grades turns now): ./rover drive (phase3/nodes/pivot_goto.py) and
+harness grades turns now): ./rover drive (nav/nodes/pivot_goto.py) and
 ./rover lidar --lag (scan_lag.py) use these.
 
     turn_twist(wz)                 the turn command in the PIVOT_ANCHOR mode

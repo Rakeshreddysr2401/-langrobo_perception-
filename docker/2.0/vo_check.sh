@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# vo_check.sh -- cuVSLAM on the synthetic IR pair (phase1/harness/fake_stereo.py), inside an image.
+# vo_check.sh -- cuVSLAM on the synthetic IR pair (pose/harness/fake_stereo.py), inside an image.
 # No camera, no robot: --network none, ROS domain 99.
 #   ~/rover/docker/2.0/vo_check.sh [image]      (default orin-nav:2.0; orin-nav:1.2 for the 4.6 baseline)
 # Prints the tracked motion vs the truth (0.10 m/s sideways for 20 s = 2.00 m), the VO rate,
@@ -14,12 +14,12 @@ docker run --rm --runtime nvidia --network none "${MPSARGS[@]}" --entrypoint bas
   -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all -e NVIDIA_DISABLE_REQUIRE=1 \
   -v "$HOME/.cache/rover-cuda/vo_check":/root/.nv/ComputeCache -e CUDA_CACHE_MAXSIZE=4294967296 \
   -e ROS_DOMAIN_ID=99 -e FASTDDS_BUILTIN_TRANSPORTS=UDPv4 \
-  -v "$REPO/phase1":/opt/rover:ro "$IMAGE" -c '
+  -v "$REPO/pose":/opt/rover/pose:ro "$IMAGE" -c '
 for f in /opt/ros/*/setup.bash /opt/realsense_ws/install/setup.bash; do [ -f $f ] && source $f; done
 echo "ROS_DISTRO=$ROS_DISTRO"
 ros2 run tf2_ros static_transform_publisher --frame-id base_link --child-frame-id camera0_link > /tmp/tf.log 2>&1 &
-ros2 launch /opt/rover/launch/vo_isaac.launch.py > /tmp/vslam.log 2>&1 &
-python3 /opt/rover/nodes/vo_isaac.py --ros-args -p slam:=false > /tmp/vo.log 2>&1 &
+ros2 launch /opt/rover/pose/launch/vo_isaac.launch.py > /tmp/vslam.log 2>&1 &
+python3 /opt/rover/pose/nodes/vo_isaac.py --ros-args -p slam:=false > /tmp/vo.log 2>&1 &
 sleep 12                                   # GPU init
 python3 - <<PY &
 import json, time, rclpy, threading
@@ -49,7 +49,7 @@ print("vo_isaac status (peak rate %.1f Hz):" % max(R or [0]), {k: S.get(k) for k
 print(("PASS" if abs(err) < 0.10 and rate >= 25 else "FAIL") + "  VO within 10 cm of truth and >= 25 Hz")
 PY
 probe=$!
-python3 /opt/rover/harness/fake_stereo.py --seconds 22 > /tmp/fake.log 2>&1 &
+python3 /opt/rover/pose/harness/fake_stereo.py --seconds 22 > /tmp/fake.log 2>&1 &
 sleep 10
 echo "cpu (% of one core):"; ps -eo pcpu,rss,args | grep -E "component_container|vo_isaac|fake_stereo" | grep -v grep | awk "{printf \"  %5s%%  %6d MB  %s\n\", \$1, \$2/1024, \$3\" \"\$4}"
 wait $probe; rc=$?

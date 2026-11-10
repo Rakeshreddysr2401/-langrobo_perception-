@@ -40,15 +40,15 @@ logs/calib/
 logs/goal_exec_pivot.json
 
 # The costmap plugin workspace: src/ is ours (tracked); build/install/log are
-# its compiled output, recreated by phase3/plugins/build.sh in ~20 s.
-phase3/plugins/ws/build_*/
-phase3/plugins/ws/install_*/
-phase3/plugins/ws/log_*/
+# its compiled output, recreated by nav/plugins/build.sh in ~20 s.
+nav/plugins/ws/build_*/
+nav/plugins/ws/install_*/
+nav/plugins/ws/log_*/
 
 # the watchdog's change log (ops/rover_watchdog.py): run output
 logs/watchdog.jsonl
 
-# probe output (logs/peek.py, scanview.py, costpeek.py)
+# probe output (tools/peek.py, scanview.py, costpeek.py)
 logs/peek/
 logs/survey_current
 

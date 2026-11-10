@@ -44,6 +44,7 @@
 #                      http://<jetson>:8099, restarts a dead layer only when told (ops/)
 #   ./rover net        WiFi signal, link rate, jitter to the Pi 5, ROS traffic on the air
 #   ./rover stop       tear the container down (saves the slam room first)
+#   ./rover test [W]   every offline test, in a throwaway container (no robot; W = nav, tight, ...)
 #
 #   TWIN=1 ./rover <any of the above>
 #                      the same, on the TWIN instead of the robot: the
@@ -66,12 +67,19 @@ IMAGE=${IMAGE:-orin-nav:2.0}
 NAME=${NAME:-rover}
 LAPTOP_USER=${LAPTOP_USER:-rakhi24}   # LAPTOP_IP is DISCOVERED, not fixed: DHCP moves it
 PI5_HOST=${PI5_HOST:-192.168.1.16}    # fixed — unlike the laptop, not on DHCP
-SRC=/opt/rover
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-HOSTSRC="$REPO/phase1"
-SRC2=/opt/rover2
-SRC3=/opt/rover3
-SRC4=/opt/rover4
+# The code, by what it does. Each folder is mounted read-only into the container
+# under /opt/rover/<same name>: edit on the host, restart the layer, no rebuild.
+#   pose/        where am I: visual odometry, gyro, LiDAR odometry, fusion -> /odom
+#   mapping/     the room: slam_toolbox, nvblox, ghost clearing, relocalize
+#   nav/         getting there: nav2, reach, goal_exec, the learned driver, follow
+#   perception/  what is it: YOLO, target tracking, VLM pixel -> goal
+#   tools/       small probes to run by hand (say.py, peek.py, ...)
+POSE=/opt/rover/pose
+MAPPING=/opt/rover/mapping
+NAV=/opt/rover/nav
+PERCEPTION=/opt/rover/perception
+TOOLS=/opt/rover/tools
 # The RPLidar C1 driver (sllidar_ros2) is COMPILED, not a script, so it lives in
 # its own colcon workspace under lidar/ws, built by lidar/build.sh INSIDE this
 # same image (never installed into it) and mounted at the path it was built at.
@@ -320,7 +328,7 @@ pivot_env(){
 rate_of(){ # topic [min_hz]
   local w=3
   awk -v m="${2:-10}" 'BEGIN{exit !(m < 2)}' && w=12
-  rexec "timeout $((w + 10)) python3 $SRC/nodes/rate_probe.py $1 $w" 2>/dev/null | tail -1 | awk '{print $1+0}' || echo 0
+  rexec "timeout $((w + 10)) python3 $POSE/nodes/rate_probe.py $1 $w" 2>/dev/null | tail -1 | awk '{print $1+0}' || echo 0
 }
 
 # teleop's MANUAL mode streams zeros over every command. Its mode page is on
@@ -350,7 +358,7 @@ assert_rate(){ # topic  min_hz  label
 # rate gate green -- one session ran 21 m that way unnoticed. health.py
 # subscribes to /fusion/status properly (`ros2 topic echo` truncates that JSON)
 # and answers the only question the rates cannot.
-pose_honest(){ rexec "python3 $SRC/nodes/health.py"; }
+pose_honest(){ rexec "python3 $POSE/nodes/health.py"; }
 
 start_container(){
   docker rm -f "$NAME" >/dev/null 2>&1 || true
@@ -371,7 +379,7 @@ start_container(){
   # stays as cheap insurance for any library that still ships PTX only.
   local cuda_cache="$HOME/.cache/rover-cuda/$NAME"
   mkdir -p "$cuda_cache"
-  # phase1/ is mounted READ-ONLY: edit a node on the host, restart the layer,
+  # pose/ is mounted READ-ONLY: edit a node on the host, restart the layer,
   # no rebuild. The image has no build recipe, so it must never be modified.
   # MPS=1: every CUDA user in the container goes through the host's MPS daemon (ops/mps.sh start;
   # ISAAC_ROS_5_UPGRADE.md B1). Off by default until it is measured better on the full stack.
@@ -386,10 +394,11 @@ start_container(){
     -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all -e NVIDIA_DISABLE_REQUIRE=1 \
     -e ROS_DOMAIN_ID=$DOMAIN "${twin_mount[@]}" "${mps_args[@]}" \
     -v "$cuda_cache":/root/.nv/ComputeCache -e CUDA_CACHE_MAXSIZE=4294967296 \
-    -v "$HOSTSRC":$SRC:ro \
-    -v "$REPO/phase2":$SRC2:ro \
-    -v "$REPO/phase3":$SRC3:ro \
-    -v "$REPO/phase4":$SRC4:ro \
+    -v "$REPO/pose":$POSE:ro \
+    -v "$REPO/mapping":$MAPPING:ro \
+    -v "$REPO/nav":$NAV:ro \
+    -v "$REPO/perception":$PERCEPTION:ro \
+    -v "$REPO/tools":$TOOLS:ro \
     -v "$REPO/models":/models:ro \
     -v "$REPO/lidar":$LIDAR:ro \
     -v "$HOSTMAPS":/maps \
@@ -409,17 +418,17 @@ case "${1:-}" in
 # ── camera ──────────────────────────────────────────────────────────────────
 camera)
   # --floor measures the camera's pitch, roll and height from the floor plane
-  # in its own depth (phase1/nodes/floor_calib.py). Needs the layer up; moves
+  # in its own depth (pose/nodes/floor_calib.py). Needs the layer up; moves
   # nothing; writes nothing -- it prints the params.yaml lines.
   if [ "${2:-}" = "--floor" ]; then
     need_container
-    rexec "python3 $SRC/nodes/floor_calib.py"; exit
+    rexec "python3 $POSE/nodes/floor_calib.py"; exit
   fi
   # --lidar [--solve|--reset] measures the camera against the LiDAR, one
-  # hand-placed pose per run (phase1/nodes/cam_lidar_calib.py). Moves nothing.
+  # hand-placed pose per run (pose/nodes/cam_lidar_calib.py). Moves nothing.
   if [ "${2:-}" = "--lidar" ]; then
     need_container
-    rexec "python3 $SRC/nodes/cam_lidar_calib.py ${3:-}"; exit
+    rexec "python3 $POSE/nodes/cam_lidar_calib.py ${3:-}"; exit
   fi
   start_container
   if [ "$TWIN" = 1 ]; then
@@ -433,7 +442,7 @@ camera)
          '$(git -C "$REPO" log --oneline -1 | tr -dc "[:alnum:] ._:,()+-" | cut -c1-90)' > /tmp/announce.log 2>&1"
   else
   echo "[camera] D555 — stereo IR + depth + motion"
-  echo "         emitter OFF and sync OFF; both are load-bearing, see phase1/README.md"
+  echo "         emitter OFF and sync OFF; both are load-bearing, see pose/README.md"
   # COLOUR 448x252x15. It was 424x240x15 from 2026-09-06 -- a D4xx profile the
   # D555 does not offer, so the driver logged "invalid" and fell back to
   # 896x504x30: ~40 MB/s of colour on top of IR 27 + depth 27, near the gigabit
@@ -530,12 +539,12 @@ pose)
   # hands map -> odom to slam_toolbox, so it has to actually work.
   # Isaac ROS cuVSLAM tracks and publishes /vo/odom; vo_isaac.py gives it its
   # optical frames and owns /vo/status and (slam:=true) map -> odom.
-  dexec "exec ros2 launch $SRC/launch/vo_isaac.launch.py > /tmp/vslam.log 2>&1"
-  dexec "exec python3 $SRC/nodes/vo_isaac.py --ros-args -p slam:=${SLAM:-true} > /tmp/vo.log 2>&1"
+  dexec "exec ros2 launch $POSE/launch/vo_isaac.launch.py > /tmp/vslam.log 2>&1"
+  dexec "exec python3 $POSE/nodes/vo_isaac.py --ros-args -p slam:=${SLAM:-true} > /tmp/vo.log 2>&1"
 
   echo "[pose] gyro  (D555 IMU, re-framed into base_link -> /gyro/base)"
   kill_match "[g]yro_node.py"
-  dexec "exec python3 $SRC/nodes/gyro_node.py > /tmp/gyro.log 2>&1"
+  dexec "exec python3 $POSE/nodes/gyro_node.py > /tmp/gyro.log 2>&1"
   sleep 10
 
   echo
@@ -624,7 +633,7 @@ lidar)
   # Read once at start, so it is started here on maps/last and stopped by ./rover slam.
   kill_match '[g]ridloc.launch.py'
   if [ -s "$HOSTMAPS/last.yaml" ] && rexec "ros2 pkg prefix isaac_ros_occupancy_grid_localizer" >/dev/null 2>&1; then
-    dexec "exec ros2 launch $SRC2/launch/gridloc.launch.py map:=/maps/last.yaml > /tmp/gridloc.log 2>&1"
+    dexec "exec ros2 launch $MAPPING/launch/gridloc.launch.py map:=/maps/last.yaml > /tmp/gridloc.log 2>&1"
     echo "[lidar] NVIDIA grid localizer warming up on maps/last (for ./rover slam)"
   fi
   ;;
@@ -645,7 +654,7 @@ drive)
     refuse_if_manual "teleop is in MANUAL — it streams zeros over every command. Tap AUTO."
     echo "  THIS DRIVES THE ROVER. Watch it; the LiDAR is blind below 21 cm."
   fi
-  rexec "$(pivot_env) python3 $SRC3/nodes/pivot_goto.py $*"
+  rexec "$(pivot_env) python3 $NAV/nodes/pivot_goto.py $*"
   ;;
 
 # ── wheels ──────────────────────────────────────────────────────────────────
@@ -658,7 +667,7 @@ wheels)
   # the BTS7960s was not on. `./rover up` printed "Wheels are live" over it.
   if [ "${2:-}" = "--nudge" ]; then
     echo "  THIS MOVES THE ROVER ~7 cm forward. Watch it."
-    rexec "python3 $SRC/nodes/nudge.py"; exit
+    rexec "python3 $POSE/nodes/nudge.py"; exit
   fi
   echo "[wheels] ESP32 -> micro-ROS agent (Pi 5) -> /wheel_state"
   echo "         firmware publishes at 20 Hz whenever it is AGENT_CONNECTED,"
@@ -713,9 +722,9 @@ fused)
   # gyro, VO and wheels, each weighted by its own evidence, and owns /odom and
   # odom -> base_link. vo_node runs with publish_tf:=false: one owner per TF.
   echo "[fused] LiDAR odometry -> /lidar/odom"
-  dexec "python3 $SRC/nodes/lidar_odom_node.py > /tmp/lidarodom.log 2>&1"
+  dexec "python3 $POSE/nodes/lidar_odom_node.py > /tmp/lidarodom.log 2>&1"
   echo "[fused] fusion2 -> /odom, TF odom -> base_link, /fusion/status, /fusion/path"
-  dexec "python3 $SRC/nodes/fusion2_node.py > /tmp/fusion2.log 2>&1"
+  dexec "python3 $POSE/nodes/fusion2_node.py > /tmp/fusion2.log 2>&1"
   sleep 5
   echo
   echo "  GATE fused:"
@@ -737,12 +746,12 @@ fused)
 # publishes what dead reckoning got wrong as map -> odom. Nothing under it
 # changes: odom -> base_link is fusion2's, nav2 still plans in odom
 # until it is deliberately moved to map (that is a separate, driven change --
-# see phase2/config/SLAM.md). What this layer gives you today is the corrected pose
+# see mapping/config/SLAM.md). What this layer gives you today is the corrected pose
 # (map -> base_link), a 2D map of the room on /map, and both in RViz.
 slam)
   need_container
   case "${2:-}" in
-    --check) rexec "python3 $SRC2/config/slam_check.py"; exit ;;
+    --check) rexec "python3 $MAPPING/config/slam_check.py"; exit ;;
     --save)
       [ -n "${3:-}" ] || die "usage: ./rover slam --save <name>   (written to maps/<name>.posegraph + .yaml/.pgm)"
       mkdir -p "$REPO/maps"
@@ -796,13 +805,13 @@ slam)
   # (search radius 3 m): a start more than ~1 m or ~30 deg off may not lock on,
   # and a wrong lock corrupts the map -- ./rover slam --save before a risky
   # start, SLAM_FRESH=1 to ignore the saved map.
-  SLAMCFG=$SRC2/config/slam_toolbox.yaml
+  SLAMCFG=$MAPPING/config/slam_toolbox.yaml
   rexec "rm -f /maps/.ref.pgm /maps/.ref.yaml"
   if [ "${SLAM_FRESH:-0}" != 1 ] && [ -s "$HOSTMAPS/last.posegraph" ] && [ -s "$HOSTMAPS/last.data" ]; then
     # WHERE AM I? (2026-10-18) Resuming from where the rover stood at the last save
     # locked onto the wrong place after it was carried elsewhere, and the autosave
     # then wrote the wrong lock over the good room. Now one lidar scan is matched
-    # against the saved room's picture (phase2/tools/relocalize.py, ~2 s) and the
+    # against the saved room's picture (mapping/tools/relocalize.py, ~2 s) and the
     # room is resumed only where it fits; else it is archived, never overwritten.
     sp=${SLAM_START_POSE:-}
     if [ -z "$sp" ] && [ -s "$HOSTMAPS/last.yaml" ]; then
@@ -810,7 +819,7 @@ slam)
       echo "[slam] where am I in the saved room? (one lidar scan against maps/last)"
       # NVIDIA's localizer first if ./rover lidar started it (orin-nav:2.1), else straight to the search
       fast=--no-fast; rexec "pgrep -f '[g]ridloc.launch.py'" >/dev/null 2>&1 && fast=
-      rl=$(rexec "python3 $SRC2/tools/relocalize.py /maps/last.yaml ${hint:+--hint=$hint} $fast" 2>/dev/null | grep '^{' | tail -1 || true)
+      rl=$(rexec "python3 $MAPPING/tools/relocalize.py /maps/last.yaml ${hint:+--hint=$hint} $fast" 2>/dev/null | grep '^{' | tail -1 || true)
       verdict=$(printf '%s' "$rl" | python3 -c 'import json,sys; print(json.load(sys.stdin)["verdict"])' 2>/dev/null || echo lost)
       echo "        $verdict: $(printf '%s' "$rl" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["why"])' 2>/dev/null || echo 'no answer')"
       echo "        ($(printf '%s' "$rl" | python3 -c 'import json,sys; d=json.load(sys.stdin); print("%s, %s s%s" % (d.get("method","search"), d.get("secs","?"), ("; fast path: " + d["fast"]) if d.get("fast") else ""))' 2>/dev/null || echo '?'))"
@@ -824,7 +833,7 @@ slam)
       echo "[slam] (the saved room has no picture yet: resuming from its last pose, unchecked)"
     fi
     if [ -n "$sp" ]; then
-      rexec "cp $SRC2/config/slam_toolbox.yaml /tmp/slam_resume.yaml && printf '    map_file_name: /maps/last\n    map_start_pose: [%s]\n' '$sp' >> /tmp/slam_resume.yaml"
+      rexec "cp $MAPPING/config/slam_toolbox.yaml /tmp/slam_resume.yaml && printf '    map_file_name: /maps/last\n    map_start_pose: [%s]\n' '$sp' >> /tmp/slam_resume.yaml"
       SLAMCFG=/tmp/slam_resume.yaml
       # the autosave's reference: the room as it was before this run touched it
       rexec "[ -s /maps/last.yaml ] && cp /maps/last.pgm /maps/.ref.pgm && sed 's/^image: .*/image: .ref.pgm/' /maps/last.yaml > /maps/.ref.yaml || true"
@@ -844,8 +853,8 @@ slam)
   echo "[slam] slam_toolbox (online async, mapping) -> map -> odom TF, /map"
   dexec "exec ros2 launch slam_toolbox online_async_launch.py \
             slam_params_file:=$SLAMCFG use_sim_time:=false autostart:=true > /tmp/slam.log 2>&1"
-  # keep the room on disk: every 2 min, atomically (phase2/tools/map_autosave.py)
-  dexec "exec python3 $SRC2/tools/map_autosave.py 120 > /tmp/map_autosave.log 2>&1"
+  # keep the room on disk: every 2 min, atomically (mapping/tools/map_autosave.py)
+  dexec "exec python3 $MAPPING/tools/map_autosave.py 120 > /tmp/map_autosave.log 2>&1"
   sleep 8
   echo
   echo "  GATE slam:"
@@ -857,7 +866,7 @@ slam)
     [ "$_try" = 4 ] && { rexec "grep -iE 'error|fail' /tmp/slam.log | tail -3"; die "no /map — see ./rover logs slam"; }
     echo "      (the saved room is still loading -- again in 10 s)"; sleep 10
   done
-  rexec "python3 $SRC2/config/slam_check.py" || true
+  rexec "python3 $MAPPING/config/slam_check.py" || true
   echo
   echo "  The correction row is what the lidar changed. Drive a zig-zag and a"
   echo "  couple of pivots, then re-run:   ./rover slam --check"
@@ -880,18 +889,18 @@ map)
     (./rover fused alone restarts fusion and NOT cuvslam, so divergence survives)"
   kill_match 'nvblox_node'
   # depth frames reach nvblox only while the rover is not turning: frames
-  # painted mid-turn smeared every object 3-10 cm (phase2/nodes/turn_gate.py)
+  # painted mid-turn smeared every object 3-10 cm (mapping/nodes/turn_gate.py)
   kill_match 'depth_gate[.]py'
-  dexec "python3 $SRC2/nodes/depth_gate.py > /tmp/depth_gate.log 2>&1"
+  dexec "python3 $MAPPING/nodes/depth_gate.py > /tmp/depth_gate.log 2>&1"
   echo "[map] nvblox — depth + the FUSED pose -> TSDF mesh and a 2D floor slice"
   echo "      built on /odom, not raw cuvslam: nvblox writes depth wherever the"
   echo "      pose claims the robot is, so a teleport smears the map permanently."
-  dexec "ros2 launch $SRC2/launch/nvblox.launch.py > /tmp/map.log 2>&1"
+  dexec "ros2 launch $MAPPING/launch/nvblox.launch.py > /tmp/map.log 2>&1"
   # nvblox never forgets; ghost_clear erases the marks of things that moved
   # (people), checked by the LiDAR -- never a low thing only the camera saw.
-  # nav2, goal_exec and reach read ITS grid (phase2/nodes/ghost_clear.py).
+  # nav2, goal_exec and reach read ITS grid (mapping/nodes/ghost_clear.py).
   kill_match 'ghost_clear_node[.]py'
-  dexec "python3 $SRC2/nodes/ghost_clear_node.py > /tmp/ghost_clear.log 2>&1"
+  dexec "python3 $MAPPING/nodes/ghost_clear_node.py > /tmp/ghost_clear.log 2>&1"
   # nvblox allocates GPU hash tables and warms up its integrators before it
   # publishes anything; checked too early it reads 0 Hz and looks broken.
   sleep 25
@@ -907,7 +916,7 @@ map)
   assert_rate /depth_gate/passed 5 "depth to the map" || true
   echo
   echo "  How much is mapped:"
-  rexec "PYTHONFAULTHANDLER=1 python3 $SRC2/tools/map_stats.py" | sed -n "/grid/,/occupied/p" | sed "s/^/    /"
+  rexec "PYTHONFAULTHANDLER=1 python3 $MAPPING/tools/map_stats.py" | sed -n "/grid/,/occupied/p" | sed "s/^/    /"
   echo
   echo "  Drive it and the map grows. In RViz: nvblox mesh, nvblox 2D slice."
   echo "  Log: ./rover logs map"
@@ -929,24 +938,24 @@ nav)
   echo "      Planner: Smac State Lattice (plans with the real 36 x 38 cm outline"
   echo "      and heading); controller: MPPI (tries ~1000 motions a tick). 1 cm"
   echo "      hard margin, clearance preferred softly -- NAV_PLAN.md."
-  echo "      Check planning without moving: python3 /opt/rover3/tools/plan_check.py"
+  echo "      Check planning without moving: python3 /opt/rover/nav/tools/plan_check.py"
   # supervised: if any nav2 part dies, nav2 restarts whole (nav2.launch.py);
   # restarts are listed in /tmp/nav_restarts.log
-  dexec "bash $SRC3/launch/nav2_supervise.sh > /tmp/nav.log 2>&1"
+  dexec "bash $NAV/launch/nav2_supervise.sh > /tmp/nav.log 2>&1"
   # nav2's smoothed command -> real turn rates on this skid-steer -> /cmd_vel.
   # Not running = nav2 cannot move the wheels at all (safe).
   kill_match 'turn_shaper[.]py'
-  dexec "python3 $SRC3/nodes/turn_shaper.py > /tmp/turn_shaper.log 2>&1"
+  dexec "python3 $NAV/nodes/turn_shaper.py > /tmp/turn_shaper.log 2>&1"
   # goal_exec (exact moves) and reach (RViz goals: retry until there) ride on nav2
   kill_match 'goal_exec_node[.]py|reach_node[.]py'
-  dexec "python3 $SRC3/nodes/goal_exec_node.py > /tmp/goal_exec.log 2>&1"
-  dexec "$(rl_env) python3 $SRC3/nodes/reach_node.py > /tmp/reach.log 2>&1"
+  dexec "python3 $NAV/nodes/goal_exec_node.py > /tmp/goal_exec.log 2>&1"
+  dexec "$(rl_env) python3 $NAV/nodes/reach_node.py > /tmp/reach.log 2>&1"
   # display only: walls red, the 5 cm body margin violet, floor clear (RViz)
   kill_match 'wall_margin_view[.]py'
-  dexec "python3 $SRC3/nodes/wall_margin_view.py > /tmp/wall_margin_view.log 2>&1"
+  dexec "python3 $NAV/nodes/wall_margin_view.py > /tmp/wall_margin_view.log 2>&1"
   # display only: who blocks (RED lidar, ORANGE camera only, PURPLE both) + the brain's target
   kill_match 'blocker_view[.]py'
-  dexec "python3 $SRC3/nodes/blocker_view.py > /tmp/blocker_view.log 2>&1"
+  dexec "python3 $NAV/nodes/blocker_view.py > /tmp/blocker_view.log 2>&1"
   sleep 20
   echo
   echo "  GATE nav:"
@@ -961,7 +970,7 @@ nav)
 # ── vlm ─────────────────────────────────────────────────────────────────────
 # The Jetson half of "go to the red bottle": the Pi 5 brain's VLM picks a
 # pixel in the color frame, this turns that pixel into a Nav2 goal. See
-# phase4/nodes/pixel_to_goal.py for the full contract and why it's odom-
+# perception/nodes/pixel_to_goal.py for the full contract and why it's odom-
 # framed, not map-framed like the code it bridges to expects.
 vlm)
   need_container
@@ -969,9 +978,9 @@ vlm)
   assert_rate /odom 15 "fused odom" || die "no fused pose — run ./rover fused"
   kill_match 'image_bridge.py|pixel_to_goal.py'
   echo "[vlm] image_bridge — color frame -> JPEG, for the Pi 5's look()/VLM"
-  dexec "exec python3 $SRC4/nodes/image_bridge.py > /tmp/image_bridge.log 2>&1"
+  dexec "exec python3 $PERCEPTION/nodes/image_bridge.py > /tmp/image_bridge.log 2>&1"
   echo "[vlm] pixel_to_goal — VLM pixel + depth -> odom-frame Nav2 goal"
-  dexec "exec python3 $SRC4/nodes/pixel_to_goal.py > /tmp/pixel_to_goal.log 2>&1"
+  dexec "exec python3 $PERCEPTION/nodes/pixel_to_goal.py > /tmp/pixel_to_goal.log 2>&1"
   sleep 4
   echo
   echo "  GATE vlm:"
@@ -1195,7 +1204,7 @@ detect)
     echo "  ! no TensorRT engine for TensorRT ${trt_tag:-?} -- YOLO runs on PyTorch (~2x the CPU, +0.8 GB)."
     echo "    Build it once: ./rover engine  (~8 min)"
   fi
-  dexec "exec python3 $SRC4/nodes/detections_3d.py $model_args > /tmp/detections_3d.log 2>&1"
+  dexec "exec python3 $PERCEPTION/nodes/detections_3d.py $model_args > /tmp/detections_3d.log 2>&1"
   echo "  loading YOLO onto the GPU (~15 s)..."
   sleep 16
   rexec "grep -m1 'YOLO backend' /tmp/detections_3d.log | sed 's/^.*YOLO backend/      YOLO backend/'" || true
@@ -1236,26 +1245,26 @@ approach)
   docker exec "$NAME" pgrep -f '[t]arget_track_node.py' >/dev/null 2>&1 || die "target_track not running — ./rover track"
   echo "  THIS DRIVES THE ROVER toward the nearest '$label' YOLO sees. Ctrl-C, then ./rover stop if needed."
   extra=""; [ $# -gt 0 ] && extra=$(printf '%q ' "$@")     # printf of nothing would pass an empty ''
-  docker exec "$NAME" bash -lc "$ENVSET python3 -u $SRC4/tools/closed_loop_approach.py --label $(printf '%q' "$label") $extra --out /logs/approach.jsonl"
+  docker exec "$NAME" bash -lc "$ENVSET python3 -u $PERCEPTION/tools/closed_loop_approach.py --label $(printf '%q' "$label") $extra --out /logs/approach.jsonl"
   ;;
 
 engine)
   # Moves nothing; loads the GPU for a few minutes -- not while driving.
   # Run it again after a JetPack update (the engine names the TensorRT it needs).
   shift
-  "$REPO/phase4/tools/build_engine.sh" "$@"
+  "$REPO/perception/tools/build_engine.sh" "$@"
   echo "  restart the detector to use it: ./rover detect"
   ;;
 
 track)
   need_container
-  # phase4/nodes/target_track_node.py: lock once (a photo's box + pixel_to_goal's
+  # perception/nodes/target_track_node.py: lock once (a photo's box + pixel_to_goal's
   # reply for it), then the point is refined from every colour frame. It only
   # SEES: /target/state says where the thing is and whether it is in view; what
   # to drive is the caller's. Colour, depth and TF are subscribed only while locked.
   kill_match '[t]arget_track_node[.]py'
   echo "[track] target_track: /target/lock -> /target/state (asleep until locked)"
-  dexec "exec python3 $SRC4/nodes/target_track_node.py > /tmp/track.log 2>&1"
+  dexec "exec python3 $PERCEPTION/nodes/target_track_node.py > /tmp/track.log 2>&1"
   sleep 3
   echo
   echo "  GATE track:"
@@ -1273,7 +1282,7 @@ rviz)
   echo "       rviz2 here competes with cuVSLAM for the GPU and the pose rate dips."
   xhost +local:docker >/dev/null 2>&1 || true
   docker exec -it -e DISPLAY=:0 "$NAME" bash -lc \
-    "$ENVSET rviz2 -d $SRC2/rviz/rover_live.rviz"
+    "$ENVSET rviz2 -d $MAPPING/rviz/rover_live.rviz"
   ;;
 
 # ── the laptop view ─────────────────────────────────────────────────────────
@@ -1306,11 +1315,11 @@ view)
   # TWIN: its own window on its own domain (beside the real one, if that is up),
   # the SAME config plus one display: the twin world's true obstacles (/sim/world).
   RVCFG=rover_live
-  RVSRC="$(dirname "$0")/phase2/rviz/rover_live.rviz"
+  RVSRC="$(dirname "$0")/mapping/rviz/rover_live.rviz"
   if [ "$TWIN" = 1 ]; then
     RVCFG=rover_twin
     RVSRC=$(mktemp --suffix=.rviz)
-    python3 - "$(dirname "$0")/phase2/rviz/rover_live.rviz" "$RVSRC" <<'PY'
+    python3 - "$(dirname "$0")/mapping/rviz/rover_live.rviz" "$RVSRC" <<'PY'
 import sys, yaml
 c = yaml.safe_load(open(sys.argv[1]))
 c['Visualization Manager']['Displays'].append({
@@ -1328,8 +1337,8 @@ PY
   fi
   RVPAT="[r]viz2 -d .*$RVCFG[.]rviz"     # this window only: the real and the twin's can both be open
   scp -q $LSSH "$RVSRC" "$LAPTOP_USER@$ip:~/$RVCFG.rviz" 2>/dev/null \
-    && scp -q $LSSH "$(dirname "$0")/phase2/rviz/rover_live.sh" "$LAPTOP_USER@$ip:~/rover_live.sh" 2>/dev/null \
-    && scp -q $LSSH "$(dirname "$0")/phase2/rviz/setup_lyrical_laptop.sh" "$LAPTOP_USER@$ip:~/setup_lyrical_laptop.sh" 2>/dev/null \
+    && scp -q $LSSH "$(dirname "$0")/mapping/rviz/rover_live.sh" "$LAPTOP_USER@$ip:~/rover_live.sh" 2>/dev/null \
+    && scp -q $LSSH "$(dirname "$0")/mapping/rviz/setup_lyrical_laptop.sh" "$LAPTOP_USER@$ip:~/setup_lyrical_laptop.sh" 2>/dev/null \
     && echo "  config synced from the repo" \
     || echo "  ! could not sync the config — the laptop may be showing an old one"
   [ "$TWIN" = 1 ] && rm -f "$RVSRC"
@@ -1460,7 +1469,7 @@ PY
 
 # ── reach ───────────────────────────────────────────────────────────────────
 # Get there: nav2, goal_exec's exact finish, and on failure look / pass / wait,
-# until reached (phase3/nodes/reach_node.py). RViz's 2D Goal Pose does this too.
+# until reached (nav/nodes/reach_node.py). RViz's 2D Goal Pose does this too.
 #   ./rover reach X Y [DEG] [--odom|--map]
 reach)
   need_container
@@ -1468,7 +1477,7 @@ reach)
   refuse_if_manual
   docker exec "$NAME" pgrep -f '[r]each_node.py' >/dev/null 2>&1 || die "reach_node not running — ./rover nav"
   ttyflag=""; [ -t 0 ] && ttyflag="-it"
-  docker exec $ttyflag "$NAME" bash -lc "$ENVSET python3 -u $SRC3/tools/reach.py $(printf '%q ' "$@")"
+  docker exec $ttyflag "$NAME" bash -lc "$ENVSET python3 -u $NAV/tools/reach.py $(printf '%q ' "$@")"
   ;;
 
 # ── demo ────────────────────────────────────────────────────────────────────
@@ -1513,7 +1522,7 @@ demo)
   ;;
 
 # ── rl ──────────────────────────────────────────────────────────────────────
-# The learned tight-space driver inside reach (RL_PLAN.md, phase3/nodes/rl_drive.py).
+# The learned tight-space driver inside reach (RL_PLAN.md, nav/nodes/rl_drive.py).
 #   ./rover rl on [/models/rl/vNNN/policy.npz]   ./rover rl off   ./rover rl [status]
 # on/off is saved in logs/ (./rover nav and up keep it) and restarts reach only.
 rl)
@@ -1526,7 +1535,7 @@ rl)
   esac
   if [ "${2:-status}" != status ]; then
     kill_match 'reach_node[.]py'
-    dexec "$(rl_env) python3 $SRC3/nodes/reach_node.py > /tmp/reach.log 2>&1"
+    dexec "$(rl_env) python3 $NAV/nodes/reach_node.py > /tmp/reach.log 2>&1"
     sleep 3
   fi
   echo "  learned driver: $(rl_env)"
@@ -1536,7 +1545,7 @@ rl)
 
 # ── pass ────────────────────────────────────────────────────────────────────
 # A tight gap: find it in the raw LiDAR + depth points (1 cm) and crawl
-# straight through on goal_exec's pass mode (phase3/tools/gap_pass.py).
+# straight through on goal_exec's pass mode (nav/tools/gap_pass.py).
 #   ./rover pass [D] [--margin 0.03] [--dry]
 pass)
   need_container
@@ -1546,13 +1555,13 @@ pass)
   refuse_if_manual
   # (re)start goal_exec: it must be running the code with pass mode and depth
   kill_match 'goal_exec_node[.]py'
-  dexec "python3 $SRC3/nodes/goal_exec_node.py > /tmp/goal_exec.log 2>&1"; sleep 4
+  dexec "python3 $NAV/nodes/goal_exec_node.py > /tmp/goal_exec.log 2>&1"; sleep 4
   ttyflag=""; [ -t 0 ] && ttyflag="-it"
-  docker exec $ttyflag "$NAME" bash -lc "$ENVSET python3 -u $SRC3/tools/gap_pass.py $(printf '%q ' "$@")"
+  docker exec $ttyflag "$NAME" bash -lc "$ENVSET python3 -u $NAV/tools/gap_pass.py $(printf '%q ' "$@")"
   ;;
 
 # ── navto ───────────────────────────────────────────────────────────────────
-# nav2 for the route, goal_exec for the exact finish (phase3/tools/navto.py).
+# nav2 for the route, goal_exec for the exact finish (nav/tools/navto.py).
 #   ./rover navto X Y [DEG] [--exact] [--odom|--map]
 navto)
   need_container
@@ -1561,14 +1570,14 @@ navto)
   assert_rate /scan 8 "laser scan"  || die "no /scan — ./rover lidar first"
   refuse_if_manual
   if ! docker exec "$NAME" pgrep -f '[g]oal_exec_node.py' >/dev/null 2>&1; then
-    dexec "python3 $SRC3/nodes/goal_exec_node.py > /tmp/goal_exec.log 2>&1"; sleep 3
+    dexec "python3 $NAV/nodes/goal_exec_node.py > /tmp/goal_exec.log 2>&1"; sleep 3
   fi
   ttyflag=""; [ -t 0 ] && ttyflag="-it"
-  docker exec $ttyflag "$NAME" bash -lc "$ENVSET python3 -u $SRC3/tools/navto.py $(printf '%q ' "$@")"
+  docker exec $ttyflag "$NAME" bash -lc "$ENVSET python3 -u $NAV/tools/navto.py $(printf '%q ' "$@")"
   ;;
 
 explore)
-  # frontier exploration on the LiDAR map (phase3/nodes/explore_node.py); every goal goes
+  # frontier exploration on the LiDAR map (nav/nodes/explore_node.py); every goal goes
   # through reach, so nav2, goal_exec and the "too tight" refusals apply as for any goal
   need_container
   shift
@@ -1580,12 +1589,12 @@ explore)
   echo "  A person watches: it cannot see drops (stairs) or things under 10 cm. Ctrl-C stops it;"
   echo "  MANUAL on the phone cancels the current goal. Save the result: ./rover slam --save <name>"
   ttyflag=""; [ -t 0 ] && ttyflag="-it"
-  docker exec $ttyflag "$NAME" bash -lc "$ENVSET python3 -u $SRC3/nodes/explore_node.py ${1:-20}"
+  docker exec $ttyflag "$NAME" bash -lc "$ENVSET python3 -u $NAV/nodes/explore_node.py ${1:-20}"
   ;;
 
 # ── response ────────────────────────────────────────────────────────────────
 # How this rover really answers a command on this floor: pivot rate per
-# command, arc following, creep speed (phase3/tools/response_test.py). Moves
+# command, arc following, creep speed (nav/tools/response_test.py). Moves
 # within ~30 cm. Re-run per surface; goal_exec and its simulator are set from it.
 response)
   need_container
@@ -1594,7 +1603,7 @@ response)
   echo "  THIS MOVES THE ROVER (turns in place, short arcs). Watch it."
   ttyflag=""; [ -t 0 ] && ttyflag="-it"
   shift
-  docker exec $ttyflag "$NAME" bash -lc "$ENVSET python3 -u $SRC3/tools/response_test.py $*"
+  docker exec $ttyflag "$NAME" bash -lc "$ENVSET python3 -u $NAV/tools/response_test.py $*"
   ;;
 
 # ── goto ────────────────────────────────────────────────────────────────────
@@ -1611,11 +1620,11 @@ goto)
   refuse_if_manual "teleop is in MANUAL — it streams zeros over every command. Tap AUTO."
   if ! docker exec "$NAME" pgrep -f '[g]oal_exec_node.py' >/dev/null 2>&1; then
     echo "[goto] starting goal_exec (learned pivot: /logs/goal_exec_pivot.json)"
-    dexec "python3 $SRC3/nodes/goal_exec_node.py > /tmp/goal_exec.log 2>&1"
+    dexec "python3 $NAV/nodes/goal_exec_node.py > /tmp/goal_exec.log 2>&1"
     sleep 3
   fi
   ttyflag=""; [ -t 0 ] && ttyflag="-it"   # Ctrl-C must reach the client: it cancels the goal
-  docker exec $ttyflag "$NAME" bash -lc "$ENVSET python3 $SRC3/tools/goto.py $(printf '%q ' "$@")"
+  docker exec $ttyflag "$NAME" bash -lc "$ENVSET python3 $NAV/tools/goto.py $(printf '%q ' "$@")"
   ;;
 
 # ── record / grade ──────────────────────────────────────────────────────────
@@ -1630,7 +1639,7 @@ record)
   ttyflag=""; [ -t 0 ] && ttyflag="-it"   # Ctrl-C must reach Python: it stops the motors
   docker exec $ttyflag -e GIT_REV="$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null)" \
     -e RUN_STAMP="$(date +%Y%m%d-%H%M%S)" "$NAME" \
-    bash -lc "$ENVSET python3 -u $SRC/harness/run.py $(printf '%q ' "$@")"
+    bash -lc "$ENVSET python3 -u $POSE/harness/run.py $(printf '%q ' "$@")"
   ;;
 grade)
   need_container
@@ -1641,17 +1650,17 @@ grade)
     set -- "$(basename "$last")"
   fi
   if [ "$1" = "--summary" ]; then
-    rexec "python3 $SRC/harness/grade.py --summary /logs/bags"
+    rexec "python3 $POSE/harness/grade.py --summary /logs/bags"
   else
     args=""; for b in "$@"; do args="$args /logs/bags/$(basename "$b")"; done
-    rexec "python3 $SRC/harness/grade.py $args"
+    rexec "python3 $POSE/harness/grade.py $args"
   fi
   ;;
 
 # ── status ──────────────────────────────────────────────────────────────────
 values)
   need_container
-  rexec "python3 $SRC/nodes/values.py"
+  rexec "python3 $POSE/nodes/values.py"
   ;;
 
 status)
@@ -1662,7 +1671,7 @@ status)
   # `wheels` cannot answer "what is alive", which is the only thing it is for.
   # ONE pass over every topic at once (health_probe.py, raw, ~12 s), not 14
   # sequential 12 s `ros2 topic hz` runs (2+ min).
-  rates=$(rexec "PYTHONFAULTHANDLER=1 python3 $SRC3/tools/health_probe.py 10" | tail -1)
+  rates=$(rexec "PYTHONFAULTHANDLER=1 python3 $NAV/tools/health_probe.py 10" | tail -1)
   for row in \
       "camera:$CAM_NS/infra1/image_rect_raw:15" \
       "camera:$CAM_NS/depth/image_rect_raw:10" \
@@ -1706,12 +1715,12 @@ except Exception: print(0.0)' "$rates" "$t")
   # health payload, not just the rates -- and it cannot do that with `ros2 topic
   # echo`, which TRUNCATES that JSON. health.py subscribes properly.
   echo
-  rexec "python3 $SRC/nodes/health.py" || true
+  rexec "python3 $POSE/nodes/health.py" || true
   ;;
 
 follow)
   need_container
-  # "Kino, follow me" (phase3/nodes/follow_node.py). Needs the fused pose (it
+  # "Kino, follow me" (nav/nodes/follow_node.py). Needs the fused pose (it
   # drives on it, with goal_exec's trust rules) and the people from the detect
   # layer, which this starts if it is not running. Part of ./rover up since
   # 2026-10-11 (after vlm, not fatal); run alone to restart it.
@@ -1725,10 +1734,10 @@ follow)
   kill_match '[f]ollow_node[.]py'
   if [ -n "${FOLLOW_DRY:-}" ]; then
     echo "[follow] DRY RUN: commands on /follow/cmd_vel_dry, the wheels are not driven"
-    dexec "exec python3 $SRC3/nodes/follow_node.py --ros-args -p cmd_topic:=/follow/cmd_vel_dry > /tmp/follow.log 2>&1"
+    dexec "exec python3 $NAV/nodes/follow_node.py --ros-args -p cmd_topic:=/follow/cmd_vel_dry > /tmp/follow.log 2>&1"
   else
     echo "[follow] follow_node -> /cmd_vel while following (1.0 m, <= 0.3 m/s)"
-    dexec "exec python3 $SRC3/nodes/follow_node.py > /tmp/follow.log 2>&1"
+    dexec "exec python3 $NAV/nodes/follow_node.py > /tmp/follow.log 2>&1"
   fi
   sleep 4
   echo
@@ -1751,14 +1760,14 @@ logs)
 stop)
   # save the room first: the container (and slam_toolbox's memory) goes with it
   if running && docker exec "$NAME" pgrep -f '[a]sync_slam_toolbox_node' >/dev/null 2>&1; then
-    timeout 40 docker exec "$NAME" bash -lc "$ENVSET python3 -c \"import sys; sys.path.insert(0,'$SRC2/tools'); import map_autosave as m; ok, why = m.save_now(); print('  room saved ' + why if ok else '  room NOT saved (previous maps/last kept)')\"" || echo "  room NOT saved (timed out; previous maps/last kept)"
+    timeout 40 docker exec "$NAME" bash -lc "$ENVSET python3 -c \"import sys; sys.path.insert(0,'$MAPPING/tools'); import map_autosave as m; ok, why = m.save_now(); print('  room saved ' + why if ok else '  room NOT saved (previous maps/last kept)')\"" || echo "  room NOT saved (timed out; previous maps/last kept)"
   fi
   docker rm -f "$NAME" >/dev/null 2>&1 && echo "  container removed" || echo "  nothing running"
   ;;
 
 health)
   need_container
-  rexec "python3 $SRC3/tools/health_probe.py ${2:-6}" | python3 -c "
+  rexec "python3 $NAV/tools/health_probe.py ${2:-6}" | python3 -c "
 import json,sys
 d=json.loads(sys.stdin.read().strip().splitlines()[-1])
 print('  topic'.ljust(48),'Hz')
@@ -1814,7 +1823,17 @@ net)
   ;;
 
 selftest)
-  python3 "$HOSTSRC/nodes/vo_node.py" --self-test
+  python3 "$REPO/pose/nodes/vo_node.py" --self-test
+  ;;
+
+# ── test ────────────────────────────────────────────────────────────────────
+# Every offline test (<folder>/tests/test_*.py), in a throwaway container of the
+# stack's image: no robot, no ROS graph, the running stack is not touched.
+#   ./rover test          all (~2.5 min)        ./rover test nav | tight | ...
+test)
+  shift
+  docker run --rm --entrypoint /bin/bash -v "$REPO":/opt/rover:ro -v "$REPO/models":/models:ro \
+    "$IMAGE" /opt/rover/tools/run_tests.sh "$@"
   ;;
 
 *)

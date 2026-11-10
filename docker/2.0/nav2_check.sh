@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# nav2_check.sh -- bring up the rover's real nav2 (phase3/launch/nav2.launch.py + config/nav2.yaml
+# nav2_check.sh -- bring up the rover's real nav2 (nav/launch/nav2.launch.py + config/nav2.yaml
 # + our costmap plugin + BT xml) in an image, offline: --network none, ROS domain 99, static TF,
 # no sensors. Catches renamed params/plugins/BT nodes before any twin or robot run.
 #   ~/rover/docker/2.0/nav2_check.sh [image]      (default orin-nav:2.0)
@@ -9,13 +9,13 @@ IMAGE=${1:-orin-nav:2.0}
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 echo "== nav2_check $IMAGE"
 docker run --rm --runtime nvidia --network none --entrypoint bash -e ROS_DOMAIN_ID=99 \
-  -v "$REPO/phase3":/opt/rover3:ro "$IMAGE" -c '
+  -v "$REPO/nav":/opt/rover/nav:ro "$IMAGE" -c '
 for f in /opt/ros/*/setup.bash; do source $f; done
-P=/opt/rover3/plugins/ws/install_${ROS_DISTRO}/setup.bash
-[ -f $P ] && source $P || echo "FAIL  no costmap plugin build for $ROS_DISTRO (phase3/plugins/build.sh)"
+P=/opt/rover/nav/plugins/ws/install_${ROS_DISTRO}/setup.bash
+[ -f $P ] && source $P || echo "FAIL  no costmap plugin build for $ROS_DISTRO (nav/plugins/build.sh)"
 ros2 run tf2_ros static_transform_publisher --frame-id odom --child-frame-id base_link >/dev/null 2>&1 &
 ros2 run tf2_ros static_transform_publisher --frame-id base_link --child-frame-id laser >/dev/null 2>&1 &
-timeout 60 ros2 launch /opt/rover3/launch/nav2.launch.py > /tmp/nav.log 2>&1
+timeout 60 ros2 launch /opt/rover/nav/launch/nav2.launch.py > /tmp/nav.log 2>&1
 clean(){ sed -E "s/\x1b\[[0-9;]*m//g" | cut -c1-230; }
 echo "ROS_DISTRO=$ROS_DISTRO"
 n=$(grep -cE "\[ERROR\]|\[FATAL\]" /tmp/nav.log)

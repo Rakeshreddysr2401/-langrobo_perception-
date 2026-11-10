@@ -253,23 +253,23 @@ def drift(g):
     v = g['v']
     F, R, S = g['env_front'], g['env_rear'], g['env_side']
     num = r'([-\d.]+)'
-    fp = grab('phase3/config/nav2.yaml',
+    fp = grab('nav/config/nav2.yaml',
               r'^\s*footprint:\s*"\[' + r',\s*'.join([rf'\[{num},\s*{num}\]'] * 4) + r'\]"', 8)
     checks = [
-        ('vo_node CAM_X_DEFAULT', grab('phase1/nodes/vo_node.py', r'^CAM_X_DEFAULT = ([-\d.]+)'), g['cam'][0]),
-        ('vo_node CAM_Y_DEFAULT', grab('phase1/nodes/vo_node.py', r'^CAM_Y_DEFAULT = ([-\d.]+)'), g['cam'][1]),
-        ('vo_node CAM_Z_DEFAULT', grab('phase1/nodes/vo_node.py', r'^CAM_Z_DEFAULT = ([-\d.]+)'), g['cam'][2]),
-        ('firmware WHEEL_BASE_M', grab('phase1/firmware/rover_firmware_v2.ino', r'#define WHEEL_BASE_M\s+([\d.]+)f'),
+        ('vo_node CAM_X_DEFAULT', grab('pose/nodes/vo_node.py', r'^CAM_X_DEFAULT = ([-\d.]+)'), g['cam'][0]),
+        ('vo_node CAM_Y_DEFAULT', grab('pose/nodes/vo_node.py', r'^CAM_Y_DEFAULT = ([-\d.]+)'), g['cam'][1]),
+        ('vo_node CAM_Z_DEFAULT', grab('pose/nodes/vo_node.py', r'^CAM_Z_DEFAULT = ([-\d.]+)'), g['cam'][2]),
+        ('firmware WHEEL_BASE_M', grab('firmware/rover_firmware_v2.ino', r'#define WHEEL_BASE_M\s+([\d.]+)f'),
          v['wheels.track']),
-        ('firmware WHEEL_DIAMETER_M', grab('phase1/firmware/rover_firmware_v2.ino',
+        ('firmware WHEEL_DIAMETER_M', grab('firmware/rover_firmware_v2.ino',
                                            r'#define WHEEL_DIAMETER_M\s+([\d.]+)f'), v['odometry.wheel_diameter']),
         ('nav2 footprint', fp, (F, S, F, -S, -R, -S, -R, S)),
     ]
     corners = r'^CORNERS = np\.array\(\[' + r',\s*'.join([rf'\[{num},\s*{num}\]'] * 4) + r'\]\)'
-    for rel in ('phase3/nodes/pivot_goto.py', 'lidar/scan_tools.py'):
+    for rel in ('nav/nodes/pivot_goto.py', 'lidar/scan_tools.py'):
         checks.append((f'{Path(rel).name} CORNERS', grab(rel, corners, 8), (F, S, F, -S, -R, -S, -R, S)))
     # the wheel constants the estimator (fusion2) and the harness use
-    rel = 'phase1/nodes/fusion2.py'
+    rel = 'pose/nodes/fusion2.py'
     checks.append(('fusion2.py WHEEL_BASE_ROT_M', grab(rel, r'^WHEEL_BASE_ROT_M = ([\d.]+)'),
                    v['odometry.effective_track']))
     checks.append(('fusion2.py METRES_PER_COUNT diameter',

@@ -6,7 +6,7 @@
 # truth at the same moment, then fits ONE rigid 2D transform map -> world (the map's frame is the
 # recording's first camera pose, not the world) and reports the residual per answer: that is
 # cuVGL's accuracy. Answers off by > 0.5 m after the fit count as wrong.
-# The map: phase2/tools/record_cuvgl.sh + create_map_offline.py (ISAAC_ROS_5_UPGRADE.md B3);
+# The map: mapping/tools/record_cuvgl.sh + create_map_offline.py (ISAAC_ROS_5_UPGRADE.md B3);
 # cuVGL features must be SIFT on this Orin (TensorRT cannot build ALIKED for SM 87, 2026-10-25).
 set -uo pipefail
 MAP=${1:?cuvgl_map dir}; SECS=${2:-200}
@@ -16,7 +16,7 @@ docker rm -f b3_cuvgl >/dev/null 2>&1
 docker run --rm --name b3_cuvgl --runtime nvidia --network host --entrypoint bash \
   -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all -e NVIDIA_DISABLE_REQUIRE=1 \
   -e ROS_DOMAIN_ID=42 -e FASTDDS_BUILTIN_TRANSPORTS=UDPv4 \
-  -v "$MAP":/map:ro -v "$REPO/phase2/config":/cfg:ro -v "$REPO/phase2/nodes":/nodes:ro -v "$OUT":/out "${IMAGE:-orin-nav:2.1}" -c "
+  -v "$MAP":/map:ro -v "$REPO/mapping/config":/cfg:ro -v "$REPO/mapping/nodes":/nodes:ro -v "$OUT":/out "${IMAGE:-orin-nav:2.1}" -c "
 source /opt/ros/lyrical/setup.bash
 python3 /nodes/cuvgl_relay.py > /out/relay.log 2>&1 &
 ros2 launch isaac_ros_visual_global_localization visual_global_localization.launch.py \

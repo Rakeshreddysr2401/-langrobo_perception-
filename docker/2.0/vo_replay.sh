@@ -11,12 +11,12 @@ docker run --rm --runtime nvidia --network none --entrypoint bash \
   -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all -e NVIDIA_DISABLE_REQUIRE=1 \
   -v "$HOME/.cache/rover-cuda/vo_check":/root/.nv/ComputeCache -e CUDA_CACHE_MAXSIZE=4294967296 \
   -e ROS_DOMAIN_ID=98 -e FASTDDS_BUILTIN_TRANSPORTS=UDPv4 \
-  -v "$REPO/phase1":/opt/rover:ro -v "$REPO/logs/$BAG":/bag:ro "$IMAGE" -c '
+  -v "$REPO/pose":/opt/rover/pose:ro -v "$REPO/logs/$BAG":/bag:ro "$IMAGE" -c '
 for f in /opt/ros/*/setup.bash; do source $f; done
 echo "ROS_DISTRO=$ROS_DISTRO"
 ros2 run tf2_ros static_transform_publisher --frame-id base_link --child-frame-id camera0_link >/dev/null 2>&1 &
-ros2 launch /opt/rover/launch/vo_isaac.launch.py > /tmp/vslam.log 2>&1 &
-python3 /opt/rover/nodes/vo_isaac.py --ros-args -p slam:=false > /tmp/vo.log 2>&1 &
+ros2 launch /opt/rover/pose/launch/vo_isaac.launch.py > /tmp/vslam.log 2>&1 &
+python3 /opt/rover/pose/nodes/vo_isaac.py --ros-args -p slam:=false > /tmp/vo.log 2>&1 &
 sleep 12
 python3 - <<PY &
 import time, json, math, rclpy

@@ -1,0 +1,325 @@
+# Architecture — the system as built
+
+What runs where, what talks to what, and **why each decision went the way it
+did**. For the measured numbers see [docs/archive/PHASE1.md](archive/PHASE1.md); for how to run it
+see [OPERATIONS.md](OPERATIONS.md); for open faults see [OPEN_ISSUES.md](OPEN_ISSUES.md)
+(the archived [docs/archive/TODO.md](archive/TODO.md) keeps the history the § numbers below cite).
+All machines and repos on one page: [SYSTEM_OVERVIEW.md](SYSTEM_OVERVIEW.md). Refreshed 2026-10-03.
+
+---
+
+## 0. The stack, and why each piece
+
+| layer | technology | why this one |
+|---|---|---|
+| OS / middleware | **ROS 2 Lyrical**, Fast DDS 3.6, on the Jetson (`orin-nav:2.0`) AND the Pi 5 (since 2026-10-25) | the distro Isaac ROS 5.0 ships; one DDS version on both ends (Jazzy on the Pi left the brain blind, OPEN_ISSUES 2026-10-25) |
+| camera | **RealSense D555** — PoE **ethernet DDS**, not USB | it is what the rover has. The ethernet transport is the source of several traps: it pings while dead, and subscribing to raw camera topics can take it offline |
+| visual odometry | **Isaac ROS cuVSLAM 5.0** (`isaac_ros_cuvslam`, `pose/launch/vo_isaac.launch.py`) | Orin-native (sm_87, 0 SVE) since Isaac ROS 4.6/5.0; the 1.x pyCuVSLAM wheel and its Thor-only package are gone with `orin-nav:1.1` |
+| heading | the D555's own **gyro**, complementary-filtered | measured −0.2% to −0.9% error over four 360° turns — better than the wheels can do through scrub |
+| distance | **wheel encoders**, calibrated against a tape | excellent in a straight line, useless mid-turn (§13) |
+| fusion | **fusion2**, an EKF, `pose/nodes/fusion2.py` (since 2026-09-26) | four sources, each weighted by its own evidence and gated (§5). The Phase 1 complementary filter (`fusion.py`, 20.5 cm / 13° worst) is in git history |
+| LiDAR | **RPLidar C1** — 360°, 10 Hz, USB, driver `sllidar_ros2` pinned + one patch (`lidar/`) | the walls are the one reference that does not drift. Added 2026-09-22 for the pose, not for nav2 |
+| drift correction | **slam_toolbox**, online async mapping, owns `map → odom` | scan-matches every scan against the walls it has seen, so the correction is continuous, where cuVSLAM's loop closure only fires on a recognised place (15–27 closures a session after §23, docs/archive/READINESS.md) — and the two cannot both own the frame, so cuVSLAM's is switched off (`SLAM=false`). No map is kept across power-off, by choice |
+| mapping | **nvblox** — TSDF → ESDF → 2D slice, GPU | the Orin has the GPU for it, and the ESDF slice is what nav2's costmap layer consumes directly |
+| planning | **nav2** — Smac **lattice** planner (2.5 cm motion primitives, `nav/config/lattice_diff_*.json`), **MPPI** controller, Spin removed from the BTs | the lattice plans only motions this skid-steer can drive, MPPI follows them against the full footprint. (NavFn + Regulated Pure Pursuit until 2026-09-28, commit 6aa4c98; NAV_PLAN.md) |
+| exact moves | **goal_exec** (one exact x, y, θ move, learned pivot slide) under **reach** (nav2 route → exact finish, retry with look / pass / wait; on "no path" the way back along its own trail) | nav2 gets near; the last centimetres and the turns are closed on the fused pose. This is what the Pi 5 brain drives through |
+| obstacles | nvblox fused map with the marks of moved things erased (`ghost_clear`, below) — for exact moves (`fused_obstacles.py`) and nav2's camera layer; LiDAR costmap layer beside it; depth into nvblox only when not turning (`depth_gate`) | a frame painted mid-turn smeared objects 3–10 cm (2026-10-03); nvblox never forgets, so people left permanent marks (2026-10-04) |
+| brain bridge | `image_bridge` (JPEG for `look()`), `pixel_to_goal` (a VLM pixel on a held photo → odom goal) | the Pi 5's LangGraph brain sees and points; the Jetson places |
+| wheels | **ESP32 + micro-ROS** over WiFi UDP, BTS7960 drivers, PID per side | the board sits on the rover; the link to it must be the thing that fails visibly |
+| teleop | a **web page on the Pi 5**, hold-to-move | any phone on the WiFi is a controller and a stop button, with no app to install |
+| visualisation | **RViz2 on a laptop** | the Jetson needs its GPU for nvblox |
+
+**A simulation twin** (since 2026-10-03; Isaac Sim since 2026-10-18): the laptop's `kino_sim` simulates the HARDWARE only -- the D555 and the C1 over TCP "cables" to stand-in drivers in the `rover_twin` container (`~/kino_sim/jetson/`), the ESP32's topics over DDS -- and `TWIN=1 ./rover up` runs this repo's whole stack on it, unchanged, on ROS domain 42 (state in `~/.rover_twin`). The twin announces itself (latched `/sim/hardware`: address, ports, world, params sha1), so this repo finds it without ssh. Domain 0 (the real robot) is never touched.
+
+**Everything runs in one container** (`rover`) on the Jetson, brought up in
+layers by `./rover`, because a failure in one layer must name itself rather than
+appear as a wall of log with no owner.
+
+---
+
+## 1. The machines
+
+The diagram is the pose path. Not drawn: the **Mac mini** (llama.cpp LLM + VLM, called by the Pi 5 over HTTP) and the **laptop** (RViz and the twin), see SYSTEM_OVERVIEW.md §2–3.
+
+```
+   ┌─────────────────────────────────────────────────────────────┐
+   │  D555 depth camera            192.168.11.55  (own subnet)   │
+   │  stereo IR · depth · IMU      Ethernet + PoE, NOT USB       │
+   └───────────────┬─────────────────────────────────────────────┘
+                   │  DDS over Ethernet
+   ┌───────────────▼─────────────────────────────────────────────┐
+   │  Jetson Orin Nano             192.168.1.15                  │
+   │  everything in orin-nav:2.0                                 │
+   │    vo_isaac     stereo IR → cuVSLAM → /vo/odom              │
+   │    gyro_node    IMU → base_link → /gyro/base                │
+   │    lidar_odom   /scan + gyro → /lidar/odom (every scan)     │
+   │    fusion2      gyro·LiDAR·VO·wheels → /odom + TF           │
+   │    slam_toolbox map → odom   nvblox  depth → obstacle map   │
+   │    nav2 · reach · goal_exec · turn_shaper → /cmd_vel        │
+   │    image_bridge · pixel_to_goal  (for the Pi 5 brain)       │
+   │    harness      ./rover record / grade vs LiDAR truth       │
+   └───────────────▲─────────────────────────────────────────────┘
+                   │  DDS over WiFi
+   ┌───────────────┴─────────────────────────────────────────────┐
+   │  Pi 5                         192.168.1.16                  │
+   │    micro-ROS agent   ESP32 ↔ ROS, UDP :8888                 │
+   │    teleop web        hold-to-move → /cmd_vel, :8091         │
+   │    LangGraph brain   voice · Telegram → /reach, /goal_exec  │
+   └───────────────▲─────────────────────────────────────────────┘
+                   │  micro-ROS over WiFi UDP
+   ┌───────────────┴─────────────────────────────────────────────┐
+   │  ESP32                        192.168.1.3                   │
+   │    50 Hz PID control task (own FreeRTOS core)               │
+   │    4× quadrature encoders · 2× BTS7960                      │
+   └─────────────────────────────────────────────────────────────┘
+```
+
+**Why the split.** The ESP32 runs the control loop on its own FreeRTOS core so
+that a network stall cannot stop the wheels being controlled. The Pi 5 owns the
+micro-ROS bridge because it sits on the rover and the link to the board must be
+short. The Jetson owns everything needing a GPU.
+
+---
+
+## 2. Topics
+
+### From the ESP32
+
+| topic | type | rate | contents |
+|---|---|---|---|
+| `/wheel_state` | `Vector3` | 20 Hz | `x`=velL, `y`=velR, `z`=commanded vx |
+| `/wheel_ticks` | `Quaternion` | 20 Hz | **cumulative** counts: LF, LR, RF, RR |
+| `/wheel_odom` | `Vector3` | 20 Hz | x, y (m), θ (rad), integrated on-board at 50 Hz |
+| `/rover_diag` | `Vector3` | 1 Hz | `loop()` Hz, free heap KB, agent state |
+| `/cmd_vel` | `Twist` | in | target body vx, wz |
+| `/pid_gains` | `Vector3` | in | live tuning: Kp, Ki, minDuty |
+| `/reset_odom` | `Vector3` | in | any message zeroes the on-board pose |
+
+**Why `Quaternion` for four wheel counts.** It is four doubles, 32 bytes, and
+needs no custom message package on either end — which matters when the container
+that builds the Jetson side has no rebuild recipe.
+
+**Why `/wheel_odom` is not `nav_msgs/Odometry`.** That message carries two 6×6
+covariance blocks, ~700 bytes, over a 512-byte micro-ROS MTU. The Jetson wraps
+three numbers where bandwidth is free.
+
+**Why `/rover_diag` exists.** The 1 Hz telemetry fault took a day to find purely
+because nothing reported how fast `loop()` was running. It does now — the next
+occurrence is a glance rather than an investigation.
+
+### From the camera
+
+| topic | rate | used by |
+|---|---|---|
+| `/camera/camera0/infra1,2/image_rect_raw` | 30 Hz | cuVSLAM |
+| `/camera/camera0/infra1,2/camera_info` | 30 Hz | intrinsics + baseline |
+| `/camera/camera0/depth/image_rect_raw` | 30 Hz | `depth_gate` → `.../depth/image_still` → nvblox; `pixel_to_goal`; `depth_obstacles` |
+| `/camera/camera0/color/image_raw` | 30 Hz | `image_bridge` → `/camera/color/image_raw/compressed` (the Pi 5's `look()`) |
+| `/camera/camera0/motion/sample` | 200 Hz | `gyro_node` |
+
+### On the Jetson
+
+| topic | type | rate | published by |
+|---|---|---|---|
+| `/vo/odom` | `Odometry` | 30 Hz | `vo_node` — **raw**, teleports |
+| `/vo/status` | `String` | 1 Hz | `vo_node` — landmarks, health |
+| `/gyro/base` | `Imu` | 200 Hz | `gyro_node` — re-framed into `base_link` |
+| `/lidar/odom` | `Odometry` | 10 Hz | `lidar_odom_node` — the LiDAR's pose, de-skewed scan-to-submap, covariance from each fit |
+| **`/odom`** | `Odometry` | 20 Hz | **`fusion2_node` — what nav2 consumes**, with covariance |
+| `/fusion/path` | `Path` | 1 Hz | `fusion2_node` — the track driven, **latched** |
+| `/fusion/status` | `String` | 1 Hz | `fusion2_node` — `origin_epoch` (the Pi 5 brain uses it), per-source alive / accepted / rejected, LiDAR and cuVSLAM health, slip / stuck, sd |
+| `/scan` | `LaserScan` | 10 Hz | `sllidar_node` — 720 beams, BEST_EFFORT, stamps shifted +82 ms to the measurement (LOCALIZATION.md §2.3) |
+| `/map` | `OccupancyGrid` | ~0.5 Hz | `slam_toolbox` — the LiDAR's room, 5 cm cells, TRANSIENT_LOCAL |
+| `/robot_description` | `String` | latched | `robot_state_publisher` — the URDF from `description/params.yaml`; RViz draws it (replaced `rover_marker`, 2026-09-24) |
+
+### Mapping and navigation
+
+| topic | type | rate | note |
+|---|---|---|---|
+| `/nvblox_node/static_occupancy_grid` | `OccupancyGrid` | 5 Hz | nvblox's map, never forgets. VOLATILE. Read only by `ghost_clear` (and RViz's raw layer, off by default) |
+| `/ghost_clear/grid` | `OccupancyGrid` | 5 Hz | **the map** nav2's two costmaps and `fused_obstacles` read: nvblox minus the marks of moved things (`mapping/nodes/ghost_clear.py`). VOLATILE |
+| `/ghost_clear/erased` | `OccupancyGrid` | 1 Hz | what was erased, for RViz (grey in the blocker view) |
+| `/nvblox_node/static_map_slice` | `DistanceMapSlice` | 5 Hz | **not** an OccupancyGrid — what `NvbloxCostmapLayer` consumes |
+| `/global_costmap/costmap` | `OccupancyGrid` | 1 Hz | TRANSIENT_LOCAL |
+| `/local_costmap/costmap` | `OccupancyGrid` | 2 Hz | TRANSIENT_LOCAL |
+| `/plan` | `Path` | on request | nav2's computed route |
+| `/goal_pose` | `PoseStamped` | in | set from RViz |
+| `/reach/goal`, `/reach/cancel` → `/reach/status` | `PoseStamped` / `Empty` → JSON | in / out | `reach_node`: nav2 + exact finish + retries. RViz's 2D Goal Pose and the Pi 5 brain use it |
+| `/goal_exec/goal`, `/turn`, `/pass`, `/cancel` → `/goal_exec/status` | `PoseStamped` / JSON | in / out | `goal_exec_node`: one exact move; status keyed by the goal's stamp |
+| `/cmd_vel_turn` → `/cmd_vel` | `Twist` | 20 Hz | `turn_shaper`: nav2's turn rates made real on a scrubbing chassis |
+| `/vision/pixel_snapshot`, `/vision/pixel_query` → `/vision/pixel_result` | `PointStamped` → JSON | in / out | `pixel_to_goal`: the photo-grounded contract (Pi 5 INTEGRATION_GAPS.md §7). The result also carries `object.z` and `camera` (the photo's camera pose, for a lock) since 2026-10-21 |
+| `/target/lock`, `/target/cancel` → `/target/state` | JSON / String → JSON | in / out, ~15 Hz while locked | `target_track_node`: keep seeing ONE locked thing (CLOSED_LOOP_PLAN.md). Lock = photo stamp + box + `pixel_to_goal`'s `object` and `camera` for it; state = tracking / coasting / occluded / out_of_view / too_close / lost + the refined odom point. Sees only, never drives |
+| `/rover_view/wall_margin` | `OccupancyGrid` | 1 Hz | `wall_margin_view`: the costmap drawn for RViz only |
+
+**The durabilities are opposite and both matter.** nvblox publishes VOLATILE;
+nav2's costmaps publish TRANSIENT_LOCAL. Subscribe with the wrong one and you
+receive nothing while the topic looks perfectly alive — RViz renders that
+identically to a dead publisher.
+
+---
+
+## 3. Frames
+
+```
+  map ──(slam_toolbox)──► odom ──(fusion2, 20 Hz)──► base_link ─┬─(static)──► camera0_link
+                                                                    └─(static)──► laser
+```
+
+| transform | owner | why |
+|---|---|---|
+| `map → odom` | **`slam_toolbox`** (since 2026-09-22) | the LiDAR correction. cuVSLAM also publishes it when `slam:=true`, so `./rover pose` runs with `SLAM=false` and `./rover slam` refuses a second owner |
+| `odom → base_link` | **`fusion2_node`** (since 2026-09-26) | fusion2: gyro + LiDAR odometry + VO + wheels, each weighted by its own reliability (LOCALIZATION.md §11). The Phase 1 `fusion_node` it replaced was retired the same day (git history) |
+| `base_link → camera0_link` | robot_state_publisher (`description/`) | x 0.1623, y +0.0419 (the LEFT imager; fitted against LiDAR truth), z 0.175, roll −1.40°, yaw +0.96° (camera vs LiDAR). All calibrated 2026-09-25/26 — `description/params.yaml`; vo_node reads the whole mount from TF |
+| `base_link → laser` | robot_state_publisher (`description/`) | x 0.1342, z 0.2498 measured 2026-09-24; **yaw +88.60° measured by driving** (`./rover lidar --calibrate`) |
+
+`map → base_link` is the corrected pose; `./rover drive` steers on it. nav2
+and the Pi 5 brain still plan in `odom` — moving them is a separate, driven
+change (mapping/config/SLAM.md).
+
+**`vo_node` runs with `publish_tf:=false`.** Only one thing may publish a
+transform. The raw cuVSLAM pose is the one that teleports — 12 in a single
+drive, one of them 651 cm in a frame — and nav2 consuming that would react
+violently to a position the rover was never in. That is a **safety** issue, not
+an accuracy one.
+
+Two publishers of the same transform make TF non-deterministic, and the symptom
+is a robot jittering between two poses with nothing in any log.
+
+### Optical vs ROS axes
+
+cuVSLAM reports the *camera* in *optical* axes (x right, y down, z forward). ROS
+wants `base_link` in REP-103 (x forward, y left, z up). Both the axes and the
+origin move, so the transform applies on **both sides**:
+
+```
+odom_from_base(t) = B · world_from_rig(t) · B⁻¹      B = base_link ← left_optical
+```
+
+A single multiply instead of a conjugation makes the rover appear to swing around
+a point 17 cm in front of itself.
+
+---
+
+## 4. The nodes
+
+| file | job |
+|---|---|
+| `pose/nodes/vo_node.py` | stereo IR → cuVSLAM → `/vo/odom`, `/vo/status`. Owns the frame conjugation |
+| `pose/nodes/gyro_node.py` | D555 IMU → re-framed into `base_link` → `/gyro/base` |
+| **`pose/nodes/lidar_odom.py`** | **LiDAR odometry, no ROS in it** (graded offline and run live) |
+| `pose/nodes/lidar_odom_node.py` | wraps it → `/lidar/odom` |
+| **`pose/nodes/fusion2.py`** | **the estimator (EKF), no ROS in it** |
+| `pose/nodes/fusion2_node.py` | wraps it → `/odom`, TF, `/fusion/status`, `/fusion/path` |
+| `pose/nodes/health.py` | the pose / cuvslam / wheels honesty rows, from `/fusion/status` |
+| `pose/nodes/floor_calib.py`, `cam_lidar_calib.py` | camera tilt off the floor; camera vs LiDAR (`./rover camera --floor` / `--lidar`) |
+| `pose/harness/` | `./rover record` / `./rover grade`: every estimate against LiDAR truth |
+| `description/` | the rover's shape: `params.yaml` → URDF, CAD, drift check |
+| `mapping/launch/nvblox.launch.py` | nvblox: depth + `/odom` → TSDF, mesh, 2D grid |
+| `mapping/rviz/rover_live.rviz` | the RViz view, standard message types only |
+| `mapping/rviz/rover_live.sh` | launches RViz on the laptop with the `-d` that is load-bearing |
+| `mapping/nodes/turn_gate.py`, `depth_gate.py` | is it turning? depth to nvblox only when not (2026-10-03) |
+| **`mapping/nodes/ghost_clear.py`** + `ghost_clear_node.py` | erases camera marks of things that moved: a mark the LiDAR also hit (tall: a person), later seen through by the LiDAR; marks under the rover. A mark only the camera saw (low: a shoe) is never erased by the LiDAR. No ROS in the class; `ROVER_GHOST_CLEAR=off` passes through (2026-10-04) |
+| `nav/config/nav2.yaml` | nav2 (Smac lattice + MPPI), with every NO-PIVOT adaptation marked |
+| `nav/bt/*.xml` | behaviour trees with Spin removed |
+| **`nav/nodes/goal_exec.py`** + `goal_exec_node.py` | **exact (x, y, θ) moves, no ROS in the class**; turn-and-shuffle, pass mode, learned pivot slide (state in `ROVER_STATE_DIR`, default `/logs`) |
+| `nav/nodes/reach_node.py` | nav2 route → goal_exec finish; on failure look, straight pass, wait; far goals in ≤ 3.2 m legs; on "no path" the way back along its trail; the same failure 3× from one spot ends the goal with a reason |
+| `nav/nodes/trail.py` | where reach drove (a carry or pose reset starts a new trail) and ~1 m waypoints back along it; no ROS (2026-10-04) |
+| `nav/nodes/pivot_goto.py` | `./rover drive`: exact short moves planned around the off-centre pivot |
+| `nav/nodes/turn_shaper.py` | `/cmd_vel_turn` → `/cmd_vel`, turns at the rate nav2 asked |
+| `nav/nodes/fused_obstacles.py`, `depth_obstacles.py` | obstacles for exact moves: nvblox's fused map (default) or live depth at 1 cm (`ROVER_OBSTACLES=depth`) |
+| `nav/nodes/wall_margin_view.py` | RViz-only costmap colouring |
+| `nav/nodes/blocker_view.py` | RViz-only: who blocks each cell — RED LiDAR only, ORANGE camera only, PURPLE both, GREY erased — near (4 m, every 2.5 cm cell) and room (8 m, 10 cm squares so it reads zoomed out), both on by default |
+| `nav/plugins/` | `footprint_clear` costmap layer (C++): cells under the rover are free |
+| `nav/tools/` | `goto`, `navto`, `reach`, `gap_pass` (the `./rover` drive commands), `plan_check`, `ghost_check`, simulators `sim_goal_exec` / `sim_gap_pass` / `sim_maneuver`; offline tests `test_obstacle_sources`, `test_trail` |
+| `mapping/tools/` | `map_stats`, `ghost_watch` (camera marks / erased / kept in front of or behind the rover, live), `test_ghost_clear` (offline) |
+| `perception/nodes/image_bridge.py` | colour → JPEG for the Pi 5's `look()` |
+| `perception/nodes/pixel_to_goal.py` | a VLM pixel/box on a held photo → odom object + standoff goal (24 photos held) |
+| `perception/nodes/detections_3d.py` | YOLOv8n + depth → `/vision/detections_3d`; opt-in (`./rover detect`), the brain does not read it today (B4) |
+| `teleop/teleop_web.py` | the Pi 5's teleop page (copied to `~/langrobo_teleop/`); MANUAL cancels nav2, reach, goal_exec |
+| `pose/nodes/values.py` | one-shot readout of every sensor |
+| `firmware/rover_firmware_v2.ino` | ESP32: PID, encoders, telemetry |
+| `firmware/HARDWARE.md` | the drivetrain itself — wiring, motor/encoder specs, direction flags, bench results |
+| `firmware/FLASHING.md` | how to flash it, and why the last flash was needed |
+
+### Why the estimators have no ROS inside
+
+`lidar_odom.py` and `fusion2.py` are plain Python classes. The harness runs
+them offline over recorded bags and grades them; the nodes run the SAME class
+live. What was measured is what ships (the rule the Phase 1 fusion.py set, and
+kept).
+
+---
+
+## 5. The estimator
+
+**fusion2** (SENSOR_FUSION_PLAN.md M3; results LOCALIZATION.md §10-11): one EKF
+over [x, y, θ, vx, vy, gyro bias]. The gyro predicts at 200 Hz; every other
+source corrects **by its own evidence**, through a statistical gate:
+
+| source | enters as | weight comes from |
+|---|---|---|
+| **LiDAR odometry** | absolute pose (re-anchored offset); late fixes carried forward by motion only | each scan fit's residual and degeneracy; a healthy fit that fails the gate widens OUR uncertainty instead of being dropped |
+| **cuVSLAM** | velocity while the LiDAR is healthy, absolute pose when it is not | landmark count; jumps fail the gate |
+| **wheels** | forward speed, no sideways speed | turn rate (scrub) and slip evidence (front vs rear, wheels vs gyro) |
+| **stillness** | zero velocity; re-measures the gyro bias | all encoders unchanged and nothing commanded |
+
+Over 19 recorded runs: worst 0.8 cm / 0.45° (the Phase 1 fusion: 20.5 cm /
+13°); live on the owner's hand-moved return test with skidding wheels:
+0.1 cm / 0.32°. The Phase 1 estimator's hard-won rules (refuse a bad sensor,
+not just a bad message; a sensor's own confidence cannot catch it being
+confidently wrong; do not calibrate during the manoeuvre that breaks the
+reference) are why fusion2 gates every source and scales the wheels by slip.
+
+---
+
+## 6. Design decisions, and what forced them
+
+| decision | why |
+|---|---|
+| **Sources shown separately, not just fused** | a single number cannot tell you which sensor is lying. cuVSLAM once under-read a 100 cm push as 26 cm — a fused value would have looked plausible; two rows disagreeing would not |
+| **Layered bring-up, one command per layer** | each layer checks the one beneath it, so a failure names its own layer instead of hiding in a wall of log |
+| **Emitter set at runtime and read back** | `emitter_enabled:=0` is a no-op for a Boolean. The projector is bolted to the camera, so its dots move *with* the rig and a 60 cm push read 1.1 cm |
+| **Loop closure OFF in Phase 1** | we are measuring raw drift; loop closure would mask exactly that |
+| **Depth unused in Phase 1** | it is derived from the same stereo pair cuVSLAM consumes — not an independent witness |
+| **Accelerometer never integrated for position** | error grows as t², 180 m in a minute. Its signal is gravity |
+| **Distance from cumulative ticks, not velocity** | velocity must be integrated, so a dropped message loses that travel permanently |
+| **Covariance from the gates** | nav2 weights poses by covariance; a confident wrong pose is worse than an honest uncertain one |
+| **Twist from sensors, not by differencing the pose** | differencing a filtered pose feeds the filter's own lag back into control |
+| **Health logged only on change** | a line every second is noise nobody reads; a line the moment a sensor drops out is the one worth finding |
+
+---
+
+## 7. Environment
+
+**The image is `orin-nav:2.0`** (Isaac ROS 5.0, ROS 2 Lyrical, since 2026-10-25), built from
+`docker/2.0/Dockerfile`; `docker/2.0/README.md` lists every package and where it comes from, and
+its `*_check.sh` scripts test an image offline. Don't install into a running container — change the
+Dockerfile and rebuild. `pose/`..`perception/` are mounted read-only, so nodes are edited on the host
+and the layer restarted — no rebuild. (1.1 and 1.2 were `docker commit` images with no recipe;
+deleted 2026-10-24/25.)
+
+`ROS_DISCOVERY_SERVER` is unset on every command. A stale one makes nodes
+silently invisible to each other, which looks exactly like a crashed node.
+
+Visual odometry is Isaac's cuVSLAM (`isaac_ros_cuvslam`, `pose/launch/vo_isaac.launch.py`)
+with `pose/nodes/vo_isaac.py` beside it. `vo_node.py` (the pyCuVSLAM wheel) is kept only for
+its self-test and the camera constants `description/build.py` cross-checks.
+
+---
+
+## 8. Constraints that propagate to nav2
+
+- **No speed cap is justified by our evidence.** This said `vx_max ≤ 25 cm/s`
+  for a long time; two room loops on 2026-08-22 at 84 and 89 cm/s produced zero
+  teleports and zero dropped frames. Teleports track TEXTURE, not speed. The
+  honest constraint is to watch `landmarks` in `/fusion/status` — see TODO §3
+- **Prefer turn-then-drive over spinning or reversing.** Not for the speed
+  reason once given here: reversing is the measured problem (cuVSLAM under-reads
+  it by ~6%, TODO §4), and a pivot on this chassis burns roughly two-thirds of
+  its torque in scrub (TODO §13)
+- **The D555 drops out** in three distinct ways — see [docs/archive/TODO.md](archive/TODO.md) §7. The
+  fusion survives it; a robot needing a human to reseat a cable does not
+  autonomously
+- **The rover cannot turn in place** ([docs/archive/TODO.md](archive/TODO.md) §14). nav2 assumes
+  rotation is free; every workaround is marked `NO-PIVOT` in
+  `nav/config/nav2.yaml` so they can be reverted together once it is fixed
