@@ -1485,9 +1485,13 @@ demo)
         die "a demo is already recording: ./rover demo stop"
       fi
       d="$(date +%Y%m%d-%H%M%S)${3:+_$3}"
-      dexec "mkdir -p /logs/rl_demos && cd /logs/rl_demos && ros2 bag record -o $d \
+      # --topics: ROS Lyrical's `bag record` takes no bare topic list (2026-11-10: it refused to
+      # start). + the depth image (what rl2's camera channel is built from) and the global costmap
+      # (rl2's route); uncompressed: zstd on the Jetson dropped /tf under load.
+      dexec "mkdir -p /logs/rl_demos && cd /logs/rl_demos && ros2 bag record -o $d --storage mcap --topics \
         /scan /odom /cmd_vel /tf /tf_static /wheel_state /sonar/left /sonar/right \
-        /goal_exec/obstacles /local_costmap/costmap /fusion/status /teleop/mode \
+        /goal_exec/obstacles /local_costmap/costmap /global_costmap/costmap /fusion/status /teleop/mode \
+        /camera/camera0/depth/image_rect_raw /camera/camera0/depth/camera_info \
         > /tmp/demo.log 2>&1"
       sleep 4
       docker exec "$NAME" pgrep -f '[b]ag record.*rl_demos|ros2 bag record' >/dev/null 2>&1 \
