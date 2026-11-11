@@ -73,6 +73,7 @@ import rl2_drive as R2  # noqa: E402
 import rl2_policy as R2P  # noqa: E402
 import known_floor as KF  # noqa: E402
 import memory_cells as MC  # noqa: E402
+from depth_obstacles import DepthObstacles  # noqa: E402
 from goal_exec import FRONT as GE_FRONT, REAR as GE_REAR, SIDE, GoalExec, wrap  # noqa: E402
 from sonar_feed import SonarFeed  # noqa: E402
 
@@ -279,6 +280,10 @@ class Reach(GP.Pass):
         # where reach has driven: its own drives only, so a carry is not a road
         self.trail = TR.Trail()
         self.known = KF.KnownFloor()             # what the camera has seen + where the body stood (rl2 shield)
+        # The PRECISE camera points for the rl2 route: the live 1 cm depth memory. self.dobs is
+        # nvblox's fused cells by default (fused_obstacles.make_obstacles) -- right for the checks,
+        # too thick for a way's width (memory_cells.route_points). On only during an rl2 round.
+        self.pdobs = DepthObstacles(self, self.buf, lambda: self.pose, active=False)
         self._known_t = 0.0
         self.pursuing = False
         self.get_logger().info('reach up: /reach/goal (RViz 2D Goal Pose)')
@@ -1212,6 +1217,13 @@ class Reach(GP.Pass):
         P = self.pivots()
         pack = (P[+1], P[-1], RL_K)
         self.dobs.set_active(True)
+        if getattr(pol, 'rl2', False):
+            # the route's precise points: switch the depth memory on and let it see what is ahead
+            # (2 hits per voxel at 5 Hz) before the first guide is laid
+            self.pdobs.set_active(True)
+            f0, tw = self.pdobs.frames, time.time()
+            while self.pdobs.frames < f0 + 3 and time.time() - tw < 1.5 and not self.stop_req:
+                self.spin_for(0.1)
         t0 = time.time()
         last = (0.0, 0.0)
         stops = steps = changed = 0
@@ -1271,11 +1283,10 @@ class Reach(GP.Pass):
                         # training field's true geometry: nvblox's cells thicken edges, and a 55 cm door
                         # read too narrow for the 44 cm the route needs -- rl2 quit in 1.8 s, the rover
                         # crawled through in goal_exec hops (real robot 2026-11-10 21:57)
-                        if len(gl):
-                            gl = gl[np.hypot(gl[:, 0], gl[:, 1]) > RL2_PRECISE_R]
-                        cam = self.dobs.points_base(self.pose)
-                        cam = cam[np.hypot(cam[:, 0], cam[:, 1]) <= RL2_PRECISE_R] if len(cam) else np.zeros((0, 2))
-                        every = np.vstack([p for p in (lid, gl, self.outside_body(cam)) if len(p)]) if (len(lid) or len(gl) or len(cam)) else lid
+                        # (the depth memory itself, self.pdobs: until 2026-11-11 this read self.dobs,
+                        # which is nvblox's cells again -- a 59 cm door stayed "unreachable")
+                        cam = self.outside_body(self.pdobs.points_base(self.pose))
+                        every = MC.route_points(lid, cam if cam is not None else np.zeros((0, 2)), gl, RL2_PRECISE_R)
                         h = (TRT._guide(np.asarray(every, float), gb, half=min(RL2_GUIDE_HALF, max(TRT.SEARCH_R + 0.2, d + 1.0)),
                                         res=0.04, clear=RL2_GUIDE_CLEAR, extend=True) if len(every) else None)
                     else:
@@ -1346,6 +1357,7 @@ class Reach(GP.Pass):
                 self.spin_for(max(0.0, 0.1 - (time.time() - now)))
         finally:
             self.stop()
+            self.pdobs.set_active(False)
             secs = time.time() - t0
             if rec and result != 'reached':
                 try:

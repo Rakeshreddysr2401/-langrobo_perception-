@@ -179,10 +179,27 @@ def _guide(pts, target, half=None, res=None, clear=None, extend=False):
     xs = (np.arange(n) * GUIDE_RES - half + GUIDE_RES / 2)
     gx, gy = np.meshgrid(xs, xs, indexing='ij')
     src = idx[free & (np.hypot(gx - target[0], gy - target[1]) <= GOAL_TOL)]
-    if not len(src):
-        return None
     dist = np.full((n, n), np.inf)
-    dist[free] = dijkstra(g, directed=False, indices=src, min_only=True)
+    if len(src):
+        dist[free] = dijkstra(g, directed=False, indices=src, min_only=True)
+    elif extend:
+        # The target itself is nearer than `clear` to a thing (real robot 2026-11-10, bag t = 327 s:
+        # two lone camera points 12 cm from the goal; the LiDAR's nearest was 36 cm): the route
+        # ends at a free cell near the target, as the start side does below -- the rover goes as
+        # near as it fits and the exact finish decides the rest. Every free cell within a body
+        # half-width + clear of the target may be that end, each costing its own distance to the
+        # target (one extra node joined to them), so the end is the one the rover can REACH. Not
+        # when the target is deep in something (no free cell that near).
+        dt = np.hypot(gx - target[0], gy - target[1])
+        ends = free & (dt <= SIDE + GUIDE_CLEAR)
+        if not ends.any():
+            return None
+        e = idx[ends]
+        g2 = coo_matrix((np.concatenate(w + [dt[ends]]),
+                         (np.concatenate(rows + [np.full(len(e), m)]), np.concatenate(cols + [e]))), shape=(m + 1, m + 1)).tocsr()
+        dist[free] = dijkstra(g2, directed=False, indices=[m], min_only=True)[:m]
+    else:
+        return None
     if extend:
         # rl2 (kino_sim rl2/world.py field): nearer than `clear` to a thing -- the shield lets the
         # rover get to 2 cm -- the way out to the nearest route cell + its length, not inf
