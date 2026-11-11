@@ -31,6 +31,9 @@ COLOUR IS OFF
     `enable_sync:=false` gates the IR pair behind colour alignment and starves
     the stereo stream cuVSLAM needs. The map is geometry-only.
 """
+import json
+import os
+
 from launch import LaunchDescription
 from launch_ros.actions import Node
 
@@ -166,6 +169,8 @@ def generate_launch_description():
                 'map_clearing_radius_m': 0.0,      # 0 = never clear, we are mapping a room
                 'update_mesh_rate_hz': 5.0,
                 'update_esdf_rate_hz': 5.0,
+                # experiments only (mapping/tools/replay_nvblox.sh): NVBLOX_PARAMS='{"name": value}'
+                **json.loads(os.environ.get('NVBLOX_PARAMS', '{}')),
             }],
             remappings=[
                 # only frames taken while not turning (mapping/nodes/depth_gate.py)
