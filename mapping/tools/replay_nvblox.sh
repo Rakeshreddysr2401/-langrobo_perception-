@@ -20,7 +20,7 @@ LAST=$(for t in $TIMES; do echo "$t"; done | sort -n | tail -1)
 # its own start time, and on the wall clock a recorded frame is always "before the start"
 PARAMS=$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); d["use_sim_time"]=True; print(json.dumps(d))' "$PARAMS")
 echo "== replay_nvblox  bag $(basename "$BAG")  until $LAST s  params $PARAMS"
-docker run --rm --name nvblox_replay --runtime nvidia --network none --entrypoint bash \
+docker run --rm --name nvblox_replay_$$ --runtime nvidia --network none --entrypoint bash \
   -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all -e NVIDIA_DISABLE_REQUIRE=1 \
   -e ROS_DOMAIN_ID=99 -e FASTDDS_BUILTIN_TRANSPORTS=UDPv4 -e NVBLOX_PARAMS="$PARAMS" -e TIMES="$TIMES" -e LAST="$LAST" \
   -v "$REPO/mapping":/opt/rover/mapping:ro -v "$BAG":/bag:ro -v "$OUT":/out "$IMAGE" -c '
