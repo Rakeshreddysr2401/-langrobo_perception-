@@ -256,6 +256,11 @@ class Reach(GP.Pass):
         self.ge_goal = self.create_publisher(PoseStamped, '/goal_exec/goal', 10)
         self.ge_turn = self.create_publisher(PoseStamped, '/goal_exec/turn', 10)
         self.pub_status = self.create_publisher(String, '/reach/status', 10)
+        # Every way reach moves the rover other than nav2 -- /cmd_vel (escape, turns, the learned
+        # driver), goal_exec's goal / turn / pass -- first ends a nav2 goal left running between legs
+        # (nav_settle): never two drivers at once, whichever code path comes next.
+        for pub in (self.cmd, self.ge_goal, self.ge_turn, self.pub):
+            pub.publish = self._settled(pub.publish)
         self.sonar = SonarFeed(self, self.buf)   # unexplained close echoes -> obstacle points
         # RViz: what reach is doing, over the rover, and the tight route's plan
         self.pub_mk = self.create_publisher(MarkerArray, '/reach/markers', QoSProfile(
@@ -423,7 +428,23 @@ class Reach(GP.Pass):
     def arrived(self, g):
         return self.dist(g) <= ARRIVED_M and abs(wrap(g[2] - self.pose[2])) <= ARRIVED_YAW
 
+    def _settled(self, publish):
+        def wrapped(msg):
+            if getattr(self, 'nav_gh', None) is not None:
+                self.nav_settle()
+            publish(msg)
+        return wrapped
+
+    def nav_settle(self):
+        """End a nav2 goal left running on purpose (a leg's waypoint, run_nav2 keep=True): before
+        any other driver, any stop, any recovery -- never two drivers at once."""
+        gh, self.nav_gh = getattr(self, 'nav_gh', None), None
+        if gh is not None:
+            gh.cancel_goal_async()
+            self.spin_for(0.2)
+
     def stop(self):
+        self.nav_settle()
         for _ in range(3):
             self.cmd.publish(Twist())
 
@@ -442,6 +463,7 @@ class Reach(GP.Pass):
             self.log_from = NAV_LOG.stat().st_size      # only this attempt's lines explain it
         except OSError:
             self.log_from = 0
+        self.nav_gh = None                         # a running leg is pre-empted by this goal, not cancelled
         goal = NavigateToPose.Goal()
         goal.pose = pose_msg('odom', *g)
         goal.pose.header.stamp = self.get_clock().now().to_msg()
@@ -459,12 +481,11 @@ class Reach(GP.Pass):
             self.spin_for(0.1)
             if self.pose is not None:
                 if done_within is not None and self.dist(g) <= done_within:
-                    self.stop()
-                    gh.cancel_goal_async()          # a waypoint: near is enough
-                    self.spin_for(0.3)
-                    self.stop()
-                    self.nav_gh = None
-                    return 'reached', f'waypoint within {done_within * 100:.0f} cm'
+                    # a waypoint: near is enough, and nav2 KEEPS driving -- the next leg's goal
+                    # pre-empts it in motion (nav2's navigator takes a new goal without stopping).
+                    # Until 2026-11-13 the rover stopped and cancelled at every leg joint. Whatever
+                    # comes next and is not nav2 calls stop() / nav_settle() first.
+                    return 'reached', f'waypoint within {done_within * 100:.0f} cm (still driving)'
                 watch.append((time.time(),) + tuple(self.pose[:3]))
                 why = self.dithering(watch, g) or self.pinned(watch)
                 if why:
