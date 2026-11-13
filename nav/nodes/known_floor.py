@@ -49,6 +49,34 @@ class KnownFloor:
         ok = (i >= 0) & (i < N) & (j >= 0) & (j < N)
         self.grid[i[ok], j[ok]] = True
 
+    def mark_free_grid(self, grid, res, origin, pose, r_max=3.0):
+        """The cells a camera map (nvblox, via ghost_clear: 0 = observed free, 100 = occupied,
+        -1 = never seen) has OBSERVED free, within r_max of pose, eroded by one cell so no cell
+        touching something unseen or occupied counts.
+
+        WHY (real robot 2026-11-10, rl_dumps 161517-162059): reach was restarted at 16:13 UTC to
+        deploy a fix, and this memory restarted empty. 2-8 minutes later four rl2 rounds ended
+        pinned 0.4-1.4 cm from things: the policy asked to back out in 80-100 % of its steps, and
+        the reverse rule refused every reverse -- the floor behind, driven over minutes before,
+        was "unknown" to the new process. The camera map lives in the mapping layer and survives
+        a reach restart; rebuilt from the bag, it knew the floor behind at all three moments tried."""
+        from scipy import ndimage
+        g = np.asarray(grid)
+        free = ndimage.binary_erosion(g == 0, structure=np.ones((3, 3), bool))
+        ii, jj = np.nonzero(free)
+        if not len(ii):
+            return 0
+        x = origin[0] + (jj + 0.5) * res
+        y = origin[1] + (ii + 0.5) * res
+        near = np.hypot(x - pose[0], y - pose[1]) <= r_max
+        x, y = x[near], y[near]
+        if self.origin is None:
+            self.origin = (pose[0], pose[1])
+        i, j = self._ij(x, y)
+        ok = (i >= 0) & (i < N) & (j >= 0) & (j < N)
+        self.grid[i[ok], j[ok]] = True
+        return int(ok.sum())
+
     def known_base(self, pose):
         """f(bx, by) -> bool array: are these base_link points (at pose) over known floor?"""
         x, y, th = pose[:3]

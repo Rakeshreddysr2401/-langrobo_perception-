@@ -177,13 +177,35 @@ def sweep_hits(pts, vx, wz, vel, pack, lag=LAG_S, known=None):
     return False
 
 
+# The shield's alternatives, as (speed factor, turn factor) of the asked command. Until 2026-11-13
+# only the first, second and fourth: every alternative kept the asked TURN, so when the turn was
+# what brought the outline onto a thing, a safe straight move was never tried. Real robot
+# 2026-11-10 (kino_sim build/real_20261110/rl_dumps): in 3 of 6 pinned rounds the policy asked to
+# back out with a turn, backing straight out was safe at every step, and the shield sent nothing
+# (or a turn in place) for 15 s. Now the safe alternative NEAREST the asked command is sent
+# (shield_cost); the training envs (kino_sim rl/env.py, rl2/env.py) choose the same way.
+SHIELD_ALT = ((1.0, 1.0), (0.5, 1.0), (1.0, 0.5), (0.0, 1.0), (1.0, 0.0), (0.5, 0.0))
+ALT_TIE = 1e-4                # cost per alternative's index: equal costs keep this order
+
+
+def shield_cost(vx, wz):
+    """How far each SHIELD_ALT is from the asked (vx, wz), in shares of each command's full range."""
+    vs = VX_MAX if vx >= 0 else -VX_MIN
+    return [abs(vx) * (1.0 - fv) / vs + abs(wz) * (1.0 - fw) / WZ_MAX + ALT_TIE * i
+            for i, (fv, fw) in enumerate(SHIELD_ALT)]
+
+
 def shield(pts, vx, wz, vel, pack, known=None):
     """-> (vx, wz) to send, changed, stopped -- the order env.py uses. known: f(bx, by) -> bool,
     is the floor at these base_link points known (known_floor.KnownFloor.known_base); with it a
-    reverse may move the outline only over known floor (as kino_sim rl2/env.py REVERSE_KNOWN)."""
+    reverse may move the outline only over known floor (as kino_sim rl2/env.py REVERSE_KNOWN).
+    The safe SHIELD_ALT nearest the asked command is sent; none safe = stop."""
     if pts is not None and len(pts):
         pts = pts[np.hypot(pts[:, 0], pts[:, 1]) < SHIELD_NEAR_M]
-    for i, (cv, cw) in enumerate(((vx, wz), (0.5 * vx, wz), (0.0, wz))):
+    cost = shield_cost(vx, wz)
+    for i in sorted(range(len(SHIELD_ALT)), key=cost.__getitem__):
+        fv, fw = SHIELD_ALT[i]
+        cv, cw = fv * vx, fw * wz
         if not sweep_hits(pts, cv, cw, vel, pack, known=known):
             return cv, cw, i > 0, False
     return 0.0, 0.0, True, True

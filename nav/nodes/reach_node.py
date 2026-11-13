@@ -276,6 +276,11 @@ class Reach(GP.Pass):
         # the HOUSE map (slam_toolbox): rooms and doors beyond nav2's 8 m window, for routing legs
         self.house = None
         self.create_subscription(OccupancyGrid, '/map', lambda m: setattr(self, 'house', m), latched)
+        # the camera map's observed-free floor for the reverse rule (known_floor.mark_free_grid): it
+        # survives a reach restart, the in-process memory does not. Read at most once a second.
+        self._free_t = 0.0
+        self.create_subscription(OccupancyGrid, '/ghost_clear/grid', self._free_grid,
+                                 QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE))
         self.create_subscription(Empty, '/reach/cancel', lambda _: setattr(self, 'stop_req', True), 10)
         # where reach has driven: its own drives only, so a carry is not a road
         self.trail = TR.Trail()
@@ -287,6 +292,14 @@ class Reach(GP.Pass):
         self._known_t = 0.0
         self.pursuing = False
         self.get_logger().info('reach up: /reach/goal (RViz 2D Goal Pose)')
+
+    def _free_grid(self, m):
+        now = time.time()
+        if self.pose is None or now - self._free_t < 1.0:
+            return
+        self._free_t = now
+        g = np.frombuffer(m.data, dtype=np.int8).reshape(m.info.height, m.info.width)
+        self.known.mark_free_grid(g, m.info.resolution, (m.info.origin.position.x, m.info.origin.position.y), self.pose)
 
     def _odom(self, m):
         super()._odom(m)
