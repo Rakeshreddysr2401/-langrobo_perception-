@@ -117,6 +117,11 @@ def generate_launch_description():
              name='lifecycle_manager_navigation', output='screen', **STOP_ALL,
              parameters=[{'use_sim_time': False,
                           'autostart': True,
+                          # 30 s, nav2's default is 4 (real robot 2026-11-15, fresh boot, full stack,
+                          # load 27): "Server controller_server was unable to be reached after 4.00s
+                          # by bond ... Aborting bringup" -- the server was alive, only slow to answer;
+                          # the whole bring-up was then thrown away and restarted after 150 s.
+                          'bond_timeout': 30.0,
                           'node_names': LIFECYCLE}]),
     ]
     return LaunchDescription(nodes)

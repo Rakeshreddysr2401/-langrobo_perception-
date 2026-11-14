@@ -38,7 +38,10 @@ while true; do
     kill -INT "$pid" 2>/dev/null
     for _ in $(seq 15); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
     kill -KILL "$pid" 2>/dev/null
-    pkill -KILL -f 'nav2_(controller|planner|behaviors|bt_navigator|velocity_smoother|lifecycle_manager)/' 2>/dev/null
+    # every process nav2.launch.py starts (2026-11-15: collision_monitor and sonar_nav2_compat.py were
+    # missing here, and a hung launch left them running beside the next one -- two sonar bridges)
+    pkill -KILL -f 'nav2_(controller|planner|behaviors|bt_navigator|velocity_smoother|lifecycle_manager|collision_monitor)/' 2>/dev/null
+    pkill -KILL -f 'nav/nodes/sonar_nav2_compat.py' 2>/dev/null
   fi
   wait "$pid" 2>/dev/null
   n=$((n + 1))
@@ -50,6 +53,9 @@ while true; do
     { echo "$died"; echo; grep -B2 -A60 'Stack trace (most recent call last)' /tmp/nav_run.log | tail -250; } > "$out" 2>/dev/null \
       && echo "$(date '+%F %T')   trace: logs/nav_crashes/$(basename "$out")" >> /tmp/nav_restarts.log
   fi
+  # leftovers of the run that just ended (a launch that died can orphan its children)
+  pkill -KILL -f 'nav2_(controller|planner|behaviors|bt_navigator|velocity_smoother|lifecycle_manager|collision_monitor)/' 2>/dev/null
+  pkill -KILL -f 'nav/nodes/sonar_nav2_compat.py' 2>/dev/null
   echo "[nav2_supervise] nav2 exited; restarting in 3 s (restart $n)"
   sleep 3
 done
