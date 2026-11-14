@@ -32,10 +32,6 @@ DST = '/camera/camera0/depth/image_still'
 INFO = '/camera/camera0/depth/camera_info'
 SPECKLE_PX = int(os.environ.get('DEPTH_SPECKLE_PX', depth_speckle.MIN_PATCH_PX))
 PASSED = '/depth_gate/passed'     # one small Header per frame passed: "nvblox got a view" (fused_obstacles.py)
-# frames handed to nvblox per second. 30 -> 10 on 2026-11-14: the speckle filter costs ~9 ms a frame and at
-# 30 Hz took ~46 % of a core on the 15 W Jetson; 10 Hz is 3.5 cm of travel per frame at nav2's 35 cm/s top
-# speed, and every reader of PASSED wants >= 3-5 Hz. Spaced by the frames' own stamps. 0 = every frame.
-MAP_HZ = float(os.environ.get('DEPTH_MAP_HZ', '10'))
 REPORT_S = 30.0
 
 
@@ -51,11 +47,10 @@ class DepthGate(Node):
         self.create_subscription(Image, SRC, self._raw, qos_profile_sensor_data, raw=True)
         self.fx = None                      # from the camera's own camera_info (the speckle filter works in disparity)
         self.info_sub = self.create_subscription(CameraInfo, INFO, self._info, qos_profile_sensor_data)
-        self.cleaned = self.removed = self.odd = self.skipped = 0
-        self.t_last = -1e9                  # stamp of the last frame passed on
+        self.cleaned = self.removed = self.odd = 0
         self.t_report = time.time()
         self.get_logger().info(f'depth gate up: {SRC} -> {DST} while |wz| <= {self.gate.wz_max} rad/s; '
-                               f'speckle patches under {SPECKLE_PX} px removed' + (' (OFF)' if SPECKLE_PX <= 0 else '') + f'; at most {MAP_HZ:g} Hz')
+                               f'speckle patches under {SPECKLE_PX} px removed' + (' (OFF)' if SPECKLE_PX <= 0 else ''))
 
     def _info(self, m):
         if m.k[0] > 0:
@@ -64,13 +59,7 @@ class DepthGate(Node):
 
     def _raw(self, data):
         sec, nsec = struct.unpack_from('<iI', data, 4)
-        t = sec + nsec * 1e-9
-        if t < self.t_last - 1.0:          # the camera restarted with an earlier clock: start over
-            self.t_last = -1e9
-        if MAP_HZ > 0 and t - self.t_last < 1.0 / MAP_HZ - 0.005:
-            self.skipped += 1               # (before the gate and the filter: a skipped frame costs nothing)
-        elif self.gate.still(t):
-            self.t_last = t
+        if self.gate.still(sec + nsec * 1e-9):
             if self.fx is not None:         # (the first frames before camera_info pass as they are)
                 data, n = depth_speckle.clean_cdr(data, self.fx, SPECKLE_PX)
                 self.cleaned += 1; self.removed += max(n, 0); self.odd += n < 0
@@ -80,7 +69,7 @@ class DepthGate(Node):
             self.pub_passed.publish(h)
         if time.time() - self.t_report > REPORT_S:
             self.t_report = time.time()
-            self.get_logger().info(f'depth gate: {self.gate.counts()}, {self.skipped} skipped for {MAP_HZ:g} Hz; speckle: {self.cleaned} frames cleaned, '
+            self.get_logger().info(f'depth gate: {self.gate.counts()}; speckle: {self.cleaned} frames cleaned, '
                                    f'{self.removed // max(self.cleaned, 1)} px removed per frame'
                                    + (f', {self.odd} of unexpected layout passed untouched' if self.odd else '')
                                    + ('' if self.fx else ' -- NO camera_info yet: frames pass unfiltered'))
