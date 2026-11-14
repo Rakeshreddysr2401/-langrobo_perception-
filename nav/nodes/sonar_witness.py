@@ -7,8 +7,9 @@ says HOW FAR, not WHERE: painted into the map as an arc, a doorframe beside the
 rover would look like a wall across its path and every tight gap would close.
 
 So an echo is used only when the map cannot explain it:
-  explained   a known obstacle point (LiDAR or camera map) lies inside that
-              sensor's cone no farther than the echo + EXPLAIN_M -- the rover
+  explained   a known obstacle point (LiDAR or camera map) lies inside what that
+              sensor really hears (HEAR_HALF, measured: wider than the datasheet's
+              cone) no farther than the echo + EXPLAIN_M -- the rover
               already knows it (the doorframe): nothing is added, nothing changes
   unexplained nothing known there: something real the map lacks. One obstacle
               point straight ahead of that sensor at the echo's range, and the
@@ -23,6 +24,34 @@ import numpy as np
 USE_M = 0.60            # m: only close echoes -- where the camera is blind
 EXPLAIN_M = 0.05        # m: a known point this much beyond the echo still explains it
 CONE_SLACK = 0.05       # rad added to the half-angle when looking for an explanation
+# HOW WIDE THEY REALLY HEAR (measured 2026-11-15, real robot parked at the half-open bedroom
+# door, 130 s, kino_sim tools/sonar_cone.py + nav/tests/fixtures/sonar_door_20261115.npz).
+# The datasheet's cone is +-15 deg; the left sonar read 0.43-0.46 m, and the only surface at
+# that range was the door frame, 20-30 deg off its axis. With the datasheet cone the frame did
+# not "explain" the echo, so 87 % of the readings planted a point in the middle of the 55 cm
+# doorway -- and the tight route found "no fit" there (40,000 poses; without the point: a plan
+# in 0.1 s). Share of readings planting a point, by the half-angle searched for an explanation:
+# 17.9 deg 87.2 % | 22 deg 7.8 % | 30 deg 4.9 % | 33 deg 2.2 % | 40 deg 2.2 % (flat from 33).
+# The datasheet's fov still says where the point goes (straight ahead); HEAR_HALF says what
+# may have made the echo.
+HEAR_HALF = math.radians(33)
+# The 2.2 % left are single short readings (0.16-0.17 m among 0.43 m: 1.5 % of the left
+# sonar's readings with nothing there; on 2026-11-10 it read 16-22 cm for 472 s and the right
+# one heard nothing). A thing in front echoes every time (15 Hz): an echo counts when the last
+# AGREE_N readings agree within AGREE_M. On the same recording: 0.0 % plant a point.
+AGREE_N = 3
+AGREE_M = 0.05
+
+
+def steady(recent, n=AGREE_N, tol=AGREE_M):
+    """recent: ranges, newest last. The echo to use (their median) when the last n all heard
+    something and agree within tol; None otherwise (a lone reading is not an obstacle)."""
+    last = list(recent)[-n:]
+    if len(last) < n or not all(r is not None and math.isfinite(r) for r in last):
+        return None
+    if max(last) - min(last) > tol:
+        return None
+    return sorted(last)[len(last) // 2]
 
 
 def witness_points(readings, known, fov, use_m=USE_M, explain_m=EXPLAIN_M):
@@ -30,7 +59,7 @@ def witness_points(readings, known, fov, use_m=USE_M, explain_m=EXPLAIN_M):
     known: N x 2 obstacle points in base_link (or None). -> M x 2 points to add."""
     out = []
     K = np.zeros((0, 2)) if known is None or not len(known) else np.asarray(known, float)[:, :2]
-    half = fov / 2 + CONE_SLACK
+    half = max(fov / 2 + CONE_SLACK, HEAR_HALF)
     for r, (sx, sy, syaw) in readings:
         if r is None or not math.isfinite(r) or r > use_m:
             continue

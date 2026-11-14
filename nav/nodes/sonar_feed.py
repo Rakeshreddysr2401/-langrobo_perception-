@@ -21,10 +21,11 @@ import numpy as np
 from rclpy.time import Time
 from sensor_msgs.msg import Range
 
-from sonar_witness import vouched_specks, witness_points
+from sonar_witness import steady, vouched_specks, witness_points
 
 MAX_AGE_S = 0.3
 VOUCH_WINDOW_S = 0.5           # the readings a vouch may use
+AGREE_WINDOW_S = 0.5           # the readings an echo must agree over (AGREE_N of them, at ~15 Hz)
 # SONAR_CLEAR=off: never overrule a camera speck (sonar_witness.vouched_specks)
 CLEAR = os.environ.get('SONAR_CLEAR', 'on') != 'off'
 TOPICS = ('/sonar/left', '/sonar/right')
@@ -67,6 +68,11 @@ class SonarFeed:
         now, readings, fov = time.time(), [], 0.52
         for frame, (t, r, f) in self.last.items():
             if now - t > MAX_AGE_S:
+                continue
+            # only an echo the last AGREE_N readings agree on (sonar_witness.steady): a lone
+            # short reading is the sensor, not a thing in front
+            r = steady([x for tx, x in self.hist.get(frame, ()) if now - tx <= AGREE_WINDOW_S])
+            if r is None:
                 continue
             m = self._mount(frame)
             if m is not None:

@@ -95,3 +95,55 @@ def test_slipper_patch_is_never_overruled():
 def test_speck_off_the_sonar_axis_is_kept():
     speck = _cells(0.50, 0.52, 0.0, 0.02)                   # straight ahead of the centre, 20+ deg off both axes
     assert not W.vouched_specks(speck, None, [(LEFT, [math.inf] * 3), (RIGHT, [math.inf] * 3)]).any()
+
+
+# ── the real cone, and a lone reading (real robot 2026-11-15, the half-open bedroom door) ──
+DOOR = Path(__file__).resolve().parent / 'fixtures' / 'sonar_door_20261115.npz'
+
+
+def _door_share(key, mount, agree, hear_half=None):
+    """Share of the recorded readings that plant an obstacle point (nothing was in front but
+    the door and its frame, which the LiDAR has)."""
+    z = np.load(DOOR)
+    E, st, scans = z[key], z['scan_t'], z['scans']
+    old = W.HEAR_HALF
+    if hear_half is not None:
+        W.HEAR_HALF = hear_half
+    try:
+        hits = 0
+        for i, (t, r) in enumerate(E):
+            if agree:
+                r = W.steady(E[max(0, i - W.AGREE_N + 1):i + 1, 1].tolist())
+                if r is None:
+                    continue
+            P = scans[int(np.argmin(np.abs(st - t)))]
+            hits += len(W.witness_points([(float(r), mount)], P[np.isfinite(P[:, 0])], FOV)) > 0
+        return hits / len(E)
+    finally:
+        W.HEAR_HALF = old
+
+
+def test_door_frame_beside_the_axis_explains_the_echo():
+    # with the datasheet cone the frame (20-30 deg off the left sonar's axis) did not explain
+    # its echo: a point in the doorway in most readings. That is the failure being fixed.
+    assert _door_share('left', LEFT, agree=False, hear_half=0.0) > 0.80
+    # with what the sonar really hears, and only echoes that repeat: no point in the doorway
+    assert _door_share('left', LEFT, agree=True) < 0.01
+    assert _door_share('right', RIGHT, agree=True) < 0.01
+
+
+def test_lone_short_reading_is_not_an_obstacle():
+    assert W.steady([0.43, 0.17, 0.43]) is None
+    assert W.steady([0.43, 0.43, 0.17]) is None
+    assert W.steady([0.44, 0.43, 0.46]) == 0.44
+    assert W.steady([0.43, 0.44]) is None, 'needs AGREE_N readings'
+    assert W.steady([0.43, math.inf, 0.43]) is None
+
+
+def test_slipper_straight_ahead_is_still_a_point_with_the_wide_cone():
+    # nothing known within what the sonar hears: a steady 15 cm echo is still an obstacle ...
+    r = W.steady([0.15, 0.16, 0.15])
+    assert W.witness_points([(r, LEFT)], np.zeros((0, 2)), FOV).shape == (1, 2)
+    # ... also beside a wall that is well outside the 33 deg (here 50 deg off the axis)
+    wall = np.array([[0.182 + 0.10, 0.14 + 0.12]])
+    assert W.witness_points([(r, LEFT)], wall, FOV).shape == (1, 2)
