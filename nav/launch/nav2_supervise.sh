@@ -17,7 +17,11 @@ if [ -f "$PLUGINS" ]; then source "$PLUGINS"; else echo "[nav2_supervise] WARNIN
 # that way until someone ran ./rover nav again -- which always worked. So a
 # launch that is not "Managed nodes are active" within BRINGUP_S is stopped
 # here and started again, the same as a crash.
-BRINGUP_S=60
+# 150 s, was 60 (real robot 2026-11-14): with the full stack at 15 W, new nav2 processes took over a
+# minute to discover /tf ("Invalid frame ID odom" until then; CPU 30 % idle -- discovery, not CPU), so
+# every bringup was killed just before it would have finished and the restarts fed the load: 13 in a
+# row, load 36-50, 56 zombies. NAV2_BRINGUP_S overrides.
+BRINGUP_S=${NAV2_BRINGUP_S:-150}
 while true; do
   from=$(stat -c %s /tmp/nav.log 2>/dev/null || echo 0)    # only THIS run's lines
   ros2 launch /opt/rover/nav/launch/nav2.launch.py &
