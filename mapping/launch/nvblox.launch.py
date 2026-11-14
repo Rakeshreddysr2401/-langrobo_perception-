@@ -138,13 +138,6 @@ def generate_launch_description():
                 # Solid walls at 3 m beat scattered walls at 5 m: drive closer.
                 'static_mapper.projective_integrator_max_integration_distance_m': 3.0,
                 'static_mapper.projective_integrator_truncation_distance_vox': 4.0,
-                # A voxel counts as an obstacle only with this much evidence (default 0.0001: ONE
-                # observation). With kInverseSquareWeight one stereo reading at 2 m weighs ~0.25, so
-                # a single noisy far reading made a permanent obstacle cell. Measured on the real bag
-                # of 2026-11-10 (kino_sim tools/nvblox_thickness.py, mapping/tools/replay_nvblox.sh):
-                # cells > 20 cm from any LiDAR point 46-50 % -> 28-36 %, what the LiDAR sees still
-                # marked 78-94 % -> 77-93 %. goal_exec refused a 49 cm move in open floor on such cells.
-                'static_mapper.esdf_integrator_min_weight': 2.0,
 
                 # DO NOT LET THE MAP FORGET.
                 #
