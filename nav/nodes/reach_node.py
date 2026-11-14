@@ -233,6 +233,20 @@ WIDEST_MAX_M = 4.0
 # "no path", then the tight route went through in 30 s. When the widest way
 # (widest.py reads +5 cm generous) is under NAV2_W, the tight route leads.
 NAV2_W = 2 * (SIDE + 0.04) + 2 * 0.025 + 2 * WD.RES
+# ASK THE PLANNER BEFORE BELIEVING THE WIDTH HINT (real robot 2026-11-14, goal stamp 1794674141):
+# the widest way read 55.0 cm, 1 cm under NAV2_W, and the goal went to the slow drivers for 47 s
+# (rl "not reachable", tight route refused twice, pass failed); nav2 then drove it in 37 s. The
+# hint is a straight-line LiDAR reading (+5 cm generous); the planner knows its own map. So once
+# per goal, when the hint says "tight first", the planner is asked: a route no longer than
+# PLAN_DIRECT x the distance + PLAN_SLACK_M (i.e. through this way, not a tour round the house)
+# goes to nav2. If nav2 then fails, the hint leads as before. REACH_PLAN_FIRST=0: the old order.
+PLAN_FIRST = os.environ.get('REACH_PLAN_FIRST', '1') == '1'
+PLAN_DIRECT, PLAN_SLACK_M = 1.5, 0.5
+
+
+def nav2_takes_it(plan_m, dist_m):
+    """The width hint is overruled: the planner has a direct route (plan_m None = none / no answer)."""
+    return plan_m is not None and plan_m <= PLAN_DIRECT * dist_m + PLAN_SLACK_M
 PIVOT_FILE = Path(os.environ.get('ROVER_STATE_DIR', '/logs')) / 'goal_exec_pivot.json'
 
 
@@ -1012,6 +1026,29 @@ class Reach(GP.Pass):
             self.spin_for(0.05)
         return r.done() and len(r.result().result.path.poses) > 0
 
+    def plan_length(self, g):
+        """Length (m) of the planner's route to g (odom); None when it has none or did not answer."""
+        if not self.planner.wait_for_server(timeout_sec=2):
+            return None
+        goal = ComputePathToPose.Goal()
+        goal.goal = pose_msg('odom', *g)
+        goal.use_start = False
+        f = self.planner.send_goal_async(goal)
+        t0 = time.time()
+        while not f.done() and time.time() - t0 < 5:
+            self.spin_for(0.05)
+        if not f.done() or not f.result().accepted:
+            return None
+        r = f.result().get_result_async()
+        while not r.done() and time.time() - t0 < 10:
+            self.spin_for(0.05)
+        if not r.done():
+            return None
+        xy = [(q.pose.position.x, q.pose.position.y) for q in r.result().result.path.poses]
+        if len(xy) < 2:
+            return None
+        return sum(math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(xy, xy[1:]))
+
     def approach_and_look(self, attempt, g):
         """True if it got meaningfully nearer and looked (retry the goal now)."""
         d0 = self.dist(g)
@@ -1706,6 +1743,7 @@ class Reach(GP.Pass):
         rl_rounds = 0
         widest_done = False
         tight_led = False
+        plan_asked = False
         for attempt in range(1, MAX_ATTEMPTS + 1):
             self.dobs.set_active(False)             # driving: nav2 / goal_exec need none
             if self.stop_req or time.time() - t0 > MAX_S:
@@ -1731,9 +1769,19 @@ class Reach(GP.Pass):
                 if legs_failed.startswith('no reachable point'):
                     why = 'no path: ' + legs_failed
             elif (d > EXACT_RANGE or go_nav2) and not tight_led and self.tight_should_lead(g):
-                # the way is narrower than nav2 plans through: the tight route first
-                tight_led = True
-                r, why = 'failed', f'no path: the widest way is under nav2\'s {NAV2_W * 100:.0f} cm -- tight route first'
+                # the way reads narrower than nav2 plans through: the tight route first --
+                # unless the planner itself has a direct route (asked once per goal)
+                plan_m = self.plan_length(g) if PLAN_FIRST and not plan_asked else None
+                if PLAN_FIRST and not plan_asked:
+                    plan_asked = True
+                    self.say(attempt=attempt, phase='plan_first', dist_m=round(d, 2),
+                             plan_m=None if plan_m is None else round(plan_m, 2), nav2=nav2_takes_it(plan_m, d))
+                if nav2_takes_it(plan_m, d):
+                    self.say(attempt=attempt, phase='nav2', dist_m=round(d, 2))
+                    r, why = self.run_nav2(g)
+                else:
+                    tight_led = True
+                    r, why = 'failed', f'no path: the widest way is under nav2\'s {NAV2_W * 100:.0f} cm -- tight route first'
             elif (d > EXACT_RANGE or go_nav2) and self.planner_says_no(g):
                 # Ask the planner first (~1-2 s). Without it a goal with no
                 # route cost a whole nav2 run -- its behaviour tree replans
