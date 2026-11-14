@@ -58,6 +58,9 @@ for _d in (Path('/opt/rover/mapping/nodes'), Path(__file__).resolve().parent.par
         _sys.path.insert(0, str(_d))
         break
 from turn_gate import TurnGate  # noqa: E402
+import depth_speckle  # noqa: E402  (same folder as turn_gate)
+
+SPECKLE_PX = int(os.environ.get('DEPTH_SPECKLE_PX', depth_speckle.MIN_PATCH_PX))
 
 DEPTH = '/camera/camera0/depth/image_rect_raw'
 INFO = '/camera/camera0/depth/camera_info'
@@ -189,8 +192,11 @@ class DepthObstacles:
         self.last_t = now
         if m.encoding not in ('16UC1', 'mono16'):
             return
-        d = np.frombuffer(m.data, dtype=np.uint16).reshape(m.height, m.width)[::STRIDE, ::STRIDE]
-        d = d.astype(np.float32) * 0.001
+        full = np.frombuffer(m.data, dtype=np.uint16).reshape(m.height, m.width).copy()
+        # stereo speckle out first (mapping/nodes/depth_speckle.py: blobs at random ranges on plain or
+        # too-near surfaces; they both paint false points and "see through" real ones)
+        depth_speckle.clean(full, float(self.K[0, 0]), SPECKLE_PX)
+        d = full[::STRIDE, ::STRIDE].astype(np.float32) * 0.001
         self.update(d, pose, now)
 
     def _mount(self, frame, now):
