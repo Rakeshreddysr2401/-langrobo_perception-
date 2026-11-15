@@ -397,7 +397,10 @@ start_container(){
     mps_args=(--ipc=host -v /tmp/nvidia-mps:/tmp/nvidia-mps -e CUDA_MPS_PIPE_DIRECTORY=/tmp/nvidia-mps)
     echo "  MPS: GPU shared through the host daemon"
   fi
-  docker run -d --name "$NAME" --entrypoint /bin/bash \
+  # --init: a real PID 1 (docker's tini) that reaps orphans. PID 1 was `sleep infinity`, which
+  # never does: every nav restart left nav2's killed processes as zombies (9 after one
+  # `./rover nav`, 2026-11-15). Takes effect at the next container start (./rover up / camera).
+  docker run -d --init --name "$NAME" --entrypoint /bin/bash \
     --runtime=nvidia --network=host --privileged \
     -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all -e NVIDIA_DISABLE_REQUIRE=1 \
     -e ROS_DOMAIN_ID=$DOMAIN "${twin_mount[@]}" "${mps_args[@]}" \
