@@ -98,7 +98,7 @@ def main():
     print(f'  gyro bias {bias:+.4f} rad/s\n')
     res = {'bias': bias, 'pivot': [], 'arc': [], 'creep': []}
 
-    parts = [a for a in sys.argv[1:] if a in ('pivot', 'arc', 'creep')] or ['pivot', 'arc', 'creep']
+    parts = [a for a in sys.argv[1:] if a in ('pivot', 'arc', 'creep', 'arc2')] or ['pivot', 'arc', 'creep']
     # Sustained pivoting has frozen the drive for seconds at a time (the
     # BTS7960s or the pack, ROVER_BUILD_PLAN.md §4.5), which invalidates any
     # part run after it; run arcs and creep on a rested drive, or alone.
@@ -134,6 +134,27 @@ def main():
             d = float(np.hypot(*(p1[:2] - p0[:2])))
             res['arc'].append({'vx': vx, 'cmd': wz, 'actual': w, 'dist_m': d})
             print(f'    vx {vx:+.2f} wz {wz:.2f}   {w:+.3f}   {w / wz:5.2f}   {d / 1.5:.3f} m/s')
+
+    # HARD turns while driving (2026-11-15): the learned driver commands |wz| 1.5 most of the time
+    # (real dumps), the arc part above stops at 0.5 -- and the share followed grows with the command
+    # (0.14 at 0.15, 0.19 at 0.5). Only on request: ./rover response arc2 (moves within ~35 cm).
+    if 'arc2' in parts:
+        print('\n  ARC2, hard turns while driving (1.5 s each)   actual wz   ratio   speed')
+        res['arc2'] = []
+    for wz in ((0.8, 1.0, 1.5) if 'arc2' in parts else ()):
+        for sgn in (1, -1):
+            for vx, secs in ((0.10, 1.5), (-0.10, 1.5), (0.20, 1.5), (-0.10, 3.0)):
+                if n.nearest() < 0.36:
+                    print('  ✗ something inside 0.36 m: stopping the test'); n.stop(); return 1
+                p0 = n.pose()
+                n.drive(vx, sgn * wz, secs)
+                gz_t = [t for t, _ in n.gz]
+                w = n.rate(gz_t[-1] - 0.8, gz_t[-1], bias) if gz_t else float('nan')
+                n.stop(0.8)
+                p1 = n.pose()
+                d = float(np.hypot(*(p1[:2] - p0[:2])))
+                res['arc2'].append({'vx': vx, 'cmd': sgn * wz, 'actual': w, 'dist_m': d, 'secs': secs})
+                print(f'    vx {vx:+.2f} wz {sgn * wz:+.2f}   {w:+.3f}   {w / (sgn * wz):5.2f}   {d / secs:.3f} m/s')
 
     if 'creep' in parts:
         print('\n  CREEP straight (1.5 s)                moved')
