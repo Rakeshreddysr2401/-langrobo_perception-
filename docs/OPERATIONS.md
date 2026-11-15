@@ -594,8 +594,10 @@ ignores the field.
 ## Health, watchdog, saved room (2026-10-16)
 
 - `./rover health` — every layer's rate in one ~15 s pass (`status` uses the same pass since 2026-10-18, plus processes and the pose check).
-- `rover-watchdog` (systemd, installed with `sudo ops/install_services.sh`) probes
-  every 30 s, serves `http://<jetson>:8099/` (JSON at `/health`), and logs changes
+- `rover-watchdog` (systemd, installed with `sudo ops/install_services.sh`) reads one
+  long-lived probe in the container (`health_probe.py --watch`: one line of rates every
+  30 s, the camera counted by its `camera_info`; since 2026-11-15, before that a new probe
+  every 30 s cost 30-40 % of a core), serves `http://<jetson>:8099/` (JSON at `/health`), and logs changes
   to `logs/watchdog.jsonl`. **Observe only.** To let it restart a dead layer:
   `sudo systemctl edit rover-watchdog` → `Environment=ROVER_WATCHDOG_ACT=1`. Even
   then it never acts while `/cmd_vel` is non-zero or `~/.rover_watchdog_pause`

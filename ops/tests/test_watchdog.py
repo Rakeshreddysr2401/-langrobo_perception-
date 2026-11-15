@@ -26,7 +26,28 @@ def test_restart_is_limited_and_pose_gets_slam_false(monkeypatch=None):
     assert len(calls) == 2 and calls[0][1] == 'false' and calls[0][0][1] == 'pose'
 
 
+def test_a_probe_line_is_judged_once_and_a_silent_probe_is_replaced():
+    import time
+    started, stopped = [], []
+    fake = type('P', (), {'poll': lambda self: None, 'stdout': [], 'terminate': lambda self: stopped.append(1)})
+    wd.subprocess.Popen = lambda *a, **kw: started.append(1) or fake()
+    wd.subprocess.run = lambda *a, **kw: None
+    wd.probe.update(proc=None, started=0.0, line_t=0.0, data=None, judged_t=0.0)
+    assert wd.probe_latest() is None and len(started) == 1, 'first call starts the probe, nothing to judge yet'
+    wd.probe.update(data={'hz': {}, 'moving': False}, line_t=time.time())
+    assert wd.probe_latest() == {'hz': {}, 'moving': False}
+    assert wd.probe_latest() is None and len(started) == 1, 'the same line is not judged twice'
+    wd.probe.update(started=time.time() - wd.PROBE_SILENT_S - 1, line_t=0.0)
+    try:
+        wd.probe_latest()
+        raise AssertionError('a silent probe must be reported')
+    except RuntimeError:
+        pass
+    assert len(started) == 2 and stopped, 'and replaced by a new one'
+
+
 if __name__ == '__main__':
     test_judge()
+    test_a_probe_line_is_judged_once_and_a_silent_probe_is_replaced()
     test_restart_is_limited_and_pose_gets_slam_false()
     print('PASS')

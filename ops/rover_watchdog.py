@@ -19,9 +19,16 @@ order (camera before pose before fused ...), because a dead camera also makes
 everything above it look dead.
 
 It does not restart the container, the Pi 5, or Studio: those are `./rover up`.
+
+THE PROBE is one long-lived process in the container (nav/tools/health_probe.py
+--watch): one DDS participant, one line of rates per PERIOD_S, the camera
+counted by its camera_info. Until 2026-11-15 a new probe ran every 30 s and
+read 6 s of raw camera images each time: 30-40 % of a core, and a discovery
+round with every node on the Jetson and the Pi 5, twice a minute.
 """
 import json
 import os
+import signal
 import subprocess
 import threading
 import time
@@ -33,7 +40,9 @@ LOG = REPO / 'logs' / 'watchdog.jsonl'
 PAUSE = Path.home() / '.rover_watchdog_pause'
 PORT = int(os.environ.get('ROVER_HEALTH_PORT', '8099'))
 ACT = os.environ.get('ROVER_WATCHDOG_ACT') == '1'
-PERIOD_S = 30                   # each probe subscribes to the camera streams: not free on a loaded Jetson
+PERIOD_S = 30                   # the probe reports once per period
+PROBE_LIFE_S = 3600             # the probe ends by itself after this (and is started again)
+PROBE_SILENT_S = 3 * PERIOD_S   # no line for this long: the probe is stuck, start a new one
 DOWN_CHECKS = 3                 # consecutive bad probes before a layer counts as down
 MAX_RESTARTS, RESTART_WINDOW_S = 2, 900
 PI5 = os.environ.get('PI5_HOST', '192.168.1.16')
@@ -71,12 +80,51 @@ def log(event, **kw):
         f.write(json.dumps({'t': round(time.time(), 1), 'event': event, **kw}) + '\n')
 
 
-def probe():
-    cmd = ['docker', 'exec', 'rover', 'bash', '-lc',
-           'unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE; export ROS_DOMAIN_ID=0; '
-           'for f in /opt/ros/*/setup.bash; do source "$f"; done; python3 /opt/rover/nav/tools/health_probe.py 6']
-    out = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-    return json.loads(out.stdout.strip().splitlines()[-1])
+PROBE_MATCH = 'health_probe.py --watc[h]'      # [h]: pkill -f must not match its own shell
+PROBE_CMD = ('unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE; export FASTDDS_BUILTIN_TRANSPORTS=UDPv4 ROS_DOMAIN_ID=0; '
+             'for f in /opt/ros/*/setup.bash; do source "$f"; done; '
+             f'exec python3 /opt/rover/nav/tools/health_probe.py --watch {PERIOD_S} {PROBE_LIFE_S}')
+probe = {'proc': None, 'started': 0.0, 'line_t': 0.0, 'data': None, 'judged_t': 0.0}
+
+
+def probe_stop():
+    """End the probe, also the copy inside the container (killing `docker exec` leaves that running)."""
+    if probe['proc'] is not None and probe['proc'].poll() is None:
+        probe['proc'].terminate()
+    probe['proc'] = None
+    subprocess.run(['docker', 'exec', 'rover', 'pkill', '-f', PROBE_MATCH], capture_output=True, timeout=20)
+
+
+def probe_read(proc):
+    for line in proc.stdout:
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        with lock:
+            if probe['proc'] is proc:
+                probe['data'], probe['line_t'] = d, time.time()
+
+
+def probe_latest():
+    """The newest rates not yet judged, or None. Starts the probe if it is not running."""
+    now = time.time()
+    proc = probe['proc']
+    stuck = proc is not None and now - max(probe['started'], probe['line_t']) > PROBE_SILENT_S
+    if proc is None or proc.poll() is not None or stuck:
+        probe_stop()
+        proc = subprocess.Popen(['docker', 'exec', 'rover', 'bash', '-lc', PROBE_CMD],
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        probe.update(proc=proc, started=now, line_t=0.0, data=None)
+        threading.Thread(target=probe_read, args=(proc,), daemon=True).start()
+        if stuck:
+            raise RuntimeError(f'no line for {PROBE_SILENT_S} s; started a new one')
+        return None
+    with lock:
+        if probe['line_t'] <= probe['judged_t']:
+            return None
+        probe['judged_t'] = probe['line_t']
+        return probe['data']
 
 
 def container_up():
@@ -125,14 +173,19 @@ def step():
     with lock:
         state['paused'] = PAUSE.exists()
     if not container_up():
+        probe['proc'] = None           # it went with the container
         with lock:
             state.update(t=time.time(), container=False, layers={}, error='container "rover" is not running (./rover up)')
         return
     try:
-        p = probe()
+        p = probe_latest()
     except Exception as e:   # noqa: BLE001 - a failed probe is a finding, not a crash
         with lock:
             state.update(t=time.time(), container=True, error=f'probe failed: {e}')
+        return
+    if p is None:                      # nothing new yet (its first line comes after one period)
+        with lock:
+            state.update(container=True)
         return
     layers = judge(p['hz'])
     pi5 = pi5_status()
@@ -184,7 +237,16 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
+def on_term(*_):
+    try:
+        probe_stop()
+    finally:
+        os._exit(0)
+
+
 def main():
+    signal.signal(signal.SIGTERM, on_term)
+    signal.signal(signal.SIGINT, on_term)
     threading.Thread(target=ThreadingHTTPServer(('0.0.0.0', PORT), Handler).serve_forever, daemon=True).start()
     log('start', act=ACT, port=PORT)
     while True:
@@ -193,7 +255,7 @@ def main():
             step()
         except Exception as e:   # noqa: BLE001 - the watchdog must outlive its own bugs
             log('error', msg=repr(e))
-        time.sleep(max(1, PERIOD_S - (time.time() - t0)))
+        time.sleep(max(1, PERIOD_S / 3 - (time.time() - t0)))    # look 3x per period: a new line is judged within 10 s
 
 
 if __name__ == '__main__':
