@@ -50,7 +50,7 @@ from pathlib import Path
 import numpy as np
 import rclpy
 from action_msgs.msg import GoalStatus
-from geometry_msgs.msg import Point, PoseStamped, Twist
+from geometry_msgs.msg import Point, PoseStamped, Twist, Vector3
 from nav2_msgs.action import ComputePathToPose, NavigateToPose
 from nav2_msgs.srv import ClearEntireCostmap
 from nav_msgs.msg import OccupancyGrid
@@ -73,6 +73,7 @@ import rl2_drive as R2  # noqa: E402
 import rl2_policy as R2P  # noqa: E402
 import known_floor as KF  # noqa: E402
 import memory_cells as MC  # noqa: E402
+import wheel_watch as WW  # noqa: E402
 from depth_obstacles import DepthObstacles  # noqa: E402
 from goal_exec import FRONT as GE_FRONT, REAR as GE_REAR, SIDE, GoalExec, wrap  # noqa: E402
 from sonar_feed import SonarFeed  # noqa: E402
@@ -349,6 +350,14 @@ class Reach(GP.Pass):
         self.create_subscription(OccupancyGrid, '/ghost_clear/grid', self._free_grid,
                                  QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE))
         self.create_subscription(Empty, '/reach/cancel', lambda _: setattr(self, 'stop_req', True), 10)
+        # are the wheels doing what is asked (wheel_watch.py; real robot 2026-11-15 22:18: 96 s of
+        # recoveries on wheels that did not turn, 2 min after a Pi 5 restart)
+        self.wheels = WW.WheelWatch()
+        self.wheels_why = None
+        self.create_subscription(Twist, '/cmd_vel', lambda c: self.wheels.on_cmd(time.time(), c.linear.x, c.angular.z), 10)
+        self.create_subscription(Vector3, '/wheel_state', lambda v: self.wheels.on_state(time.time(), v.x, v.y, v.z),
+                                 QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT))
+        self.create_timer(0.5, self._wheels_check)
         # where reach has driven: its own drives only, so a carry is not a road
         self.trail = TR.Trail()
         self.known = KF.KnownFloor()             # what the camera has seen + where the body stood (rl2 shield)
@@ -396,7 +405,18 @@ class Reach(GP.Pass):
         except Exception as e:                  # a dump must never stop a goal
             self.get_logger().warning(f'tight dump failed: {e}')
 
+    def _wheels_check(self):
+        if not self.pursuing or self.wheels_why:
+            return
+        why = self.wheels.verdict(time.time())
+        if why:
+            self.wheels_why = why
+            self.say(phase='wheels', why=why)
+            self.stop_req = True                   # every phase stops on it; say() turns the result into 'failed'
+
     def say(self, **d):
+        if d.get('result') == 'cancelled' and self.wheels_why:
+            d['result'], d['why'] = 'failed', self.wheels_why
         d['t'] = round(time.time(), 1)
         if self.goal_stamp:
             d['goal_stamp'] = self.goal_stamp
@@ -1373,6 +1393,7 @@ class Reach(GP.Pass):
         minclear = math.inf
         result, why = 'failed', ''
         rec = [] if RL_DUMP_DIR.is_dir() else None
+        guides = []    # (t, the global-costmap cells the rl2 route was laid on): a quit can be replayed exactly
         unreachable = 0
         self.say(attempt=attempt, phase='rl', target=[round(tgt[0], 2), round(tgt[1], 2)], policy=RL_MODEL)
         try:
@@ -1432,6 +1453,8 @@ class Reach(GP.Pass):
                                         res=RL2_GUIDE_RES, clear=RL2_GUIDE_CLEAR, extend=True,
                                         cells=gcells, cells_clear=RL2_GUIDE_CLEAR - RL2_CELL_FAT)
                              if len(every) or len(gcells) else None)
+                        if rec is not None:
+                            guides.append((now - t0, np.asarray(gcells, np.float16)))
                     else:
                         h = (TRT._guide(np.asarray(lid, float), gb, half=min(3.4, max(TRT.SEARCH_R + 0.2, d + 0.4)),
                                         res=0.02, clear=0.16) if len(lid) else None)
@@ -1517,6 +1540,8 @@ class Reach(GP.Pass):
                         obs=np.stack([r[2] for r in rec]), cmd=np.stack([r[3] for r in rec]),
                         pts=np.array([r[4] for r in rec], dtype=object), mem=np.array([r[5] for r in rec], dtype=object),
                         lidar=np.array([r[6] for r in rec], dtype=object),
+                        guide_t=np.float32([x[0] for x in guides]),
+                        guide_cells=np.array([x[1] for x in guides] + [None], dtype=object)[:-1],
                         goal=np.float32(g[:3]), target=np.float32(tgt), why=why, policy=RL_MODEL)
                 except Exception as e:
                     self.get_logger().warning(f'rl dump failed: {e}')
@@ -1789,6 +1814,8 @@ class Reach(GP.Pass):
     def _pursue(self, m):
         self.goal_stamp = f'{m.header.stamp.sec}.{m.header.stamp.nanosec:09d}'
         self.stop_req = False
+        self.wheels_why = None
+        self.wheels.reset()
         t0 = time.time()
         g = self.goal_odom(m)
         # map -> odom can be missing for a few seconds: slam_toolbox stops publishing it
