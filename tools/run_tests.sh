@@ -14,7 +14,7 @@ for f in /opt/ros/*/setup.bash; do [ -f "$f" ] && source "$f"; done
 export PYTHONDONTWRITEBYTECODE=1
 cd "$ROOT" || exit 2
 pass=0; failed=()
-for t in $(find . -path ./docs -prune -o -path ./lidar/ws -prune -o -path '*/tests/test_*.py' -print | sed 's|^\./||' | sort); do
+for t in $(find . -path ./docs -prune -o -path ./lidar/ws -prune -o -path ./camera/ws -prune -o -path '*/tests/test_*.py' -print | sed 's|^\./||' | sort); do
   [ -n "${1:-}" ] && case "$t" in *"$1"*) ;; *) continue ;; esac
   if grep -qE '^def test_[A-Za-z0-9_]+\(\)' "$t" && ! grep -qE '^def test_[A-Za-z0-9_]+\([^)]' "$t"; then
     cmd=(python3 -m pytest -q --no-header -p no:cacheprovider "$t")
