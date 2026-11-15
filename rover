@@ -85,6 +85,9 @@ TOOLS=/opt/rover/tools
 # its own colcon workspace under lidar/ws, built by lidar/build.sh INSIDE this
 # same image (never installed into it) and mounted at the path it was built at.
 LIDAR=/opt/lidar
+# The D555's camera stack matched to its firmware (camera/build.sh, camera/README.md): librealsense +
+# realsense-ros built into camera/ws, mounted at the path it was built at. Missing = the image's own.
+CAMDRV=/opt/camera
 # The plain node, not /dev/serial/by-id/...: the Slamtec SDK refuses the symlink
 # (error 80008004) but opens the node it points at. It is the only CP210x here.
 LIDAR_PORT=${LIDAR_PORT:-/dev/ttyUSB0}
@@ -402,6 +405,7 @@ start_container(){
     -v "$REPO/tools":$TOOLS:ro \
     -v "$REPO/models":/models:ro \
     -v "$REPO/lidar":$LIDAR:ro \
+    -v "$REPO/camera":$CAMDRV:ro \
     -v "$HOSTMAPS":/maps \
     -v "$HOSTLOGS":/logs \
     "$IMAGE" -c 'sleep infinity' >/dev/null
@@ -451,20 +455,30 @@ camera)
   # IR streams (colour and depth kept flowing) about a minute into every VO run.
   # 448x252x15 is the D555's low-res profile (~5 MB/s). The valid list:
   #   ros2 param describe /camera/camera0 rgb_camera.color_profile
+  # motion_fps:=200, said, not left to the default: fusion2 publishes /odom on every 10th gyro
+  # sample, and realsense-ros 4.59.2 (camera/build.sh) picks 100 Hz where 4.58.2 picked 200 --
+  # /odom fell to 10 Hz and the fused gate failed (2026-11-15). Options: 100, 200.
   dexec 'printf "{\"context\":{\"dds\":{\"enabled\":true,\"domain\":0}}}" > ~/.realsense-config.json;
          export LD_LIBRARY_PATH=/opt/librealsense/lib:/root/librealsense/install/lib:$LD_LIBRARY_PATH;
+         c='$CAMDRV'/ws; if [ -f $c/install_$ROS_DISTRO/setup.bash ] && [ -d $c/librealsense/lib ]; then
+           export LD_LIBRARY_PATH=$c/librealsense/lib:$LD_LIBRARY_PATH; source $c/install_$ROS_DISTRO/setup.bash; fi;
          exec ros2 launch realsense2_camera rs_launch.py camera_name:=camera0 \
             enable_infra1:=true enable_infra2:=true depth_module.infra_profile:=896x504x30 \
             depth_module.emitter_enabled:=false depth_module.laser_power:=0.0 \
             enable_depth:=true enable_color:=true rgb_camera.color_profile:=448x252x15 \
             align_depth.enable:=true \
-            enable_motion:=true enable_sync:=false > /tmp/camera.log 2>&1'
+            enable_motion:=true motion_fps:=200 enable_sync:=false > /tmp/camera.log 2>&1'
   fi
   t=0
   until cam_ready; do
     t=$((t+3)); [ "$t" -ge 40 ] && { echo "  ✗ D555 not streaming after 40 s."
       [ "$TWIN" = 1 ] && { echo "    TWIN: is the world up on the laptop ($ip)?  There: ./sim up home_real (kino_sim)"
                            docker exec "$NAME" tail -3 /tmp/camera.log; exit 1; }
+      if docker exec "$NAME" grep -q "Unsupported device" /tmp/camera.log 2>/dev/null; then
+        # 2026-11-15: new firmware, old driver. A power-cycle does NOT help this one.
+        echo "    The driver REFUSED the camera (/tmp/camera.log: Unsupported device) -- not a power problem."
+        echo "    Build the camera stack for its firmware: ./camera/build.sh  (camera/README.md), then ./rover camera"; exit 1
+      fi
       docker exec "$NAME" grep -q "No RealSense devices were found" /tmp/camera.log 2>/dev/null \
         && echo "    Its on-camera DDS server is offline. It still answers ping; that means nothing."
       echo "    Only a physical PoE power-cycle (unplug ~5 s) recovers this."

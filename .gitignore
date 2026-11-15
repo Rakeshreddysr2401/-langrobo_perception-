@@ -70,3 +70,6 @@ logs/session_*/
 logs/sonar_log_*.npz
 logs/nav_crashes/
 logs/watchdog.out
+
+# the D555 camera stack built for its firmware (camera/build.sh recreates it)
+camera/ws/

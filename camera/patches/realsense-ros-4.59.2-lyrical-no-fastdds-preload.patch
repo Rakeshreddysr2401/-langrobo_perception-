@@ -1,0 +1,19 @@
+realsense-ros 4.59.2 on ROS Lyrical: do not force-load ROS's libfastdds (Fast DDS 3.x) ahead of
+librealsense, whose realdds has Fast DDS 2.10 built in; with it the node segfaults at start (2026-11-15).
+
+diff --git a/realsense2_camera/CMakeLists.txt b/realsense2_camera/CMakeLists.txt
+index b6eb588..6500f1d 100644
+--- a/realsense2_camera/CMakeLists.txt
++++ b/realsense2_camera/CMakeLists.txt
+@@ -366,7 +366,10 @@ target_link_libraries(${PROJECT_NAME}
+ # configure time, find_library returns NOTFOUND and the workaround silently
+ # no-ops — users on Cyclone/Zenoh with a non-DDS librealsense (the common
+ # case) aren't forced to install FastDDS via rosdep.
+-if(fastcdr_FOUND AND UNIX AND NOT APPLE)
++# Not on Lyrical: there libfastdds is Fast DDS 3.x, while librealsense's realdds carries its own
++# Fast DDS 2.10 statically. Forcing 3.x to load first makes realdds resolve shared symbol names
++# (eprosima::fastdds::dds::...) into 3.x: the node segfaults at start (rover, 2026-11-15).
++if(fastcdr_FOUND AND UNIX AND NOT APPLE AND NOT "$ENV{ROS_DISTRO}" STREQUAL "lyrical")
+   # Humble and Jazzy still ship the library as libfastrtps.so; it was renamed
+   # to libfastdds.so in Kilted. find_library returns the first match, so
+   # try fastdds first (Kilted/Lyrical/Rolling), fall through to fastrtps

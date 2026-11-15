@@ -1,5 +1,12 @@
 # nav2 does not start with the full stack — what we know (2026-11-15 evening)
 
+> **SOLVED the same night (21:22).** The D555 had been moved to firmware 7.58.46386 (MTU work); the
+> image's camera stack (librealsense 2.58.2 / realsense-ros 4.58.2) was made for the old firmware.
+> With librealsense 2.59.2 + realsense-ros 4.59.2 (`camera/build.sh`, `camera/README.md`) and the
+> camera's motion rate set to 200 Hz: every `./rover up` gate OK, **nav2 active on the first try,
+> 0 restarts**, load 9-14 (was 25-40), loopback 6,900 packets/s (was 26,000) with the TypeLookup
+> storm gone (was 14,200/s). The camera-domain proposal in section 4 is no longer needed.
+
 Read this first when you are back. Short version: **every sensor and the Pi 5 link work; nav2 (the
 part that plans and drives to a goal) never becomes active.** It was restarted 11+ times in 30 minutes.
 Nothing is broken in hardware. The cause is in how the ROS nodes find each other (DDS discovery).
