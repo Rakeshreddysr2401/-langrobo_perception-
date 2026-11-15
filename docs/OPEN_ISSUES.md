@@ -1,4 +1,31 @@
-# Open issues — where things stand (newest first; last updated 2026-11-10)
+# Open issues — where things stand (newest first; last updated 2026-11-15)
+
+## 2026-11-15 — Jetson + Pi 5 check (code, links, wasted CPU)
+
+Checked with the stack down (the camera cable `enP8p1s0` had no carrier: PoE off): pyflakes 0 warnings,
+`./rover test` 31/31 files, Pi 5 tests 895 passed; from this Jetson every Pi 5 node is seen,
+`/wheel_state` 20.0 Hz, `/sonar/*` 15.3 Hz, clocks 8-10 ms apart.
+
+**Fixed**
+
+| what | before | now |
+|---|---|---|
+| Watchdog probe (9bfe357) | a new process + DDS participant every 30 s, 6 s of two raw camera streams each: 30-40 % of a core | one long-lived `health_probe.py --watch`, camera counted by `camera_info` |
+| Clock agreement (5f2e8b2) | never checked; nav2 drops the Pi 5's sonar stamps if the clocks are > 0.2 s apart (this Jetson boots in 1970) | `./rover clock`, and a gate in `./rover up` |
+| Pi 5 `sonar_node` (Pi 307bd53) | 100 Hz serial poll, 7.6 % of a core | reader thread, 1.5 % |
+| Pi 5 DDS setup (Pi df254f4) | copied into nine scripts, not all alike | `kino_dds` in `scripts/ros_env.sh` |
+
+**Still open** (not changed: each needs the full stack up, or the owner)
+
+| # | what | next step |
+|---|---|---|
+| B1 | **Network flood with the full stack** (2026-11-15 afternoon): the `realsense2_camera` process sends ~15,000 small packets/s to ~60 ports on the Pi 5 (4.9 MB/s of WiFi, load 39). Not there with the camera alone; a realdds whitelist did not change it (dc409f7, reverted). | with the stack up, find the topic: an AF_PACKET capture on `wlP1p1s0` (no tcpdump here), group by destination port and RTPS writer id |
+| B2 | Disk 96 % full (9 GB free): `logs/bags` 69 GB, `logs/rl_demos` 23 GB. | owner: which to keep (2026-11-14/15 sessions are already on the laptop) |
+| B3 | A1-A10 below are unchanged (A1 one `/cmd_vel` path, A2 restart of dead nodes, A7 old `vo_node.py`, A8 the launcher's size). | A7/A8 need a camera-up run to verify; not done blind |
+| B4 | Both machines run a full desktop (gdm, gnome-shell ~300 MB each); this Jetson also `iperf3`, `gnome-remote-desktop`, `fwupd`, `ModemManager`, `kerneloops`. | owner's call (system settings). The Pi 5's voice needs its user session: do not drop the desktop there without `loginctl enable-linger` |
+| B5 | `~/netwatch/watch.sh` (crontab @reboot) names its log before the clock is set: every file is `19700101-0530xx.log`. | wait for `timedatectl` sync before naming, or stop it if the drop-outs are solved |
+| B6 | The branch is ahead of GitHub (last pushed 2026-11-15 morning). | push when the owner says |
+
 
 ## 2026-11-10 — Repo audit and restructure (branch `kino_0.1.0_fable-5.2`, from `kino_0.1.0` @ 0f6fcf1)
 
