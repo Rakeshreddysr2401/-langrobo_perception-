@@ -43,6 +43,7 @@ ACT = os.environ.get('ROVER_WATCHDOG_ACT') == '1'
 PERIOD_S = 30                   # the probe reports once per period
 PROBE_LIFE_S = 3600             # the probe ends by itself after this (and is started again)
 PROBE_SILENT_S = 3 * PERIOD_S   # no line for this long: the probe is stuck, start a new one
+PROBE_REFRESH_S = 600           # a topic with a publisher reads 0: try a fresh probe, at most this often
 DOWN_CHECKS = 3                 # consecutive bad probes before a layer counts as down
 MAX_RESTARTS, RESTART_WINDOW_S = 2, 900
 PI5 = os.environ.get('PI5_HOST', '192.168.1.16')
@@ -84,7 +85,7 @@ PROBE_MATCH = 'health_probe.py --watc[h]'      # [h]: pkill -f must not match it
 PROBE_CMD = ('unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE; export FASTDDS_BUILTIN_TRANSPORTS=UDPv4 ROS_DOMAIN_ID=0; '
              'for f in /opt/ros/*/setup.bash; do source "$f"; done; '
              f'exec python3 /opt/rover/nav/tools/health_probe.py --watch {PERIOD_S} {PROBE_LIFE_S}')
-probe = {'proc': None, 'started': 0.0, 'line_t': 0.0, 'data': None, 'judged_t': 0.0}
+probe = {'proc': None, 'started': 0.0, 'line_t': 0.0, 'data': None, 'judged_t': 0.0, 'refreshed': 0.0}
 
 
 def probe_stop():
@@ -186,6 +187,13 @@ def step():
     if p is None:                      # nothing new yet (its first line comes after one period)
         with lock:
             state.update(container=True)
+        return
+    if p.get('silent') and time.time() - probe['refreshed'] > PROBE_REFRESH_S:
+        # a publisher is there and the probe heard nothing: a stuck node, or a probe that never
+        # matched it. A fresh probe (new DDS participant) decides; this line is not judged.
+        probe['refreshed'] = time.time()
+        log('probe_refresh', silent=p['silent'])
+        probe_stop()
         return
     layers = judge(p['hz'])
     pi5 = pi5_status()
