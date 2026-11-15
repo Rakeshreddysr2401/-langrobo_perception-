@@ -99,6 +99,7 @@ class FakeReach:
     def __init__(self, phantom, cancel_after=None):
         self.pose = np.zeros(3)
         self.dobs = Cams(CAMERA.copy())
+        self.lcm = None          # no local costmap here: the tight route's out-of-view cells (MC.for_checks) are none
         self.phantom = phantom
         self.stop_req = False
         self.cancel_after = cancel_after
