@@ -62,6 +62,22 @@ def for_checks(m, pose):
     return unseen(lethal_cells(m, pose))
 
 
+def route_split(lidar, precise, cells, r_near):
+    """route_points' two parts kept apart: (the measured points, the costmap cells used). The
+    route may keep less room from the cells, which nvblox draws 3-8 cm too wide on each side
+    (reach rl_round, RL2_CELL_FAT; real robot 2026-11-15)."""
+    lidar = np.asarray(lidar, float).reshape(-1, 2)
+    precise = np.asarray(precise, float).reshape(-1, 2)
+    cells = np.asarray(cells, float).reshape(-1, 2)
+    parts = [lidar]
+    if len(precise):
+        parts.append(precise[(np.hypot(precise[:, 0], precise[:, 1]) <= r_near) & TRT.in_view(precise)])
+    if len(cells):
+        far = np.hypot(cells[:, 0], cells[:, 1]) > r_near
+        cells = cells[far | ~TRT.in_view(cells)]
+    return np.vstack(parts), cells
+
+
 def route_points(lidar, precise, cells, r_near):
     """The obstacle points a ROUTE is laid on (reach rl_round, rl2), base_link, N x 2.
 

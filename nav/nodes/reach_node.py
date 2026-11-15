@@ -208,6 +208,17 @@ RL_DONE_M = 0.25
 # 0.19 + the shield's 2 cm; +1 cm here: the guide's 2 cm cells hold LiDAR points up to a cell off).
 # 0.16 led its routes through 36 cm gaps (kino_sim r006, 2026-11-10). v002 keeps 0.16.
 RL2_GUIDE_CLEAR = 0.22
+# ... less from the global costmap's cells: nvblox draws an edge 3-8 cm too wide on each side
+# (a 55-62 cm door read 43-47 cm, real robot 2026-11-10). With the full 0.22 on top, rl2 quit
+# "not reachable" twice on 2026-11-15 at a door the LiDAR and the camera's own points left open
+# (replays: nav/tests/test_route_points.py). 5 cm = the lower end of the measured extra width. Only
+# the ROUTE uses this; the shield checks every command on all points, cells included.
+RL2_CELL_FAT = 0.05
+# rl2's guide grid. Was 0.04 (the training env's FIELD_RES): points snapped to 4 cm cells read a way up
+# to ~5 cm narrower, and on 2026-11-15 a door the rover then went through read closed even on the
+# LiDAR + the camera's own points (a 3.9 m detour; at 2 cm the straight 1.5 m way). The old driver's
+# guide moved to 2 cm for the same reason on 2026-11-07 (below). ~30 ms laptop, every 1.5 s.
+RL2_GUIDE_RES = 0.02
 RL2_PRECISE_R = 2.4          # m: rl2's route uses the precise points this near, the costmap beyond
 RL2_GUIDE_HALF = 3.9          # m: the global costmap rolls 8 x 8 m round the rover (config/nav2.yaml)
 # rl2's shield checks every model of the measured turning (rl_drive.MEASURED); a policy trained before
@@ -1416,9 +1427,11 @@ class Reach(GP.Pass):
                         # (the depth memory itself, self.pdobs: until 2026-11-11 this read self.dobs,
                         # which is nvblox's cells again -- a 59 cm door stayed "unreachable")
                         cam = self.outside_body(self.pdobs.points_base(self.pose))
-                        every = MC.route_points(lid, cam if cam is not None else np.zeros((0, 2)), gl, RL2_PRECISE_R)
+                        every, gcells = MC.route_split(lid, cam if cam is not None else np.zeros((0, 2)), gl, RL2_PRECISE_R)
                         h = (TRT._guide(np.asarray(every, float), gb, half=min(RL2_GUIDE_HALF, max(TRT.SEARCH_R + 0.2, d + 1.0)),
-                                        res=0.04, clear=RL2_GUIDE_CLEAR, extend=True) if len(every) else None)
+                                        res=RL2_GUIDE_RES, clear=RL2_GUIDE_CLEAR, extend=True,
+                                        cells=gcells, cells_clear=RL2_GUIDE_CLEAR - RL2_CELL_FAT)
+                             if len(every) or len(gcells) else None)
                     else:
                         h = (TRT._guide(np.asarray(lid, float), gb, half=min(3.4, max(TRT.SEARCH_R + 0.2, d + 0.4)),
                                         res=0.02, clear=0.16) if len(lid) else None)

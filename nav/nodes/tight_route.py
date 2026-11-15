@@ -137,7 +137,7 @@ GUIDE_RES = 0.02              # m per cell of the walking-distance guide
 GUIDE_CLEAR = 0.16            # m: the body's inner half-width (0.178) less a cell's half-diagonal
 
 
-def _guide(pts, target, half=None, res=None, clear=None, extend=False):
+def _guide(pts, target, half=None, res=None, clear=None, extend=False, cells=None, cells_clear=None):
     """Walking distance to the target for the rover's centre, around obstacles.
 
     WHY (twin door49, 2026-11-01): nav2 left the rover in the pocket between the
@@ -148,7 +148,11 @@ def _guide(pts, target, half=None, res=None, clear=None, extend=False):
     SIDE) about base_link, so the centre stays that far from every point: cells
     nearer than GUIDE_CLEAR are no place for it. The walking distance over the
     rest leads the search out of dead ends. A cell it cannot reach is a pose no
-    plan can pass through. Returns h(x, y) or None (then the straight line)."""
+    plan can pass through. Returns h(x, y) or None (then the straight line).
+
+    cells / cells_clear: obstacles known to be drawn too THICK (the global costmap's nvblox cells,
+    3-8 cm a side), kept at cells_clear instead of clear. Real robot 2026-11-15: the full 22 cm on
+    top of their extra width closed a door the rover fits (rl2 quit twice; nav/tests/test_route_points.py)."""
     from scipy import ndimage
     from scipy.sparse import coo_matrix
     from scipy.sparse.csgraph import dijkstra
@@ -162,6 +166,12 @@ def _guide(pts, target, half=None, res=None, clear=None, extend=False):
     ij = ij[((ij >= 0) & (ij < n)).all(1)]
     occ[ij[:, 0], ij[:, 1]] = True
     free = ndimage.distance_transform_edt(~occ) * GUIDE_RES > GUIDE_CLEAR
+    if cells is not None and len(cells):
+        occ2 = np.zeros((n, n), bool)
+        ij = np.floor((np.asarray(cells, float).reshape(-1, 2) + half) / GUIDE_RES).astype(int)
+        ij = ij[((ij >= 0) & (ij < n)).all(1)]
+        occ2[ij[:, 0], ij[:, 1]] = True
+        free &= ndimage.distance_transform_edt(~occ2) * GUIDE_RES > (GUIDE_CLEAR if cells_clear is None else cells_clear)
     idx = -np.ones((n, n), int)
     idx[free] = np.arange(int(free.sum()))
     rows, cols, w = [], [], []

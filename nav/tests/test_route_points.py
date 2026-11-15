@@ -27,6 +27,7 @@ import tight_route as TRT  # noqa: E402
 
 FIX = np.load(Path(__file__).resolve().parent / 'fixtures' / 'real_door_20261110.npz')
 R_NEAR, CLEAR, HALF = 2.4, 0.22, 3.9      # reach_node RL2_PRECISE_R, RL2_GUIDE_CLEAR, RL2_GUIDE_HALF
+RES = 0.02                                 # reach_node RL2_GUIDE_RES (0.04 until 2026-11-15)
 
 
 def case(t):
@@ -38,7 +39,7 @@ def walk(pts, goal):
     """Walking distance from where the rover stands, or None: reach's 'not reachable'."""
     d = math.hypot(*goal)
     h = TRT._guide(np.asarray(pts, float), goal, half=min(HALF, max(TRT.SEARCH_R + 0.2, d + 1.0)),
-                   res=0.04, clear=CLEAR, extend=True)
+                   res=RES, clear=CLEAR, extend=True)
     if h is None:
         return None
     best = min(h(r * math.cos(k * math.pi / 4), r * math.sin(k * math.pi / 4))
@@ -82,9 +83,72 @@ def test_a_goal_deep_in_something_is_still_unreachable():
     assert w is not None and 1.2 < w < 1.8, w
 
 
+
+
+# ── 2026-11-15, real robot, rl2_r011: two rounds quit "not reachable" at a door it then went through ──
+# fixtures/real_guide_20261115.npz, base_link at the step the round quit (session bag 08:25:32 and
+# 08:33:10 UTC; kino_sim build/real_20261115/session): lid = the last scan, pts = the shield's points
+# (LiDAR + camera + sonar; stands in for the depth memory, which the dump does not keep), cells = the
+# global costmap's lethal cells from the recorded /global_costmap/costmap, gb = the goal.
+NOV15 = np.load(Path(__file__).resolve().parent / 'fixtures' / 'real_guide_20261115.npz')
+FAT = 0.05                                  # reach_node RL2_CELL_FAT
+
+
+def walk_split(pts, cells, goal, cells_clear, res=RES):
+    d = math.hypot(*goal)
+    h = TRT._guide(np.asarray(pts, float), goal, half=min(HALF, max(TRT.SEARCH_R + 0.2, d + 1.0)),
+                   res=res, clear=CLEAR, extend=True, cells=cells, cells_clear=cells_clear)
+    if h is None:
+        return None
+    best = min(h(r * math.cos(k * math.pi / 4), r * math.sin(k * math.pi / 4))
+               for r in (0.0, 0.05, 0.10, 0.15, 0.20) for k in range(8))
+    return best if math.isfinite(best) else None
+
+
+def test_nov15_what_the_robot_did_closed_the_door():
+    """The robot's guide then: 4 cm grid, cells at the full 22 cm -> no way (both rounds quit)."""
+    for st in ('082532', '083310'):
+        pts, cells = MC.route_split(NOV15[f'lid_{st}'], NOV15[f'pts_{st}'], NOV15[f'cells_{st}'], R_NEAR)
+        assert walk_split(pts, cells, tuple(NOV15[f'gb_{st}']), CLEAR, res=0.04) is None, st
+
+
+def test_nov15_each_part_of_the_fix_is_needed():
+    """08:25 is closed by the 4 cm grid (open at 2 cm even with the cells at 22 cm); 08:33 by the cells'
+    extra width (closed at 2 cm with the cells at 22 cm)."""
+    def w(st, cc, res):
+        pts, cells = MC.route_split(NOV15[f'lid_{st}'], NOV15[f'pts_{st}'], NOV15[f'cells_{st}'], R_NEAR)
+        return walk_split(pts, cells, tuple(float(v) for v in NOV15[f'gb_{st}']), cc, res=res)
+    assert w('082532', CLEAR, 0.04) is None and w('082532', CLEAR, 0.02) is not None
+    assert w('083310', CLEAR, 0.02) is None and w('083310', CLEAR - FAT, 0.02) is not None
+
+
+def test_nov15_cells_less_their_extra_width_leave_it_open():
+    """The fix: the cells kept FAT closer -> a way, and not a detour round the house."""
+    for st in ('082532', '083310'):
+        goal = tuple(float(v) for v in NOV15[f'gb_{st}'])
+        pts, cells = MC.route_split(NOV15[f'lid_{st}'], NOV15[f'pts_{st}'], NOV15[f'cells_{st}'], R_NEAR)
+        w = walk_split(pts, cells, goal, CLEAR - FAT)
+        assert w is not None, f'{st}: the door the rover went through must be reachable'
+        assert w <= math.hypot(*goal) + 0.3, f'{st}: walking {w:.2f} m for {math.hypot(*goal):.2f} m: a detour, not the door'
+
+
+def test_cells_still_close_a_real_wall():
+    """Less room from cells is not a way through them: a block of cells is still a block."""
+    wall = np.array([[x, y] for x in np.arange(0.8, 2.2, 0.025) for y in np.arange(-1.5, 1.5, 0.025)])
+    lid = np.array([[3.0, 3.0]])
+    assert walk_split(lid, wall, (1.5, 0.0), CLEAR - FAT) is None
+    wall = np.array([[x, y] for x in np.arange(0.8, 1.0, 0.025) for y in np.arange(-4.5, 4.5, 0.025)])  # wall to wall: no way round
+    # a 24 cm slot between cells = ~34 cm really (cells are >= 5 cm too wide a side): the rover is 38 cm
+    gap = wall[np.abs(wall[:, 1]) > 0.12]
+    assert walk_split(lid, gap, (2.6, 0.0), CLEAR - FAT) is None, 'a slot narrower than the rover stays closed'
+    # ... and one with room (44 cm between cells = ~54 cm really) is open
+    gap = wall[np.abs(wall[:, 1]) > 0.22]
+    assert walk_split(lid, gap, (2.6, 0.0), CLEAR - FAT) is not None, 'a slot the rover fits is open'
+
+
 if __name__ == '__main__':
-    for f in (test_the_real_doors_are_reachable_on_the_route_points, test_nvblox_cells_alone_close_them,
-              test_what_the_camera_cannot_see_now_stays, test_a_goal_deep_in_something_is_still_unreachable):
-        f()
-        print('ok  ', f.__name__)
+    for name, fn in list(globals().items()):
+        if name.startswith('test_') and callable(fn):
+            fn()
+            print('ok  ', name)
     print('ALL PASS')
