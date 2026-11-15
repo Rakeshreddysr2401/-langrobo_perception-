@@ -126,6 +126,33 @@ def _targets(vx, wz, k):
     return vx, math.copysign(max(0.0, k * (TURN_GAIN * abs(wz) - TURN_OFF)), wz)
 
 
+# HOW THE ROVER REALLY TURNS WHILE DRIVING (measured 2026-11-15, ./rover response arc + arc2, 38 rows,
+# logs/calib/response_20261115-02*.json; kino_sim rl2/env.py real_targets is this, in torch).
+# _targets above ("22 % of a turn command, forward speed unchanged") holds only for gentle turns:
+# the share followed is 0.14-0.19 up to 0.5 rad/s and 0.29-0.45 at 0.8-1.5, building over 0.4-0.9 s;
+# the forward speed halves once the inner side is driven backwards (q = |wz| x 0.17 / |vx| > 1.3);
+# on the spot the old formula fits, right turns 13-58 % faster than left.
+# The shield cannot know which rover it is today (battery, floor): for rl2 a command is safe only if it
+# is safe for EVERY model here -- (share x, turn lag s, forward kept in a hard turn, right/left spot):
+#   least turn, full forward | most turn, full forward | most turn, least forward
+MEASURED = ((0.8, 0.9, 1.0, 0.85), (1.2, 0.4, 1.0, 1.35), (1.2, 0.4, 0.45, 1.35))
+
+
+def turn_share(a):
+    """Share of a turn command |wz| = a followed while driving, steady state (the measured curve)."""
+    return 0.13 + 0.06 * min(max(a / 0.5, 0.0), 1.0) + 0.19 * min(max((a - 0.5) / 0.3, 0.0), 1.0)
+
+
+def _targets_real(vx, wz, k, share_k, f_min, asym):
+    """-> (v target, w target, driving) for one MEASURED model."""
+    vt, wt = _targets(vx, wz, k)
+    if abs(vt) <= 1e-6:
+        return vt, (wt * asym if wz < 0 else wt), False
+    a = abs(wz)
+    q = a * HALF_TRACK / max(abs(vx), 1e-3)
+    f = 1.0 - (1.0 - f_min) * min(max((q - 0.9) / 0.4, 0.0), 1.0)
+    return vt * f, turn_share(a) * share_k * wz, True
+
 _m = SHIELD_MARGIN
 _ru = np.arange(-REAR - _m, FRONT + _m + 1e-6, 0.02)
 _rv = np.arange(-SIDE - _m, SIDE + _m + 1e-6, 0.02)
@@ -134,19 +161,25 @@ RING_V = np.concatenate([np.full_like(_ru, -SIDE - _m), np.full_like(_ru, SIDE +
 CREEP_TOL = 0.001             # m: how much nearer an already-close point may come (rounding)
 
 
-def sweep_hits(pts, vx, wz, vel, pack, lag=LAG_S, known=None):
+def sweep_hits(pts, vx, wz, vel, pack, lag=LAG_S, known=None, model=None):
     """Does command (vx, wz), held 0.8 s from the measured (v, w), bring the outline + 2 cm
-    onto any base_link point?"""
+    onto any base_link point? model: one of MEASURED, or None for the old single model."""
     back = known is not None and vx < 0
     if (pts is None or not len(pts)) and not back:
         return False
     if pts is None:
         pts = np.zeros((0, 2))
     pl, pr, k = pack
-    vt, wt = _targets(vx, wz, k)
+    a = aw = SHIELD_DT / (lag + SHIELD_DT)
+    if model is None:
+        vt, wt = _targets(vx, wz, k)
+    else:
+        share_k, lag_w, f_min, asym = model
+        vt, wt, driving = _targets_real(vx, wz, k, share_k, f_min, asym)
+        if driving:
+            aw = SHIELD_DT / (lag_w + SHIELD_DT)
     v, w = vel
     x = y = th = 0.0
-    a = SHIELD_DT / (lag + SHIELD_DT)
     m = SHIELD_MARGIN
     # a point ALREADY within the margin (crept in: raster cells, noise) blocks only motion that
     # brings the outline nearer to it; else every command, backing away too, is refused and the
@@ -155,7 +188,7 @@ def sweep_hits(pts, vx, wz, vel, pack, lag=LAG_S, known=None):
     near0 = ((pts[:, 0] < FRONT + m) & (pts[:, 0] > -REAR - m) & (np.abs(pts[:, 1]) < SIDE + m))
     for _ in range(SHIELD_T):
         v += a * (vt - v)
-        w += a * (wt - w)
+        w += aw * (wt - w)
         P = pl if w >= 0 else pr
         vb, vyb = v + w * P[1], -w * P[0]
         c, s = math.cos(th), math.sin(th)
@@ -195,17 +228,18 @@ def shield_cost(vx, wz):
             for i, (fv, fw) in enumerate(SHIELD_ALT)]
 
 
-def shield(pts, vx, wz, vel, pack, known=None):
+def shield(pts, vx, wz, vel, pack, known=None, models=None):
     """-> (vx, wz) to send, changed, stopped -- the order env.py uses. known: f(bx, by) -> bool,
     is the floor at these base_link points known (known_floor.KnownFloor.known_base); with it a
     reverse may move the outline only over known floor (as kino_sim rl2/env.py REVERSE_KNOWN).
-    The safe SHIELD_ALT nearest the asked command is sent; none safe = stop."""
+    The safe SHIELD_ALT nearest the asked command is sent; none safe = stop. models: MEASURED for
+    rl2 (safe for every measured model); None = the old single model (v002)."""
     if pts is not None and len(pts):
         pts = pts[np.hypot(pts[:, 0], pts[:, 1]) < SHIELD_NEAR_M]
     cost = shield_cost(vx, wz)
     for i in sorted(range(len(SHIELD_ALT)), key=cost.__getitem__):
         fv, fw = SHIELD_ALT[i]
         cv, cw = fv * vx, fw * wz
-        if not sweep_hits(pts, cv, cw, vel, pack, known=known):
+        if not any(sweep_hits(pts, cv, cw, vel, pack, known=known, model=mdl) for mdl in (models or (None,))):
             return cv, cw, i > 0, False
     return 0.0, 0.0, True, True

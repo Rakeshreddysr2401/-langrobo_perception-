@@ -195,6 +195,9 @@ RL_DONE_M = 0.25
 RL2_GUIDE_CLEAR = 0.22
 RL2_PRECISE_R = 2.4          # m: rl2's route uses the precise points this near, the costmap beyond
 RL2_GUIDE_HALF = 3.9          # m: the global costmap rolls 8 x 8 m round the rover (config/nav2.yaml)
+# rl2's shield checks every model of the measured turning (rl_drive.MEASURED); a policy trained before
+# kino_sim r011 (old single-model shield) runs with REACH_RL2_SHIELD_REAL=0 only for an A/B.
+RL2_SHIELD_REAL = os.environ.get('REACH_RL2_SHIELD_REAL', '1') == '1'
 RL_MAX_S = 60.0
 RL_STALL_S, RL_GAIN_M = 15.0, 0.10
 RL_STOPS = 20                  # 2 s of shield stops in a row
@@ -1416,7 +1419,8 @@ class Reach(GP.Pass):
                     obs = RD.observe(seen, gb, gobs, vel, last, pack, now - t0)
                     pvx, pwz = RD.to_cmd(pol(obs))
                 vx, wz, chg, stp = RD.shield(seen, pvx, pwz, vel, pack,
-                                             known=self.known.known_base(self.pose) if pol.rl2 else None)
+                                             known=self.known.known_base(self.pose) if pol.rl2 else None,
+                                             models=RD.MEASURED if pol.rl2 and RL2_SHIELD_REAL else None)
                 if rec is not None:
                     rec.append((now - t0, np.asarray(self.pose, np.float32), obs, np.float32([pvx, pwz, vx, wz]),
                                 np.asarray(pts, np.float16), np.asarray(mc, np.float16),
