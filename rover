@@ -161,6 +161,10 @@ fi
 # A stale ROS_DISCOVERY_SERVER makes nodes silently invisible to each other,
 # which looks exactly like a crashed node. Clear it on every command.
 #
+# FASTDDS_DEFAULT_PROFILES_FILE=ops/fastdds.xml: no TypeLookup service (ROS matches by type name);
+# with it, ~36 participants kept 10-14k discovery packets/s going for ever and nav2's own servers
+# did not find each other (2026-11-15; the A/B is in the file).
+#
 # FASTDDS_BUILTIN_TRANSPORTS=UDPv4: no shared memory between the container's
 # own processes. FastDDS's SHM segments are 512 KB; a D555 depth frame is
 # ~900 KB, IR ~450 KB, and once a reader stalls or dies mid-read the segment
@@ -170,7 +174,7 @@ fi
 # the same driver, at the same moment. (The 2026-10-10 "UDP-only worked"
 # above, kill_match, was the same failure.) The Pi 5 and laptop were UDP
 # already; this only changes traffic inside the container.
-ENVSET="unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE; export FASTDDS_BUILTIN_TRANSPORTS=UDPv4; export ROS_DOMAIN_ID=$DOMAIN; for f in /opt/ros/*/setup.bash /opt/realsense_ws/install/setup.bash; do [ -f \$f ] && source \$f; done;"
+ENVSET="unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE; export FASTDDS_BUILTIN_TRANSPORTS=UDPv4 FASTDDS_DEFAULT_PROFILES_FILE=/opt/rover/ops/fastdds.xml; export ROS_DOMAIN_ID=$DOMAIN; for f in /opt/ros/*/setup.bash /opt/realsense_ws/install/setup.bash; do [ -f \$f ] && source \$f; done;"
 
 dexec(){ docker exec -d "$NAME" bash -lc "$ENVSET $1"; }
 rexec(){ docker exec    "$NAME" bash -lc "$ENVSET $1"; }
@@ -405,6 +409,7 @@ start_container(){
     -v "$REPO/tools":$TOOLS:ro \
     -v "$REPO/models":/models:ro \
     -v "$REPO/lidar":$LIDAR:ro \
+    -v "$REPO/ops":/opt/rover/ops:ro \
     -v "$REPO/camera":$CAMDRV:ro \
     -v "$HOSTMAPS":/maps \
     -v "$HOSTLOGS":/logs \

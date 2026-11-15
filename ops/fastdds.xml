@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!-- Fast DDS settings for every ROS participant in the rover container (./rover ENVSET,
+     FASTDDS_DEFAULT_PROFILES_FILE; ops/rover_watchdog.py's probe too).
+
+     type_propagation disabled: no TypeLookup service. ROS 2 matches publishers and subscribers by
+     topic + type NAME; it never needs the remote type objects. With it on, every pair of the ~36
+     participants kept TypeLookup heartbeats/acknacks going about 3 a second for ever: 10,000-14,000 of
+     the 22,000-26,000 loopback packets a second, load 25-42, and new nodes (nav2's own servers, the
+     watchdog probe) that did not find running ones : nav2 never became active on 2026-11-15
+     afternoon. Live A/B the same night, two listeners side by side on the full stack: default
+     ~480 TypeLookup packets/s each, disabled 0, the same /odom and /scan received.
+     Documented values: enabled (default), minimal_bandwidth, registration_only, disabled
+     (fast-dds.docs.eprosima.com, property_policies/non_consolidated_qos). -->
+<dds xmlns="http://www.eprosima.com">
+  <profiles>
+    <participant profile_name="rover_participant" is_default_profile="true">
+      <rtps>
+        <propertiesPolicy>
+          <properties>
+            <property>
+              <name>fastdds.type_propagation</name>
+              <value>disabled</value>
+            </property>
+          </properties>
+        </propertiesPolicy>
+      </rtps>
+    </participant>
+  </profiles>
+</dds>

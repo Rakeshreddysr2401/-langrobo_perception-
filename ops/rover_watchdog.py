@@ -82,7 +82,8 @@ def log(event, **kw):
 
 
 PROBE_MATCH = 'health_probe.py --watc[h]'      # [h]: pkill -f must not match its own shell
-PROBE_CMD = ('unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE; export FASTDDS_BUILTIN_TRANSPORTS=UDPv4 ROS_DOMAIN_ID=0; '
+PROBE_CMD = ('unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE; export FASTDDS_BUILTIN_TRANSPORTS=UDPv4 ROS_DOMAIN_ID=0 '
+             'FASTDDS_DEFAULT_PROFILES_FILE=/opt/rover/ops/fastdds.xml; '   # same DDS settings as ./rover ENVSET
              'for f in /opt/ros/*/setup.bash; do source "$f"; done; '
              f'exec python3 /opt/rover/nav/tools/health_probe.py --watch {PERIOD_S} {PROBE_LIFE_S}')
 probe = {'proc': None, 'started': 0.0, 'line_t': 0.0, 'data': None, 'judged_t': 0.0, 'refreshed': 0.0, 'seen': set()}
