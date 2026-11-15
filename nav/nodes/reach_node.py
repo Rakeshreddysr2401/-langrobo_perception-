@@ -145,6 +145,21 @@ ARRIVED_YAW = 0.25
 # after nav2 reports success: the exact finish refused or stuck still leaves
 # the rover where nav2 put it; allow for a few cm of pose noise on top
 NAV2_ARRIVED_M = 0.15
+# TWO WATCHES ON A RUNNING NAV2 (2026-11-15, kino_sim tools/nav2_progress.py on the 16 nav2 runs of the
+# real bags 2026-11-10 / 11-14 / 11-14b; tonight two runs sat 120 s each, "stuck: the controller made no
+# progress", before NAV_TIMEOUT ended them -- 240 of a 367 s goal):
+#   NEAR      within NAV2_ARRIVED_M of the goal for NEAR_HOLD_S: nav2 has done its part; it went on
+#             shuffling for heading / tolerance (11-14b: 30 s within 11-15 cm on a goal that then
+#             succeeded; 75 s on another that started 12 cm off and ended "dithering"). The exact finish
+#             takes over. Would have fired on 3 of 16 runs, at 4 / 4 / 11 s, all 11-15 cm off.
+#   PROGRESS  nav2's own distance_remaining (NavigateToPose feedback) has not improved by PROGRESS_M in
+#             PROGRESS_S; a re-plan longer by PROGRESS_RESET_M restarts the clock. With NEAR in place no
+#             window down to 20 s fired on any of the 16 runs; 30 s keeps a margin (a half turn on the spot
+#             is 6-13 s at the measured 0.25-0.5 rad/s). Ends "narrow: no progress" -> the tight-place
+#             drivers (rl2 first), as dithering does. NAV2_WATCH=0: neither (the old behaviour).
+NAV2_WATCH = os.environ.get('NAV2_WATCH', '1') == '1'
+NEAR_HOLD_S = 4.0
+PROGRESS_S, PROGRESS_M, PROGRESS_RESET_M = 30.0, 0.10, 0.5
 # nav2 landed this close: finish with a turn on the spot, not goal_exec's
 # docking line (which backs up to a pre-goal first). = nav2's xy goal
 # tolerance, so after a nav2 route the finish is ALWAYS turn-only: drive test
@@ -251,6 +266,25 @@ def nav2_takes_it(plan_m, dist_m):
     """The width hint is overruled: the planner has a direct route (plan_m None = none / no answer)."""
     return plan_m is not None and plan_m <= PLAN_DIRECT * dist_m + PLAN_SLACK_M
 PIVOT_FILE = Path(os.environ.get('ROVER_STATE_DIR', '/logs')) / 'goal_exec_pivot.json'
+
+
+
+def no_progress(fb, now, window=None, gain=None, reset=None):
+    """'narrow: no progress ...' when nav2's distance_remaining (fb: [(t, d)], oldest first) has not
+    improved by `gain` for `window` seconds; a re-plan longer by `reset` restarts the clock. '' otherwise."""
+    window = PROGRESS_S if window is None else window
+    gain = PROGRESS_M if gain is None else gain
+    reset = PROGRESS_RESET_M if reset is None else reset
+    if not fb:
+        return ''
+    best, best_t = fb[0][1], fb[0][0]
+    for t, d in fb[1:]:
+        if d > best + reset or d < best - gain:
+            best, best_t = d, t
+    if now - best_t > window:
+        return (f'narrow: no progress (nav2 {best:.2f} m from the goal along its path, '
+                f'no {gain * 100:.0f} cm nearer in {now - best_t:.0f} s)')
+    return ''
 
 
 def yaw_of(q):
@@ -484,13 +518,20 @@ class Reach(GP.Pass):
         goal = NavigateToPose.Goal()
         goal.pose = pose_msg('odom', *g)
         goal.pose.header.stamp = self.get_clock().now().to_msg()
-        fut = self.nav.send_goal_async(goal)
+        fb = []                                    # (t, distance_remaining): the progress watch
+
+        def on_fb(m):
+            d = float(m.feedback.distance_remaining)
+            if math.isfinite(d) and d > 0:
+                fb.append((time.time(), d))
+        fut = self.nav.send_goal_async(goal, feedback_callback=on_fb)
         t0 = time.time()
         while not fut.done() and time.time() - t0 < 5:
             self.spin_for(0.05)
         gh = fut.result() if fut.done() else None
         if gh is None or not gh.accepted:
             return 'failed', 'nav2 rejected the goal'
+        near_since = None
         self.nav_gh = gh                           # cancelled on shutdown (main)
         res = gh.get_result_async()
         watch = []                                 # (t, x, y, th): the dither watch
@@ -504,7 +545,22 @@ class Reach(GP.Pass):
                     # comes next and is not nav2 calls stop() / nav_settle() first.
                     return 'reached', f'waypoint within {done_within * 100:.0f} cm (still driving)'
                 watch.append((time.time(),) + tuple(self.pose[:3]))
-                why = self.dithering(watch, g) or self.pinned(watch)
+                if NAV2_WATCH and done_within is None:
+                    now = time.time()
+                    if self.dist(g) <= NAV2_ARRIVED_M:
+                        near_since = near_since or now
+                        if now - near_since >= NEAR_HOLD_S:
+                            self.stop()
+                            gh.cancel_goal_async()
+                            self.spin_for(0.5)
+                            self.nav_gh = None
+                            self.stop()
+                            return 'reached', (f'within {NAV2_ARRIVED_M * 100:.0f} cm for {NEAR_HOLD_S:.0f} s '
+                                               f'({self.dist(g) * 100:.0f} cm): the exact finish takes over')
+                    else:
+                        near_since = None
+                why = self.dithering(watch, g) or self.pinned(watch) or \
+                    (no_progress(fb, time.time()) if NAV2_WATCH else '')
                 if why:
                     self.stop()
                     gh.cancel_goal_async()
