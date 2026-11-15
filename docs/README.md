@@ -26,6 +26,7 @@ Code comments name these files without a path ("see NAV_PLAN.md"): they are all 
 ## reports/ — one dated test or audit each
 [REAL_TEST_20261107](reports/REAL_TEST_20261107.md) · [SONAR_NAV2_COMPAT_2026-11-08](reports/SONAR_NAV2_COMPAT_2026-11-08.md) ·
 [VOICE_NAV_AUDIT_2026-11-07](reports/VOICE_NAV_AUDIT_2026-11-07.md) · [WAVESHARE_SWITCH_TEST](reports/WAVESHARE_SWITCH_TEST.md) ·
+[NAV2_DISCOVERY_20261115](reports/NAV2_DISCOVERY_20261115.md) (**read first**: nav2 does not start with the full stack; measurements, proposal),
 [CHANGES_20261115](reports/CHANGES_20261115.md) (sonar cone, nav2 bring-up, measured-motion shield, nav2 watches)
 
 ## learn/ and archive/
