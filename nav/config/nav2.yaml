@@ -41,8 +41,11 @@ bt_navigator:
     # nav2 1.5: the tree is built when bt_navigator ACTIVATES and every action server must answer
     # within wait_for_service_timeout (default 1000 ms). Under load follow_path came up later:
     # "Action server follow_path not available" -> bring-up failed, nav2_supervise restarted
-    # after its 60 s hang (twin, 2026-10-25). 5 s only bounds a wait at start-up.
-    wait_for_service_timeout: 5000
+    # after its 60 s hang (twin, 2026-10-25). It only bounds a wait at start-up.
+    # 60 s, was 5 (real robot 2026-11-15): with the full stack at load 25-40 the servers of the SAME
+    # launch were not discovered in 5 s -- "follow_path" / "compute_path_to_pose not available" on 6 of
+    # 7 bring-ups, nav2 never active, restarted every 2.5 min. nav2_supervise still gives up at 150 s.
+    wait_for_service_timeout: 60000
     # 1000 ms from 20 (2026-09-28). The BT gives each action server this long
     # to ACKNOWLEDGE a request; on the loaded Jetson (load ~10) the planner,
     # busy in a search, answered late, and the BT failed the whole goal:

@@ -15,6 +15,41 @@ Checked with the stack down (the camera cable `enP8p1s0` had no carrier: PoE off
 | Pi 5 `sonar_node` (Pi 307bd53) | 100 Hz serial poll, 7.6 % of a core | reader thread, 1.5 % |
 | Pi 5 DDS setup (Pi df254f4) | copied into nine scripts, not all alike | `kino_dds` in `scripts/ros_env.sh` |
 
+**Full stack up, 16:45-17:20 (after the owner's power cycle of the Pi 5 and the D555)**
+
+`./rover up`: every gate OK (IR 30, depth 30.8, scan 10, VO 30, gyro 200, /odom 20, /map 0.5, grid 4.8,
+costmaps 0.8 / 1.7, JPEG at the Pi 5 4.2, /wheel_state 19.7, clocks +37 ms). **But nav2 never became
+active: 10 restarts in 25 min**, and the gates do not show it (they read costmap rates only).
+Load 25-40 the whole time. Measured with the capture scripts kept in `tools/net/`:
+
+- **B1 is discovery traffic, not camera data.** To the Pi 5 at good signal: 1,700 small packets/s, 0.3 MB/s,
+  none from the camera process. On the Jetson's loopback: 26,000 packets/s, of which ~20,000 are
+  discovery -- TypeLookup HEARTBEAT/ACKNACK 14,200/s (every pair of the 36 participants, 3 a second,
+  for ever) and endpoint-discovery HEARTBEAT/ACKNACK 5,600/s. Real data is 3,600 packets/s (84 MB/s:
+  the images, over UDP because shared memory is off, see `rover` ENVSET). 14 plain nodes on a test
+  domain (77) show NO TypeLookup traffic at rest, so this is not normal Fast DDS behaviour.
+- **New nodes do not reliably find running ones.** A fresh node found `/tf`, `/scan`, `/map` in 1 s but
+  never the camera's `camera_info` (75 s); a watchdog probe born during a nav2 restart read camera,
+  lidar and maps as 0 for minutes; nav2's own `bt_navigator` did not find `compute_path_to_pose` of the
+  same launch in 5 s (6 of 7 starts) nor in 60 s (1 of 3); twice a costmap got no `odom` in 60 s.
+- **The D555 is a DDS participant on domain 0, the ROS domain** (`~/.realsense-config.json` domain 0).
+  On the camera cable every one of the Jetson's participants (72 source ports) runs endpoint discovery
+  with the camera: 64 HEARTBEATs/s to it, 8 ACKNACKs/s back -- it never catches up. Only the camera
+  driver needs to talk to it.
+- No packets are lost in the kernel (UDP RcvbufErrors, softnet drops, reassembly: 0 while measured).
+
+Changed on this evidence: the watchdog probe listens to the fast topics 4 s of every 30 (kept subscribed
+it cost 36 % of a core; now 10 %), and a topic that has a publisher but reads 0 gets ONE fresh probe
+before it is believed; nav2 `wait_for_service_timeout` 5 s -> 60 s (removes the most frequent start
+failure, not the cause).
+
+**Proposed, owner's decision (B7):** give the D555 its own DDS domain (`rs-dds-config` on the camera +
+the same number in `~/.realsense-config.json`), so the 36 ROS participants and the camera never meet.
+It is a setting stored in the camera and needs a camera restart. Then measure the same three numbers
+again (loopback discovery packets/s, fresh-node discovery time, nav2 starts). If TypeLookup traffic
+remains: `fastdds.type_propagation` in a Fast DDS profile (documented, values enabled /
+minimal_bandwidth / registration_only / disabled), twin first.
+
 **Still open** (not changed: each needs the full stack up, or the owner)
 
 | # | what | next step |
