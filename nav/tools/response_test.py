@@ -19,6 +19,7 @@ executor and the simulator are set from. Per surface, re-run it.
 """
 import json
 import math
+import os
 import sys
 import time
 from pathlib import Path
@@ -141,7 +142,8 @@ def main():
     if 'arc2' in parts:
         print('\n  ARC2, hard turns while driving (1.5 s each)   actual wz   ratio   speed')
         res['arc2'] = []
-    for wz in ((0.8, 1.0, 1.5) if 'arc2' in parts else ()):
+    # ARC2_WZ=1.0,1.5 runs only those (the rover creeps ~7 cm forward per set: the full list needs ~1 m clear)
+    for wz in (tuple(float(x) for x in os.environ.get('ARC2_WZ', '0.8,1.0,1.5').split(',')) if 'arc2' in parts else ()):
         for sgn in (1, -1):
             for vx, secs in ((0.10, 1.5), (-0.10, 1.5), (0.20, 1.5), (-0.10, 3.0)):
                 if n.nearest() < 0.36:
