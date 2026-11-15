@@ -17,7 +17,7 @@ class Fake:
  pose=(0.,0.,0.)
  def __init__(self,stop):
   self.stop_req=stop;self.t=0.;self.events=[];self.goal=Goal(self)
-  self.nav=NS(wait_for_server=lambda **kw:True,send_goal_async=lambda g:Future(self.goal))
+  self.nav=NS(wait_for_server=lambda **kw:True,send_goal_async=lambda g,**kw:Future(self.goal))
  def spin_for(self,dt):self.t+=dt
  def stop(self):self.events.append(('stop',self.t))
  def get_clock(self):return NS(now=lambda:NS(to_msg=lambda:None))
@@ -27,7 +27,7 @@ class Fake:
  def nav_reason(self):return 'test timeout'
 for requested_stop in [True,False]:
  f=Fake(requested_stop)
- ns=dict(NAV_TIMEOUT=120,NAV_LOG=Path('/nonexistent/nav.log'),NavigateToPose=NS(Goal=lambda:NS()),pose_msg=lambda *a:NS(header=NS()),time=NS(time=lambda:f.t))
+ ns=dict(NAV2_WATCH=True,NAV2_ARRIVED_M=0.15,NEAR_HOLD_S=4.0,no_progress=lambda fb,now:'',math=__import__('math'),NAV_TIMEOUT=120,NAV_LOG=Path('/nonexistent/nav.log'),NavigateToPose=NS(Goal=lambda:NS()),pose_msg=lambda *a:NS(header=NS()),time=NS(time=lambda:f.t))
  exec(compile(ast.Module(body=[fn],type_ignores=[]),str(source),'exec'),ns)
  result=ns['run_nav2'](f,(2.,0.,0.),timeout=120 if requested_stop else 0)
  assert f.events[0]==('stop',.1),f.events
