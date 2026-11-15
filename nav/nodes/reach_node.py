@@ -1383,8 +1383,14 @@ class Reach(GP.Pass):
                 prog = gobs[0] if math.isfinite(gobs[0]) else d
                 if prog < best - RL_GAIN_M:
                     best, best_t = prog, now
-                if now - best_t > RL_STALL_S:
-                    why = f'no {RL_GAIN_M * 100:.0f} cm of progress in {RL_STALL_S:.0f} s'
+                # rl2 was trained with rl2_drive.STALL_S (25 s) and is TOLD the time since its last
+                # progress as a share of it (R2.observe). Cut at 15 s it was stopped mid-manoeuvre:
+                # real robot 2026-11-15 (rl_dumps/20261114-202740): goal 1.5 m BEHIND, it turned
+                # round in 12 s (the rover turns ~25 deg/s), had closed 1.89 -> 1.45 m in the last
+                # 3 s, and was ended "no 10 cm of progress in 15 s".
+                stall_s = R2.STALL_S if getattr(pol, 'rl2', False) else RL_STALL_S
+                if now - best_t > stall_s:
+                    why = f'no {RL_GAIN_M * 100:.0f} cm of progress in {stall_s:.0f} s'
                     return result
                 vel = getattr(self, 'odom_vel', (0.0, 0.0))
                 # what the costmap remembers beside / behind goes to the policy too, not only the
