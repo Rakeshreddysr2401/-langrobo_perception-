@@ -5,7 +5,20 @@
 > With librealsense 2.59.2 + realsense-ros 4.59.2 (`camera/build.sh`, `camera/README.md`) and the
 > camera's motion rate set to 200 Hz: every `./rover up` gate OK, **nav2 active on the first try,
 > 0 restarts**, load 9-14 (was 25-40), loopback 6,900 packets/s (was 26,000) with the TypeLookup
-> storm gone (was 14,200/s). The camera-domain proposal in section 4 is no longer needed.
+> storm gone (was 14,200/s). ~~The camera-domain proposal in section 4 is no longer needed.~~
+>
+> **Update 22:56: the storm came back, then fixed at its root.** After the owner power-cycled the Pi 5
+> and the D555 (22:16) the running stack went back to load 42 and 22,600 loopback packets/s, 10,000 of
+> them TypeLookup, and fresh nodes again missed topics. A clean start only avoided it. Fix: Fast DDS
+> `fastdds.type_propagation = disabled` for every participant in the container (`ops/fastdds.xml`,
+> `./rover` ENVSET; live A/B first: a listener with it sent/received 0 TypeLookup packets, the same
+> data). After `./rover up`: every gate OK, nav2 active first try, 0 restarts, load 9-12, loopback
+> 11,000 packets/s, no TypeLookup, a fresh probe sees every topic.
+> **Still there: endpoint discovery ~5,300 packets/s that does not settle** (at the 21:23 clean
+> start ~570). The most-addressed participants are the camera driver's TWO: its ROS one and
+> librealsense's own realdds participant (Fast DDS 2.10, domain 0 from `~/.realsense-config.json`),
+> which every ROS node runs endpoint discovery with. **Section 4 (the camera on its own DDS domain)
+> is the next step again**, owner's go-ahead: it changes a setting stored on the camera.
 
 Read this first when you are back. Short version: **every sensor and the Pi 5 link work; nav2 (the
 part that plans and drives to a goal) never becomes active.** It was restarted 11+ times in 30 minutes.
