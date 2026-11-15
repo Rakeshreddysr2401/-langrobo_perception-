@@ -450,8 +450,21 @@ camera)
   # IR streams (colour and depth kept flowing) about a minute into every VO run.
   # 448x252x15 is the D555's low-res profile (~5 MB/s). The valid list:
   #   ros2 param describe /camera/camera0 rgb_camera.color_profile
-  dexec 'printf "{\"context\":{\"dds\":{\"enabled\":true,\"domain\":0}}}" > ~/.realsense-config.json;
-         export LD_LIBRARY_PATH=/opt/librealsense/lib:/root/librealsense/install/lib:$LD_LIBRARY_PATH;
+  # THE CAMERA'S OWN DDS STAYS ON THE CAMERA CABLE (2026-11-15). librealsense talks to the D555 over its
+  # own DDS participant ("realdds") on domain 0 -- the robot's ROS domain -- so it also discovered every
+  # ROS program on the Pi 5 and the laptops and, over WiFi, sent ~15,000 packets/s to the Pi's discovery
+  # ports (measured: one socket of realsense2_camera; Jetson WiFi out 4.9 MB/s, Pi ping 0.9-1.5 s, load
+  # 39, nav2 bring-up and late subscribers failing). Its UDP transport now only uses the address that
+  # reaches the camera (realdds dds-serialization: udp/whitelist). CAM_DDS_WHITELIST=0: the old config.
+  cam_src=$(ip -4 route get "${D555_IP:-192.168.11.55}" 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')
+  if [ "${CAM_DDS_WHITELIST:-1}" = 1 ] && [ -n "$cam_src" ]; then
+    cam_dds='{"context":{"dds":{"enabled":true,"domain":0,"udp":{"whitelist":["'"$cam_src"'"]}}}}'
+  else
+    cam_dds='{"context":{"dds":{"enabled":true,"domain":0}}}'
+  fi
+  echo "  camera DDS config: $cam_dds"
+  printf '%s' "$cam_dds" | docker exec -i "$NAME" sh -c 'cat > /root/.realsense-config.json'
+  dexec 'export LD_LIBRARY_PATH=/opt/librealsense/lib:/root/librealsense/install/lib:$LD_LIBRARY_PATH;
          exec ros2 launch realsense2_camera rs_launch.py camera_name:=camera0 \
             enable_infra1:=true enable_infra2:=true depth_module.infra_profile:=896x504x30 \
             depth_module.emitter_enabled:=false depth_module.laser_power:=0.0 \
