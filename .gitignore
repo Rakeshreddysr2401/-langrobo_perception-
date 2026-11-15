@@ -62,3 +62,11 @@ logs/rl_episodes.jsonl
 logs/tight_dumps/
 logs/rl_dumps/
 logs/rl_demos/
+
+# run output of a test day: session folders (bags, camera frames, notes), sonar
+# recordings, nav2 crash dumps written by nav2_supervise.sh, the watchdog's stdout.
+# What matters from them is written up in docs/reports/ with the numbers.
+logs/session_*/
+logs/sonar_log_*.npz
+logs/nav_crashes/
+logs/watchdog.out

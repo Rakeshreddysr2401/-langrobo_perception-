@@ -42,6 +42,7 @@
 #   ./rover health     every layer's rate in ONE pass (~15 s)
 #   ./rover watchdog   start|stop|pause|resume|status|act — watches the layers, serves
 #                      http://<jetson>:8099, restarts a dead layer only when told (ops/)
+#   ./rover clock      do the Pi 5's clock and the Jetson's agree (nav2 drops the sonars if not)
 #   ./rover net        WiFi signal, link rate, jitter to the Pi 5, ROS traffic on the air
 #   ./rover stop       tear the container down (saves the slam room first)
 #   ./rover test [W]   every offline test, in a throwaway container (no robot; W = nav, tight, ...)
@@ -1065,6 +1066,10 @@ up)
   fi
 
   echo
+  echo "[pi5] clock — its sonar stamps are placed in time with the Jetson's clock"
+  "$0" clock || true
+
+  echo
   echo "[pi5] teleop + agent_node"
   # SSH_OK first: on weak WiFi this ssh times out, and an empty answer used to
   # read as "not running" while both were up (2026-10-09).
@@ -1799,6 +1804,14 @@ for k,v in d['layers'].items(): print('  %-8s %-5s restarts=%d'%(k,v['status'].u
       ;;
     *) die "usage: ./rover watchdog start|act|stop|pause|resume|status" ;;
   esac
+  ;;
+
+# The Pi 5 stamps the sonars with its own clock; nav2 reads them with ours. Each
+# machine sets its clock from the internet alone (this Jetson boots in 1970), so
+# they can disagree with every rate gate green. tools/clock_check.py measures it.
+clock)
+  need_container
+  rexec "python3 $TOOLS/clock_check.py ${2:-3}"
   ;;
 
 net)
