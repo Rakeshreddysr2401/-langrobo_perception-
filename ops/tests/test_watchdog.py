@@ -32,7 +32,7 @@ def test_a_probe_line_is_judged_once_and_a_silent_probe_is_replaced():
     fake = type('P', (), {'poll': lambda self: None, 'stdout': [], 'terminate': lambda self: stopped.append(1)})
     wd.subprocess.Popen = lambda *a, **kw: started.append(1) or fake()
     wd.subprocess.run = lambda *a, **kw: None
-    wd.probe.update(proc=None, started=0.0, line_t=0.0, data=None, judged_t=0.0, refreshed=0.0)
+    wd.probe.update(proc=None, started=0.0, line_t=0.0, data=None, judged_t=0.0, refreshed=0.0, seen=set())
     assert wd.probe_latest() is None and len(started) == 1, 'first call starts the probe, nothing to judge yet'
     wd.probe.update(data={'hz': {}, 'moving': False}, line_t=time.time())
     assert wd.probe_latest() == {'hz': {}, 'moving': False}
@@ -47,7 +47,6 @@ def test_a_probe_line_is_judged_once_and_a_silent_probe_is_replaced():
 
 
 def test_a_silent_topic_gets_one_fresh_probe_then_is_believed():
-    import time
     stops = []
     wd.container_up = lambda: True
     wd.pi5_status = lambda: {'reachable': True, 'manual': False}
@@ -55,6 +54,7 @@ def test_a_silent_topic_gets_one_fresh_probe_then_is_believed():
     line = {'hz': dict(OK, **{'/scan': 0.0}), 'moving': False, 'silent': ['/scan']}
     wd.probe_latest = lambda: line
     wd.probe['refreshed'] = 0.0
+    wd.probe['seen'] = set()
     wd.state['layers'] = {}
     wd.step()
     assert stops == [1] and wd.state['layers'] == {}, 'first time: a fresh probe, the line is not judged'
@@ -62,9 +62,26 @@ def test_a_silent_topic_gets_one_fresh_probe_then_is_believed():
     assert stops == [1] and wd.state['layers']['lidar']['status'] == 'down', 'the fresh probe says the same: believed'
 
 
+def test_a_topic_that_was_flowing_and_went_to_0_gets_a_fresh_probe():
+    """2026-11-15 22:20: the probe lost every topic AND its publishers ('silent' empty)."""
+    stops = []
+    wd.container_up = lambda: True
+    wd.pi5_status = lambda: {'reachable': True, 'manual': False}
+    wd.probe_stop = lambda: stops.append(1)
+    wd.probe.update(refreshed=0.0, seen=set())
+    lines = iter([{'hz': dict(OK), 'moving': False, 'silent': []},
+                  {'hz': {t: 0.0 for t in OK}, 'moving': False, 'silent': []}])
+    wd.probe_latest = lambda: next(lines)
+    wd.step()
+    assert stops == [] and wd.state['layers']['camera']['status'] == 'ok'
+    wd.step()
+    assert stops == [1], 'everything that was flowing went to 0: a fresh probe first, not "all down"'
+
+
 if __name__ == '__main__':
     test_judge()
     test_restart_is_limited_and_pose_gets_slam_false()
     test_a_probe_line_is_judged_once_and_a_silent_probe_is_replaced()
-    test_a_silent_topic_gets_one_fresh_probe_then_is_believed()      # last: it replaces wd.probe_latest
+    test_a_silent_topic_gets_one_fresh_probe_then_is_believed()      # these two replace wd.probe_latest
+    test_a_topic_that_was_flowing_and_went_to_0_gets_a_fresh_probe()
     print('PASS')
