@@ -1692,6 +1692,15 @@ class Reach(GP.Pass):
                 conf = ev.base(self.pose)           # camera points already proven real
                 if len(conf):
                     every, lidar = np.vstack([every, conf]), np.vstack([lidar, conf])
+                # ... and what goal_exec checks every move against besides those: the costmap's cells
+                # the camera cannot see now (beside, behind; MC.for_checks). Without them the route
+                # planned moves goal_exec then refused -- real robot 2026-11-15 22:33 and 22:34: "F10 L45
+                # F25 ..." refused at the first move, "blocked mid-leg: obstacle 0.27 m into the 0.29 m
+                # leg", twice, then 22:28 the same: ~70 s of plans nobody could drive. One obstacle
+                # picture for the plan and the driver: a plan is drivable, or "no fit" comes at once.
+                mc = self.outside_body(MC.for_checks(self.lcm, self.pose))
+                if len(mc):
+                    every, lidar = np.vstack([every, mc]), np.vstack([lidar, mc])
                 plans += 1
                 steps, info = TRT.plan(every, tb, ge, budget_s=TIGHT_BUDGET_S)
                 mode = 'all'
