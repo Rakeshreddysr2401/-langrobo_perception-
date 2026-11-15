@@ -125,6 +125,11 @@ class GoalExec:
     ARRIVE = 0.003        # m   along-track: close enough to stop the leg
     REVERSE_WITHIN = 0.6  # m   a point this close and behind is reached backwards
     MAX_TRIES = 8         # a full correction cycle (pre-goal + approach) is two
+    # In place (within POS_TOL) and within FACE_TOL after this many tries: done. YAW_TOL (1 deg) is
+    # the aim, not a wall: real robot 2026-11-15 22:25, 1.2 cm away and +1.3 deg, it spent 35 s on 8
+    # tries and then said "failed"; 22:24, 18 s of turn-and-shuffle for the same. A turn that small
+    # is under the drive's resolution (WZ_DRIVE ~0.22 rad/s actual, 0.4-0.9 s lag).
+    SETTLE_TRIES = 3
     L = 0.35              # m   pre-goal distance behind the goal: runway to steer on
     L_MAX = 0.50          # m   the line approach covers at most this
     LINE_OK = 0.08        # m   cross-track that a line approach can still steer out
@@ -416,6 +421,10 @@ class GoalExec:
         along, cross = self.line_coords(pose)
         if err <= self.POS_TOL and abs(yerr) <= self.YAW_TOL:
             self._finish('reached', f'{err * 100:.1f} cm, {math.degrees(yerr):+.1f} deg')
+            return
+        if err <= self.POS_TOL and abs(yerr) <= self.FACE_TOL and self.tries >= self.SETTLE_TRIES:
+            self._finish('reached', f'{err * 100:.1f} cm, {math.degrees(yerr):+.1f} deg (within {math.degrees(self.FACE_TOL):.0f} deg '
+                                    f'after {self.tries} tries)')
             return
         if self.tries >= self.MAX_TRIES:
             self._finish('failed', f'{err * 100:.1f} cm, {math.degrees(yerr):+.1f} deg after {self.tries} tries')
