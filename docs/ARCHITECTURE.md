@@ -115,7 +115,7 @@ occurrence is a glance rather than an investigation.
 | `/camera/camera0/infra1,2/camera_info` | 30 Hz | intrinsics + baseline |
 | `/camera/camera0/depth/image_rect_raw` | 30 Hz | `depth_gate` → `.../depth/image_still` → nvblox; `pixel_to_goal`; `depth_obstacles` |
 | `/camera/camera0/color/image_raw` | 30 Hz | `image_bridge` → `/camera/color/image_raw/compressed` (the Pi 5's `look()`) |
-| `/camera/camera0/motion/sample` | 200 Hz | `gyro_node` |
+| `/camera/camera0/imu` (USB) or `/camera/camera0/motion/sample` (Ethernet/DDS, twin) | 200 Hz | `gyro_node` (finds whichever exists) |
 
 ### On the Jetson
 

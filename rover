@@ -204,6 +204,12 @@ kill_match(){ docker exec "$NAME" bash -lc "
   done
   kill -9 \$alive 2>/dev/null; true" >/dev/null 2>&1 || true; }
 
+# Stop the D555 driver GENTLY before the container goes (SIGINT, then -9 after 3 s): it closes
+# its streams and the camera's USB endpoints. `docker rm -f` alone SIGKILLs it mid-stream, and on
+# USB that left the camera wedged ("reset_endpoint ... Connection timed out", stuck at "Starting
+# Sensor: Depth Module"); only a cable re-plug recovered it (2026-11-16). Harmless over Ethernet.
+cam_stop(){ running && kill_match '[r]ealsense2_camera'; true; }
+
 # Every fixed frame on the rover -- base_link -> camera0_link, laser, wheels,
 # chassis -- from ONE robot_state_publisher serving the URDF that
 # description/build.py derives from params.yaml at this moment (never a stale
@@ -369,6 +375,7 @@ assert_rate(){ # topic  min_hz  label
 pose_honest(){ rexec "python3 $POSE/nodes/health.py"; }
 
 start_container(){
+  cam_stop
   docker rm -f "$NAME" >/dev/null 2>&1 || true
   mkdir -p "$HOSTLOGS" "$HOSTMAPS"
   local twin_mount=()
@@ -400,8 +407,11 @@ start_container(){
   # --init: a real PID 1 (docker's tini) that reaps orphans. PID 1 was `sleep infinity`, which
   # never does: every nav restart left nav2's killed processes as zombies (9 after one
   # `./rover nav`, 2026-11-15). Takes effect at the next container start (./rover up / camera).
+  # /dev/bus/usb from the HOST, live: --privileged alone gives a /dev snapshot taken at container start,
+  # so a USB device that re-enumerates (the D555 after initial_reset or a hiccup comes back with a new
+  # device number) would never appear inside, and the driver could not reconnect (2026-11-16).
   docker run -d --init --name "$NAME" --entrypoint /bin/bash \
-    --runtime=nvidia --network=host --privileged \
+    --runtime=nvidia --network=host --privileged -v /dev/bus/usb:/dev/bus/usb \
     -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all -e NVIDIA_DISABLE_REQUIRE=1 \
     -e ROS_DOMAIN_ID=$DOMAIN "${twin_mount[@]}" "${mps_args[@]}" \
     -v "$cuda_cache":/root/.nv/ComputeCache -e CUDA_CACHE_MAXSIZE=4294967296 \
@@ -454,7 +464,28 @@ camera)
   dexec "exec python3 -u /opt/twin/jetson/announce.py '$(git -C "$REPO" branch --show-current)' \
          '$(git -C "$REPO" log --oneline -1 | tr -dc "[:alnum:] ._:,()+-" | cut -c1-90)' > /tmp/announce.log 2>&1"
   else
-  echo "[camera] D555 — stereo IR + depth + motion"
+  # THE LINK (2026-11-16): the D555 can stream over USB 3 (FW 7.58) as well as over Ethernet/DDS.
+  # USB is the robot's link now (USB-C to USB-A, USB 3, into the Jetson). Auto-detected from
+  # the host's USB bus; override with CAM_LINK=usb|eth ./rover camera. Two differences:
+  #  - motion: over USB the camera has SEPARATE gyro (200 Hz) and accel (100 Hz) sensors, not
+  #    the combined DDS 'motion' stream, so enable_motion publishes nothing. unite_imu_method:=2
+  #    (linear interpolation) merges them into ONE /camera/camera0/imu at the gyro's 200 Hz --
+  #    the same combined message motion/sample was; gyro_node finds it by name ('/imu').
+  #  - discovery: librealsense's own DDS participant (realdds, domain 0) is switched OFF on USB.
+  #    It was most of the remaining discovery traffic on the Jetson (OPEN_ISSUES B7, 2026-11-15).
+  #  - camera/d555_usb.yaml: the on-camera point cloud OFF (it fights the depth stream over USB).
+  #  - initial_reset:=true: the driver resets the camera at every start. A USB start after a bad
+  #    stop left the depth module half-alive (no IR at all, depth at 45 Hz) through any number of
+  #    driver restarts (2026-11-16); a reset is what a cable re-plug did. Needs /dev/bus/usb live.
+  if [ -z "${CAM_LINK:-}" ]; then
+    if lsusb -d 8086:0b56 >/dev/null 2>&1; then CAM_LINK=usb; else CAM_LINK=eth; fi
+  fi
+  if [ "$CAM_LINK" = usb ]; then
+    cam_dds=false; cam_imu="enable_gyro:=true enable_accel:=true gyro_fps:=200 accel_fps:=100 unite_imu_method:=2 config_file:=$CAMDRV/d555_usb.yaml initial_reset:=true"
+  else
+    cam_dds=true;  cam_imu="enable_motion:=true motion_fps:=200"
+  fi
+  echo "[camera] D555 over $CAM_LINK — stereo IR + depth + motion"
   echo "         emitter OFF and sync OFF; both are load-bearing, see pose/README.md"
   # COLOUR 448x252x15. It was 424x240x15 from 2026-09-06 -- a D4xx profile the
   # D555 does not offer, so the driver logged "invalid" and fell back to
@@ -466,7 +497,7 @@ camera)
   # motion_fps:=200, said, not left to the default: fusion2 publishes /odom on every 10th gyro
   # sample, and realsense-ros 4.59.2 (camera/build.sh) picks 100 Hz where 4.58.2 picked 200 --
   # /odom fell to 10 Hz and the fused gate failed (2026-11-15). Options: 100, 200.
-  dexec 'printf "{\"context\":{\"dds\":{\"enabled\":true,\"domain\":0}}}" > ~/.realsense-config.json;
+  dexec 'printf "{\"context\":{\"dds\":{\"enabled\":'"$cam_dds"',\"domain\":0}}}" > ~/.realsense-config.json;
          export LD_LIBRARY_PATH=/opt/librealsense/lib:/root/librealsense/install/lib:$LD_LIBRARY_PATH;
          c='$CAMDRV'/ws; if [ -f $c/install_$ROS_DISTRO/setup.bash ] && [ -d $c/librealsense/lib ]; then
            export LD_LIBRARY_PATH=$c/librealsense/lib:$LD_LIBRARY_PATH; source $c/install_$ROS_DISTRO/setup.bash; fi;
@@ -475,7 +506,7 @@ camera)
             depth_module.emitter_enabled:=false depth_module.laser_power:=0.0 \
             enable_depth:=true enable_color:=true rgb_camera.color_profile:=448x252x15 \
             align_depth.enable:=true \
-            enable_motion:=true motion_fps:=200 enable_sync:=false > /tmp/camera.log 2>&1'
+            '"$cam_imu"' enable_sync:=false > /tmp/camera.log 2>&1'
   fi
   t=0
   until cam_ready; do
@@ -487,9 +518,13 @@ camera)
         echo "    The driver REFUSED the camera (/tmp/camera.log: Unsupported device) -- not a power problem."
         echo "    Build the camera stack for its firmware: ./camera/build.sh  (camera/README.md), then ./rover camera"; exit 1
       fi
-      docker exec "$NAME" grep -q "No RealSense devices were found" /tmp/camera.log 2>/dev/null \
-        && echo "    Its on-camera DDS server is offline. It still answers ping; that means nothing."
-      echo "    Only a physical PoE power-cycle (unplug ~5 s) recovers this."
+      if [ "$CAM_LINK" = usb ]; then
+        echo "    USB: is it on SuperSpeed? lsusb -t (want 5000M; 480M = USB 2 cable/port). Re-plug the USB cable (~5 s)."
+      else
+        docker exec "$NAME" grep -q "No RealSense devices were found" /tmp/camera.log 2>/dev/null \
+          && echo "    Its on-camera DDS server is offline. It still answers ping; that means nothing."
+        echo "    Only a physical PoE power-cycle (unplug ~5 s) recovers this."
+      fi
       echo "    Container left up so you can retry: ./rover camera"; exit 1; }
     sleep 3
   done
@@ -1789,6 +1824,7 @@ stop)
   if running && docker exec "$NAME" pgrep -f '[a]sync_slam_toolbox_node' >/dev/null 2>&1; then
     timeout 40 docker exec "$NAME" bash -lc "$ENVSET python3 -c \"import sys; sys.path.insert(0,'$MAPPING/tools'); import map_autosave as m; ok, why = m.save_now(); print('  room saved ' + why if ok else '  room NOT saved (previous maps/last kept)')\"" || echo "  room NOT saved (timed out; previous maps/last kept)"
   fi
+  cam_stop
   docker rm -f "$NAME" >/dev/null 2>&1 && echo "  container removed" || echo "  nothing running"
   ;;
 

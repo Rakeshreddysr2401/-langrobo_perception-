@@ -1,0 +1,10 @@
+# D555 over USB (./rover camera with CAM_LINK=usb, the default when the camera is on the Jetson's USB).
+# Passed to realsense2_camera as config_file:= ; these are node parameters rs_launch.py has no
+# launch argument for.
+#
+# enable_point_cloud: FW 7.58 exposes an on-camera "Depth Mapping Camera" over USB whose point-cloud
+# stream is ON by default (1280x720x15). It cannot run beside the Depth stream ("Point Cloud cannot
+# start while Depth is streaming"), so the driver looped on errors at every start, and in one of
+# three restarts the IR streams never came up (2026-11-16). The rover does not use it: nvblox builds
+# its own map from depth. Occupancy is already off by default.
+enable_point_cloud: false
