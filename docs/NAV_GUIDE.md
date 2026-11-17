@@ -67,7 +67,7 @@ Global costmap, in order (`nav2.yaml` `plugins:`):
 | layer | source | what it adds | weakness |
 |---|---|---|---|
 | `nvblox_layer` | camera depth → nvblox 3D map → `ghost_clear` → 2D grid, heights **3–31 cm** (31 since 2026-10-19: the rover is 26.3 cm, a 28 cm tabletop must be an obstacle) | low things the LiDAR misses (shoes, chair legs below 25 cm) and overhangs up to 31 cm. **Remembers** them | sees 87° ahead only; does not decay, so people who walked by stay as "specks" (S10) |
-| (not a layer) **front sonars** | `/sonar/left`, `/sonar/right`: 2 cones (±15°) at 6.5 cm, front corners, 2 cm-4 m | what is low and close in front, under the LiDAR and inside the camera's blind 40 cm -- used by the collision monitor and reach / goal_exec (§5), NOT painted into the costmaps (a cone says how far, not where) | ahead only; soft things may swallow the ping |
+| (not a layer) **front sonars** | `/sonar/left`, `/sonar/right`: 2 cones (±15°) at 9.5 cm, 18 cm apart (since 2026-11-17), 2 cm-4 m | what is low and close in front, under the LiDAR and inside the camera's blind 40 cm -- used by the collision monitor and reach / goal_exec (§5), NOT painted into the costmaps (a cone says how far, not where) | ahead only; soft things may swallow the ping |
 | `lidar_layer` | `/scan`, one plane at 25 cm, 360°, returns from **5 cm** (20 cm until 2026-10-19 left ~15 cm in front of the nose unmarked) | everything round the rover, live; raytracing clears stale marks | one height only |
 | `footprint_clear` | our plugin (`nav/plugins`) | cells under the rover's own outline are free — it's standing there | global only |
 | `inflation_layer` | the layers above | the cost ramp around every lethal cell | **see §2.4** |
