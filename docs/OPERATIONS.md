@@ -347,6 +347,12 @@ ssh 192.168.1.16 'pkill -f teleop_web.py'
 A stale `ROS_DISCOVERY_SERVER`. `./rover` unsets it on every command; if you are
 running something by hand, do the same.
 
+Pi 5 nodes missing here (since 2026-11-17 they come over the Jetson <-> Pi 5 cable,
+`enP8p1s0` 10.0.0.1 <-> Pi 5 10.0.0.2): `ping -c3 10.0.0.2` and
+`cat /sys/class/net/enP8p1s0/carrier`. The Pi 5 chooses cable or WiFi when each of its
+services starts, so after re-plugging restart them there. Pi 5 nodes missing on the
+RViz laptop are expected: details in the Pi 5's `docs/NETWORKING.md`.
+
 ### An obstacle stays in RViz after the person has gone
 
 Pink cells with the light-blue inflation ring, in FRONT of a standing rover,

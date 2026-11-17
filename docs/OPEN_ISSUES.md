@@ -1,4 +1,25 @@
-# Open issues — where things stand (newest first; last updated 2026-11-15)
+# Open issues — where things stand (newest first; last updated 2026-11-17)
+
+## 2026-11-17 — Jetson <-> Pi 5 on a direct Ethernet cable; D555 on USB checked again
+
+- **D555 on USB 3** (since e6b12a9): enumerates at 5000M (now hub port 2-1.4), `./rover camera`
+  picks USB by itself: IR 29.9 Hz, depth 30.1, `/camera/camera0/imu` 201.8, colour 14.9 (its
+  profile is 448x252x15). The camera's Ethernet cable is no longer needed.
+- **Jetson <-> Pi 5 cable live.** `enP8p1s0` = NM profile `kino-link` (was "Wired connection 1"):
+  `10.0.0.1/24` + `192.168.11.70/24` kept for the D555 Ethernet fallback (`CAM_LINK=eth`), MTU
+  **1500** (was 9000 for the camera), never-default. Pi 5 `eth0` = `10.0.0.2/24`. Cable 935 Mbit/s
+  vs WiFi 135, ping 0.3 ms. MTU 9000 not used: the Pi 5's macb driver refuses an MTU change while
+  the port is up (NetworkManager), and the Pi 5 gets results, not raw streams.
+- Fast DDS sends to every address the other side announces, so the cable alone did not keep
+  traffic off WiFi (Pi 5 -> Jetson test topic: cable + 2x on WiFi). Fixed on the **Pi 5 only**
+  (its `scripts/fastdds_cable.xml` via `kino_dds`, plus a "from 10.0.0.2 -> cable only" routing
+  rule). Measured with 4 MB/s each way on domain 77: 100 % cable, WiFi ~1 kB/s. On domain 0 this
+  container sees all 7 Pi 5 nodes, `/sonar/left` 15.2 Hz. Nothing in this repo changed; the
+  Jetson's own `ops/fastdds.xml` keeps all interfaces (the RViz laptop is on WiFi).
+  Full write-up: Pi 5 `~/ros2_ws/docs/NETWORKING.md`.
+- Still on WiFi: ssh / `PI5_HOST` (192.168.1.16), the RViz laptop, the Mac Mini, internet.
+  The RViz laptop no longer sees the Pi 5's own topics (sonar, brain).
+- Not tested: WiFi off (owner will say when), full `./rover up` + driving with the cable.
 
 ## 2026-11-15 — Jetson + Pi 5 check (code, links, wasted CPU)
 
