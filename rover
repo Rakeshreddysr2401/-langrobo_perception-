@@ -1034,7 +1034,7 @@ vlm)
   need_container
   echo "  checking the fused pose is up before bridging vision to a goal..."
   assert_rate /odom 15 "fused odom" || die "no fused pose — run ./rover fused"
-  kill_match 'image_bridge.py|pixel_to_goal.py|frame_capture.py'
+  kill_match 'image_bridge.py|pixel_to_goal.py|frame_capture.py|frame_uploader.py'
   echo "[vlm] image_bridge — color frame -> JPEG, for the Pi 5's look()/VLM"
   dexec "exec python3 $PERCEPTION/nodes/image_bridge.py > /tmp/image_bridge.log 2>&1"
   echo "[vlm] pixel_to_goal — VLM pixel + depth -> odom-frame Nav2 goal"
@@ -1043,6 +1043,15 @@ vlm)
   # pose at its stamp -> /logs/frames (host ~/rover/logs/frames, FRAMES_MAX_GB=5). ~8 % of a core.
   echo "[vlm] frame_capture — keyframes + depth + pose at the stamp, for the frame memory"
   dexec "cd $PERCEPTION/nodes && exec python3 frame_capture.py > /tmp/frame_capture.log 2>&1"
+  # step 2: each kept frame (JPEG + metadata) -> the Mac's frame memory (kmem there). The container
+  # has no mDNS: the Mac's address is looked up here, on the host. Mac off = frames wait on disk.
+  MEM_IP=$(getent hosts "${MEMORY_HOST:-singireddys-mac-mini.local}" | awk '{print $1; exit}')
+  if [ -n "$MEM_IP" ]; then
+    echo "[vlm] frame_uploader — keyframes -> the Mac's frame memory (http://$MEM_IP:8094)"
+    dexec "cd $PERCEPTION/nodes && MEMORY_URL=http://$MEM_IP:8094 exec python3 -u frame_uploader.py > /tmp/frame_uploader.log 2>&1"
+  else
+    echo "  ! the Mac (${MEMORY_HOST:-singireddys-mac-mini.local}) not found: frames stay on the Jetson for now"
+  fi
   sleep 4
   echo
   echo "  GATE vlm:"

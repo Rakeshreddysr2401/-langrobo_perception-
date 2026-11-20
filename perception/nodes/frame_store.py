@@ -131,7 +131,7 @@ def prune(root: str, max_bytes: int) -> int:
     for fid, dp in frames:
         if use <= max_bytes:
             break
-        for ext in ('.json', '.jpg', '.depth.png'):
+        for ext in ('.json', '.jpg', '.depth.png', '.sent'):
             p = os.path.join(dp, fid + ext)
             try:
                 use -= os.path.getsize(p)
