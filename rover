@@ -1034,11 +1034,15 @@ vlm)
   need_container
   echo "  checking the fused pose is up before bridging vision to a goal..."
   assert_rate /odom 15 "fused odom" || die "no fused pose — run ./rover fused"
-  kill_match 'image_bridge.py|pixel_to_goal.py'
+  kill_match 'image_bridge.py|pixel_to_goal.py|frame_capture.py'
   echo "[vlm] image_bridge — color frame -> JPEG, for the Pi 5's look()/VLM"
   dexec "exec python3 $PERCEPTION/nodes/image_bridge.py > /tmp/image_bridge.log 2>&1"
   echo "[vlm] pixel_to_goal — VLM pixel + depth -> odom-frame Nav2 goal"
   dexec "exec python3 $PERCEPTION/nodes/pixel_to_goal.py > /tmp/pixel_to_goal.log 2>&1"
+  # frame memory step 1 (Pi docs/plans/FRAME_MEMORY.md): every keyframe + its depth + the camera
+  # pose at its stamp -> /logs/frames (host ~/rover/logs/frames, FRAMES_MAX_GB=5). ~8 % of a core.
+  echo "[vlm] frame_capture — keyframes + depth + pose at the stamp, for the frame memory"
+  dexec "cd $PERCEPTION/nodes && exec python3 frame_capture.py > /tmp/frame_capture.log 2>&1"
   sleep 4
   echo
   echo "  GATE vlm:"
