@@ -124,6 +124,42 @@ Visualization Manager:
       Use rainbow: false
       Value: true
 
+    # -- front sonar, left (HC-SR04, 9.5 cm up). Relayed by the Jetson's
+    # sonar_nav2_compat, so a laptop sees it although the Pi 5 talks only
+    # over the Jetson cable. "No echo" is drawn as a cone at max range.
+    - Alpha: 0.35
+      Buffer Length: 1
+      Class: rviz_default_plugins/Range
+      Color: 255; 0; 255
+      Enabled: true
+      Name: Sonar left
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /nav2_sonar/left
+      Value: true
+
+    # -- front sonar, right (HC-SR04, 9.5 cm up). Relayed by the Jetson's
+    # sonar_nav2_compat, so a laptop sees it although the Pi 5 talks only
+    # over the Jetson cable. "No echo" is drawn as a cone at max range.
+    - Alpha: 0.35
+      Buffer Length: 1
+      Class: rviz_default_plugins/Range
+      Color: 0; 200; 255
+      Enabled: true
+      Name: Sonar right
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /nav2_sonar/right
+      Value: true
+
     # ── THE ROOM: the lidar's map (slam_toolbox), and the frame we live in ──
     # Drawn under everything else, and opaque -- this is the primary map now,
     # not a translucent overlay on top of nvblox's. 5 cm cells. Black is a wall
