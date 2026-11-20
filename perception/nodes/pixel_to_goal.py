@@ -78,6 +78,12 @@ AT THE MOMENT OF THE PHOTO (INTELLIGENCE_PLAN.md B2, 2026-09-26)
     then measured from where the robot is NOW -- the object is fixed in odom,
     the robot is not. stamp 0 = the old behaviour: newest depth, newest pose.
     Replies add "at_capture": true/false and, when true, "capture_dt_ms".
+    REMEMBERED FRAMES (frame memory, 2026-11-21, Pi docs/plans/FRAME_MEMORY.md): a stamp older than
+    the ring and the snapshots, that frame_capture KEPT (/logs/frames/<origin>/<stamp>.json), is grounded
+    on that frame's own saved depth, intrinsics and camera pose -- minutes or days later. Same power-on:
+    the pose as saved; an earlier power-on: through the house map (map <- odom then and now). The reply
+    adds "remembered": true, "frame_age_s", "pose_from" and, whenever map <- odom is known now,
+    "object_map" (the object on the house map). No LiDAR cross-check for those (no scan was kept).
     A stamp with no snapshot and no ring frame fails "snapshot_expired": the
     Pi 5 decides whether the newest view is still the same view.
 
@@ -168,6 +174,11 @@ from cv_bridge import CvBridge
 from geometry_msgs.msg import PointStamped
 from sensor_msgs.msg import CameraInfo, Image, LaserScan
 from std_msgs.msg import String
+from types import SimpleNamespace as _NS
+
+import sys as _sys
+_sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # frame_store, beside this file
+import frame_store  # noqa: E402
 from tf2_ros import Buffer, TransformListener
 
 # Mirrors langrobo_core/tools/approach.py's _STANDOFF_M — different repos, on
@@ -196,6 +207,7 @@ _MAX_DEPTH_M = 6.0        # beyond this the reading is usually noise
 DEPTH_RING_S = 2.0        # depth frames kept this long ...
 DEPTH_RING_DT = 0.09      # ... at most one per this: ~22 x 900 KB
 SNAP_MAX_DT_S = 0.10      # nearest depth frame must be this close to the photo
+FRAMES_DIR = os.environ.get('FRAMES_DIR', '/logs/frames')   # frame_capture's kept frames
 SNAPSHOTS = 24            # photos remembered: the Pi 5 surveys EVERY photo in the
                           # background (tools/survey.py), after a search's 8 views,
                           # so the depth must outlive the search (~0.9 MB each)
@@ -426,6 +438,7 @@ class PixelToGoal(Node):
         self._depth_at = 0.0
         self._ring = deque()                 # (stamp_ns, depth array)
         self._snaps = OrderedDict()          # stamp_ns -> {depth, cam_tf, dt_ms}
+        self._origin = None                  # /fusion/status origin_epoch: which odom we are in
         self._snap_pending = []              # (stamp_ns, first try, monotonic)
         self._scans = deque()                # (stamp_ns, frame_id, N x 3 points in the laser frame)
 
@@ -437,6 +450,7 @@ class PixelToGoal(Node):
             PointStamped, '/vision/pixel_query', self._on_query, 5)
         self.create_subscription(
             PointStamped, '/vision/pixel_snapshot', self._on_snapshot, 5)
+        self.create_subscription(String, '/fusion/status', self._on_fusion_status, 2)
         self.create_subscription(LaserScan, '/scan', self._on_scan, 2)
         self.create_timer(0.1, self._retry_snapshots)
         self._result_pub = self.create_publisher(String, '/vision/pixel_result', 5)
@@ -505,6 +519,42 @@ class PixelToGoal(Node):
         except Exception as e:
             name = type(e).__name__
             return None, ('tf_not_yet' if 'Extrapolation' in name else f'tf_failed:{name}')
+
+    def _on_fusion_status(self, msg: String) -> None:
+        try:
+            self._origin = json.loads(msg.data).get('origin_epoch')
+        except Exception:
+            pass
+
+    def _map_odom_now(self):
+        """(t, q) of map <- odom now, or None (no SLAM yet)."""
+        try:
+            tf = self._tf_buffer.lookup_transform('map', 'odom', Time())
+        except Exception:
+            return None
+        t, q = tf.transform.translation, tf.transform.rotation
+        return (t.x, t.y, t.z), (q.x, q.y, q.z, q.w)
+
+    def _remembered_snapshot(self, stamp_ns: int) -> tuple:
+        """A frame frame_capture kept, as a snapshot: its depth, its K, its camera pose in TODAY's odom."""
+        path = frame_store.find_frame(FRAMES_DIR, stamp_ns)
+        if path is None:
+            return None, 'snapshot_expired'
+        try:
+            meta, depth = frame_store.load_frame(path)
+        except Exception as e:
+            return None, f'remembered_unreadable:{type(e).__name__}'
+        if depth is None:
+            return None, 'remembered_without_depth'
+        pose, why = frame_store.cam_pose_now(meta, self._origin, self._map_odom_now())
+        if pose is None:
+            return None, why
+        (tx, ty, tz), (qx, qy, qz, qw) = pose
+        cam_tf = _NS(transform=_NS(translation=_NS(x=tx, y=ty, z=tz), rotation=_NS(x=qx, y=qy, z=qz, w=qw)))
+        K = meta['K']
+        return {'depth': depth, 'cam_tf': cam_tf, 'dt_ms': meta.get('depth_dt_ms'), 'scan': None,
+                'K': (K['fx'], K['fy'], K['cx'], K['cy']), 'remembered': True, 'pose_from': why,
+                'age_s': round(time.time() - stamp_ns / 1e9, 1)}, ''
 
     def _store_snapshot(self, stamp_ns: int, depth, cam_tf, dt_s: float) -> dict:
         snap = {'depth': depth, 'cam_tf': cam_tf, 'dt_ms': round(dt_s * 1000, 1),
@@ -668,6 +718,9 @@ class PixelToGoal(Node):
                 snap, why = self._make_snapshot(stamp_ns)
                 if snap is None:
                     why = 'snapshot_expired' if why == 'tf_not_yet' else why
+                if snap is None and why == 'snapshot_expired':
+                    snap, why = self._remembered_snapshot(stamp_ns)     # a kept frame, any age
+                if snap is None:
                     self.get_logger().warning(f'query {req_id} ({u:.0f},{v:.0f}): {why}')
                     self._reply(req_id, False, reason=why.split(':')[0])
                     return
@@ -706,6 +759,8 @@ class PixelToGoal(Node):
         t = cam_to_odom.transform.translation
         fx, fy = info.k[0], info.k[4]
         cx, cy = info.k[2], info.k[5]
+        if snap is not None and 'K' in snap:
+            fx, fy, cx, cy = snap['K']                 # the remembered frame's own intrinsics
 
         region = None
         if box is not None:
@@ -783,6 +838,12 @@ class PixelToGoal(Node):
 
         extra = {"at_capture": snap is not None, "region": region is not None,
                  "source": "lidar" if lidar is not None else "camera", "what": what}
+        if snap is not None and snap.get('remembered'):
+            extra.update({"remembered": True, "frame_age_s": snap['age_s'], "pose_from": snap['pose_from']})
+        mo = self._map_odom_now()
+        if mo is not None:
+            mx, my, _ = frame_store.compose(mo, ((ox, oy, 0.0), (0.0, 0.0, 0.0, 1.0)))[0]
+            extra["object_map"] = {"x": round(mx, 3), "y": round(my, 3)}
         if lidar is not None:
             extra["camera_m"] = round(cam_m, 2)
         if region is not None:

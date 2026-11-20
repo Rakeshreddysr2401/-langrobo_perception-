@@ -144,3 +144,62 @@ def prune(root: str, max_bytes: int) -> int:
 
 def now() -> float:
     return time.monotonic()
+
+
+# ── reading a remembered frame back (pixel_to_goal grounds a box on it) ──────
+def find_frame(root: str, stamp_ns: int):
+    """The .json of the kept frame with this stamp (any origin), or None."""
+    import glob
+    hits = glob.glob(os.path.join(root, '*', f'{int(stamp_ns)}.json'))
+    return hits[0] if hits else None
+
+
+def load_frame(json_path: str):
+    """(meta, depth uint16 array or None) of a kept frame."""
+    meta = json.load(open(json_path))
+    depth = None
+    if meta.get('depth'):
+        import cv2
+        depth = cv2.imread(os.path.join(os.path.dirname(json_path), meta['depth']), cv2.IMREAD_UNCHANGED)
+    return meta, depth
+
+
+def _qmul(a, b):
+    ax, ay, az, aw = a
+    bx, by, bz, bw = b
+    return (aw * bx + ax * bw + ay * bz - az * by, aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw, aw * bw - ax * bx - ay * by - az * bz)
+
+
+def _qrot(q, v):
+    x, y, z, _ = _qmul(_qmul(q, (v[0], v[1], v[2], 0.0)), (-q[0], -q[1], -q[2], q[3]))
+    return (x, y, z)
+
+
+def compose(a, b):
+    """a * b for poses (t, q): b expressed in a's frame -> the outer frame."""
+    ta, qa = a
+    tb, qb = b
+    r = _qrot(qa, tb)
+    return ((ta[0] + r[0], ta[1] + r[1], ta[2] + r[2]), _qmul(qa, qb))
+
+
+def invert(a):
+    t, q = a
+    qi = (-q[0], -q[1], -q[2], q[3])
+    r = _qrot(qi, t)
+    return ((-r[0], -r[1], -r[2]), qi)
+
+
+def cam_pose_now(meta: dict, origin_now, map_odom_now):
+    """The remembered frame's camera pose in TODAY's odom: (t, q), why.
+    Same odom (origin) -> as stored. Another power-on -> through the house map:
+    odom_now <- map <- odom_then <- camera. None when that is not possible."""
+    cam = (tuple(meta['cam_odom']['t']), tuple(meta['cam_odom']['q']))
+    if origin_now is not None and meta.get('origin') == origin_now:
+        return cam, 'same_odom'
+    mo_then = meta.get('map_odom')
+    if mo_then and map_odom_now:
+        then = (tuple(mo_then['t']), tuple(mo_then['q']))
+        return compose(invert(map_odom_now), compose(then, cam)), 'via_house_map'
+    return None, 'other_power_on_without_map'

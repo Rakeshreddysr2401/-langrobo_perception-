@@ -60,5 +60,42 @@ with tempfile.TemporaryDirectory() as d:
     check('prune drops the oldest first', gone >= 1 and left[0] != '1000.json' and '1004.json' in left)
     check('prune gets under the limit', fs.disk_use(d) <= use - 2500)
 
+# ── remembered frames: poses back in today's odom ───────────────────────────
+import math  # noqa: E402
+
+
+def yawq(deg):
+    return (0.0, 0.0, math.sin(math.radians(deg) / 2), math.cos(math.radians(deg) / 2))
+
+
+def close(a, b, tol=1e-6):
+    return all(abs(x - y) < tol for x, y in zip(a, b))
+
+
+p = ((1.0, 2.0, 0.3), yawq(30))
+check('invert . compose = identity', close(fs.compose(fs.invert(p), p)[0], (0, 0, 0)))
+check('compose rotates then shifts', close(fs.compose(((1, 0, 0), yawq(90)), ((1, 0, 0), yawq(0)))[0], (1, 1, 0)))
+
+cam = {'t': [0.5, 0.0, 0.17], 'q': list(yawq(0))}
+meta = {'origin': 111.0, 'cam_odom': cam, 'map_odom': {'t': [2.0, 1.0, 0.0], 'q': list(yawq(90))}}
+pose, why = fs.cam_pose_now(meta, 111.0, None)
+check('same power-on -> pose as stored', why == 'same_odom' and close(pose[0], (0.5, 0.0, 0.17)))
+# after a power cycle the new odom sits elsewhere in the house map: map <- odom_now = (3, 1), yaw 90
+pose, why = fs.cam_pose_now(meta, 222.0, ((3.0, 1.0, 0.0), yawq(90)))
+# camera in map = (2,1) + rot90(0.5,0) = (2, 1.5); in odom_now: rot(-90)((2,1.5) - (3,1)) = rot(-90)(-1, 0.5) = (0.5, 1)
+check('other power-on -> through the house map', why == 'via_house_map' and close(pose[0], (0.5, 1.0, 0.17), 1e-6))
+pose, why = fs.cam_pose_now({**meta, 'map_odom': None}, 222.0, ((3.0, 1.0, 0.0), yawq(90)))
+check('other power-on, no map then -> refuse', pose is None and why == 'other_power_on_without_map')
+
+with tempfile.TemporaryDirectory() as d:
+    import cv2
+    dep = (np.arange(252 * 448) % 4000).astype(np.uint16).reshape(252, 448)
+    ok, enc = cv2.imencode('.png', dep)
+    fs.write_bundle(d, {'id': 555, 'origin': 9, 'depth': '555.depth.png'}, b'J', enc.tobytes())
+    j = fs.find_frame(d, 555)
+    m, back = fs.load_frame(j)
+    check('find_frame by stamp', j is not None and fs.find_frame(d, 556) is None)
+    check('depth comes back exactly (16-bit)', back is not None and back.dtype == np.uint16 and (back == dep).all())
+
 print(f"\n{'ALL PASS' if not fails else f'{fails} FAILED'}")
 sys.exit(1 if fails else 0)
