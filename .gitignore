@@ -73,3 +73,7 @@ logs/watchdog.out
 
 # the D555 camera stack built for its firmware (camera/build.sh recreates it)
 camera/ws/
+# frame memory (2026-11-21): frame_capture's kept frames (photo + depth + pose) -- the robot's
+# memory, not source; and recorded test tours
+logs/frames/
+logs/tour_*/
