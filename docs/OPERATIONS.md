@@ -621,3 +621,24 @@ ignores the field.
   Measured 2026-10-16: WiFi carries ~3.5 Mbit/s of ROS data, so bandwidth is not
   the limit; signal is. DDS unicast-only discovery was tried (FastDDS peer XML,
   `ROS_STATIC_PEERS`) and did not prove multicast was off: left unchanged.
+
+## 6. Frame memory -- every keyframe kept, for "where is X?" (2026-11-21)
+
+Design, results and what is open: Pi 5 `~/ros2_ws/docs/plans/FRAME_MEMORY.md`.
+
+| piece | what | started by |
+|---|---|---|
+| `perception/nodes/frame_capture.py` (+ `frame_store.py`) | a keyframe when moved 0.40 m / turned 20 deg / the scene changed / 30 s still: JPEG + aligned depth + K + camera pose AT THE STAMP + map <- odom + room -> `logs/frames/<origin>/<stamp>.{jpg,depth.png,json}` (5 GB cap, oldest first); ~8 % of a core | `./rover vlm` |
+| `perception/nodes/frame_uploader.py` | each kept frame (not its depth) -> the Mac's memory (`kmem` there); Mac off = they wait on disk | `./rover vlm` (Mac found by mDNS on the host) |
+| `pixel_to_goal.py` | a stamped query older than the 2 s ring grounds on the REMEMBERED frame's own depth and pose (any age; earlier power-on through the house map); replies `remembered`, `frame_age_s`, `object_map` | `./rover vlm` |
+
+Checks (read only, never drive), inside the container:
+
+```
+python3 /opt/rover/perception/tools/memory_where.py "a helmet" "a dustbin"   # Mac /find -> placed -> LiDAR check
+cd /logs && python3 /opt/rover/perception/tools/live_ground.py grab           # the current photo + its depth
+ros2 topic echo /frames/status                                                 # kept / skipped / disk
+```
+
+The LiDAR check is independent only for things that reach its plane (25 cm up); lower things show what is
+behind them. Tests: `perception/tests/test_frame_capture.py` (24).

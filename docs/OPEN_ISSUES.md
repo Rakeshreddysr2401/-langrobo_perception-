@@ -1,4 +1,20 @@
-# Open issues — where things stand (newest first; last updated 2026-11-17)
+# Open issues — where things stand (newest first; last updated 2026-11-21)
+
+## 2026-11-21 — frame memory live; left-back motor fault; what the parked tests showed
+
+- **Left-back motor** (owner): `./rover wheels --nudge` gave L 1.3 / R 2.6 cm/s for 5.0 commanded; drives
+  stalled ("turn stuck", "wheels not turning ... encoders read 0"). On open floor -> hardware. No driving
+  tests until fixed. After the Jetson restart `./rover up` reported "wheels silent" (board off for repair).
+- **Frame memory** (Pi `docs/plans/FRAME_MEMORY.md`): every keyframe kept with depth + pose; "where is X"
+  checked against the LiDAR: orange bottle 0-1 cm, blue bottle 2-3 cm, dustbin ~10 cm; moves followed
+  within seconds; a removed thing -> "last seen".
+- **pixel_to_goal takes the nearest solid slab in a box**: a chair with a bottle in front of it got the
+  bottle's distance. Big furniture needs the main body (or the LiDAR).
+- **Flat things on the floor** (a keyboard ~1.5 m away) are seen edge-on from the 17.5 cm camera: not found.
+- **Retention**: the Jetson prunes frames at 5 GB without telling the Mac's memory -> an old frame can be
+  "found but not placed" (remembered_without_depth). Planned: one rule + /forget.
+- **Lifted robot**: frames saved while it is off the floor carry wrong poses.
+
 
 ## 2026-11-17 — Jetson <-> Pi 5 on a direct Ethernet cable; D555 on USB checked again
 
