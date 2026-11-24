@@ -34,20 +34,24 @@ COMBOS = tuple((dx, a) for dx in (0.05, 0.10) for a in TURNS)
 # the rover is never exactly parallel, so the gap closes (measured: refused at 3-5 deg).
 # So: forward at a crawl, steering off the nearest point every tick (reach_node
 # slide_along), only when nothing is IN the body's way ahead -- a thing beside it
-# may converge by up to SLIDE_ROOM, which the steering takes up.
+# may converge by up to SLIDE_ROOM at SLIDE_L ahead, which the steering takes up;
+# nearer, proportionally less (the crawl turns ~0.2 cm sideways in its first 5 cm).
+# Twin chairs44 2026-11-24 (v040 run 3): a chair foot 5 cm past the nose, 3.3 cm
+# into the body's line, passed the flat 4 cm allowance; the slide ran into it twice
+# (-2.7 cm).
 SLIDE_L = 0.40          # m per slide (an escape may repeat it)
 SLIDE_ROOM = 0.04       # m: how far a side thing may converge into the path ahead
 SLIDE_OPEN = 0.03       # m: done when this much is open (nav2's 2 cm hard margin + 1 cm)
 
 
 def slide_clear(pts, L=SLIDE_L, room=SLIDE_ROOM):
-    """Is the body's way ahead clear for L (nothing within SIDE - room of the centre
-    line between the nose and L past it), and is there room to steer on BOTH sides
-    of it (a side thing at least `room` off the outline at the start)?"""
+    """Is the body's way ahead clear for L: nothing between the nose and L past it
+    reaches further into the body's line than the steering can take up by then
+    (room at L, proportionally less nearer)?"""
     if pts is None or not len(pts):
         return True
     x, y = pts[:, 0], pts[:, 1]
-    ahead = (x > FRONT) & (x < FRONT + L) & (np.abs(y) < SIDE - room)
+    ahead = (x > FRONT) & (x < FRONT + L) & (np.abs(y) < SIDE - room * (x - FRONT) / L)
     return not ahead.any()
 
 

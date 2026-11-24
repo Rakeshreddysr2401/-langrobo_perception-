@@ -70,6 +70,16 @@ def test_slide_refused_with_something_ahead():
     assert not E.slide_clear(table_along(12.0))       # converging too fast to steer off
 
 
+def test_slide_refused_with_a_chair_foot_just_ahead_at_the_corner():
+    # twin chairs44 2026-11-24 (v040 run 3): the foot 5-13 cm past the nose, 3.3 cm into the
+    # body's line on the left -- the steering cannot take that up in 5 cm; it ran into it
+    foot = np.array([[x, y] for x in np.linspace(0.234, 0.311, 8) for y in np.linspace(0.157, 0.234, 8)])
+    behind = np.array([[x, y] for x in np.linspace(-0.183, -0.106, 8) for y in np.linspace(0.202, 0.280, 8)])
+    assert not E.slide_clear(np.vstack([foot, behind]))
+    assert E.slide_clear(behind)
+    assert E.slide_clear(foot + [0.30, 0.0])          # the same foot 35 cm ahead: steerable
+
+
 def test_slide_steer_rear_side_turns_toward_it():
     # the nearest thing beside the REAR-left: turning left swings the rear right, off it
     pts = np.c_[np.linspace(-0.17, -0.05, 13), np.full(13, E.SIDE + 0.008)]
