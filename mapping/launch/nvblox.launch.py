@@ -137,7 +137,14 @@ def generate_launch_description():
                 # reach far walls. It reached them with data too noisy to use.
                 # Solid walls at 3 m beat scattered walls at 5 m: drive closer.
                 'static_mapper.projective_integrator_max_integration_distance_m': 3.0,
-                'static_mapper.projective_integrator_truncation_distance_vox': 4.0,
+                # The surface shell: 3 voxels (7.5 cm), was 4 (10 cm). 2026-11-24 the real D555's depth error is
+                # smooth and fixed to the scene (2-7 cm waves, kino_sim tools/depth_error_texture.py), so a
+                # wide shell lets a wave in front of a wall mark free floor. Real 11-10 replay: ways 46/50/48 cm
+                # (4 vox: 43/50/47; LiDAR 59/55/59), LiDAR things kept 76/83/92 % (77/84/92). Twin with the
+                # measured camera error (kino_sim build/v031 vs v033): 0 touches (was 3), chairs44 44 cm way
+                # crossed 1 of 2 (4 vox: 0 of 2), objects kept. 2 vox gave wider ways but lost thin legs and a
+                # 6 cm step: kino_sim docs/reports/NIGHT_20261124.md.
+                'static_mapper.projective_integrator_truncation_distance_vox': 3.0,
 
                 # DO NOT LET THE MAP FORGET.
                 #
